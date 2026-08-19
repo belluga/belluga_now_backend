@@ -6,6 +6,7 @@ namespace Tests\Feature\Auth;
 
 use App\Application\Accounts\AccountUserService;
 use App\Application\Auth\TenantScopedAccessTokenService;
+use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
@@ -79,17 +80,20 @@ class TenantPublicMissingTenantScopeGuardTest extends TestCaseTenant
         $response->assertStatus(403);
     }
 
-    public function test_me_rejects_account_token_with_missing_tenant_scope(): void
+    public function test_me_rejects_account_token_with_blank_or_missing_tenant_scope(): void
     {
-        $newToken = $this->issueScopedToken($this->accountUser);
-        $newToken->accessToken->setAttribute('tenant_id', null);
-        $newToken->accessToken->save();
+        foreach ($this->blankTenantScopeMutators() as $label => $mutate) {
+            $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+            $newToken = $this->issueScopedToken($this->accountUser);
+            $mutate($newToken->accessToken);
+            $newToken->accessToken->save();
 
-        $response = $this
-            ->withHeaders(['Authorization' => "Bearer {$newToken->plainTextToken}"])
-            ->getJson("{$this->base_api_tenant}me");
+            $response = $this
+                ->withHeaders(['Authorization' => "Bearer {$newToken->plainTextToken}"])
+                ->getJson("{$this->base_api_tenant}me");
 
-        $response->assertStatus(403);
+            $response->assertStatus(403, $label);
+        }
     }
 
     private function issueScopedToken(AccountUser $user): NewAccessToken
@@ -102,5 +106,18 @@ class TenantPublicMissingTenantScopeGuardTest extends TestCaseTenant
             ['*'],
             accountId: (string) $this->account->_id
         );
+    }
+
+    /**
+     * @return array<string, callable(PersonalAccessToken): void>
+     */
+    private function blankTenantScopeMutators(): array
+    {
+        return [
+            'null' => fn (PersonalAccessToken $token) => $token->setAttribute('tenant_id', null),
+            'empty_string' => fn (PersonalAccessToken $token) => $token->setAttribute('tenant_id', ''),
+            'whitespace_only' => fn (PersonalAccessToken $token) => $token->setAttribute('tenant_id', '   '),
+            'missing_attribute' => fn (PersonalAccessToken $token) => $token->offsetUnset('tenant_id'),
+        ];
     }
 }
