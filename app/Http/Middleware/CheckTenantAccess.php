@@ -81,7 +81,7 @@ class CheckTenantAccess
 
         $tokenTenantId = trim((string) ($token->getAttribute('tenant_id') ?? ''));
         if ($tokenTenantId === '') {
-            return;
+            throw new AuthorizationException('Account token is not valid for the current tenant.');
         }
 
         $currentTenantId = trim((string) ($this->current_tenant_id ?? ''));
