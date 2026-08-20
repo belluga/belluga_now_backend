@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
-use App\Application\Tenants\TenantRequestLifecycleTrace;
 use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventDiscoveryFilterCatalogContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
+use Belluga\Events\Contracts\EventRequestLifecycleTraceContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
@@ -53,6 +53,7 @@ class EventQueryService
         private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
         private readonly EventOccurrenceNestedAccountStore $occurrenceNestedAccountStore,
         private readonly EventDiscoveryFilterCatalogContract $eventDiscoveryFilterCatalog,
+        private readonly EventRequestLifecycleTraceContract $requestLifecycleTrace,
         ?EventManagementOccurrenceQuery $managementOccurrenceQuery = null,
     ) {
         $this->managementOccurrenceQuery = $managementOccurrenceQuery
@@ -80,7 +81,7 @@ class EventQueryService
         $useGeo = $filters['use_geo'] && ! $filters['confirmed_only'];
         $raw = $this->runAgendaQuery($filters, $userId, $skip, $limit, $useGeo);
 
-        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.selection_catalog.start');
+        $this->requestLifecycleTrace->record('endpoint.agenda.selection_catalog.start');
         $runtimeCatalog = $this->eventDiscoveryFilterCatalog->buildCanonicalCatalog(
             'home.events',
             is_array($raw['discovery_filter_facets'] ?? null)
@@ -93,7 +94,7 @@ class EventQueryService
                 'primary' => $filters['categories'],
                 'taxonomy' => $this->groupTaxonomySelectionsByType($filters['taxonomy']),
             ], $runtimeCatalog);
-        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.selection_catalog.complete');
+        $this->requestLifecycleTrace->record('endpoint.agenda.selection_catalog.complete');
 
         if ($repairedSelection['changed']) {
             $filters['categories'] = $repairedSelection['primary'];
@@ -107,9 +108,9 @@ class EventQueryService
         $hasMore = count($pageRows) > $pageSize;
         $pageSlice = array_slice($pageRows, 0, $pageSize);
 
-        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.hydration.start');
+        $this->requestLifecycleTrace->record('endpoint.agenda.hydration.start');
         $items = $this->formatAgendaEvents($pageSlice, $userId);
-        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.hydration.complete');
+        $this->requestLifecycleTrace->record('endpoint.agenda.hydration.complete');
 
         return [
             'items' => $items,
@@ -1232,9 +1233,9 @@ class EventQueryService
         ]);
 
         /** @var Collection<int, EventOccurrence> $events */
-        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.aggregate.start');
+        $this->requestLifecycleTrace->record('endpoint.agenda.aggregate.start');
         $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
-        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.aggregate.complete');
+        $this->requestLifecycleTrace->record('endpoint.agenda.aggregate.complete');
         $payload = $this->normalizeArray($events->first());
 
         return [
