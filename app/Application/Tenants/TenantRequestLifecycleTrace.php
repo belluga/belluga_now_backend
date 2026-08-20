@@ -44,13 +44,14 @@ final class TenantRequestLifecycleTrace
 
         $this->enabled = true;
         $this->startedAtNanoseconds = hrtime(true);
+        $traceStartedAt = microtime(true);
 
         $this->record('request.started', [
             'method' => $request->getMethod(),
             'path' => '/'.ltrim($request->path(), '/'),
             'host_hash' => $this->redactIdentifier($request->getHost()),
             'pid' => getmypid(),
-            'laravel_start_to_tenancy_ms' => $this->laravelStartToTenancyMilliseconds(),
+            'laravel_start_to_tenancy_ms' => $this->laravelStartToTenancyMilliseconds($traceStartedAt),
         ]);
 
         $this->armConnectionTrace(
@@ -262,7 +263,7 @@ final class TenantRequestLifecycleTrace
         return round((hrtime(true) - $this->startedAtNanoseconds) / 1_000_000, 3);
     }
 
-    private function laravelStartToTenancyMilliseconds(): ?float
+    private function laravelStartToTenancyMilliseconds(float $traceStartedAt): ?float
     {
         if (! defined('LARAVEL_START')) {
             return null;
@@ -273,7 +274,7 @@ final class TenantRequestLifecycleTrace
             return null;
         }
 
-        return round(max(0.0, (microtime(true) - (float) $laravelStart) * 1_000), 3);
+        return round(max(0.0, ($traceStartedAt - (float) $laravelStart) * 1_000), 3);
     }
 
     /**
