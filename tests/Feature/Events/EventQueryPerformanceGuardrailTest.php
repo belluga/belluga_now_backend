@@ -209,31 +209,36 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             ],
         ]);
 
-        $account = Account::query()->create([
-            'name' => 'Public Resolver Budget Account',
-            'document' => 'DOC-PUBLIC-RESOLVER-BUDGET',
-        ]);
+        $profiles = [];
+        for ($index = 1; $index <= 3; $index++) {
+            $account = Account::query()->create([
+                'name' => "Public Resolver Budget Account {$index}",
+                'document' => "DOC-PUBLIC-RESOLVER-BUDGET-{$index}",
+            ]);
 
-        $profile = AccountProfile::query()->create([
-            'account_id' => (string) $account->_id,
-            'profile_type' => (string) $publicPoiType->type,
-            'display_name' => 'Public Resolver Budget Venue',
-            'slug' => 'public-resolver-budget-venue',
-            'taxonomy_terms' => [],
-            'location' => [
-                'type' => 'Point',
-                'coordinates' => [-40.1234, -20.5678],
-            ],
-            'visibility' => 'public',
-            'is_active' => true,
-        ]);
+            $profiles[] = AccountProfile::query()->create([
+                'account_id' => (string) $account->_id,
+                'profile_type' => (string) $publicPoiType->type,
+                'display_name' => "Public Resolver Budget Venue {$index}",
+                'slug' => "public-resolver-budget-venue-{$index}",
+                'taxonomy_terms' => [],
+                'location' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.1234 - ($index / 1000), -20.5678 - ($index / 1000)],
+                ],
+                'visibility' => 'public',
+                'is_active' => true,
+            ]);
+        }
 
         $connection = DB::connection('tenant');
         $connection->flushQueryLog();
         $connection->enableQueryLog();
 
         $resolved = app(AccountProfileResolverAdapter::class)
-            ->resolveExistingPublicPhysicalHostsByProfileIds([(string) $profile->_id]);
+            ->resolveExistingPublicPhysicalHostsByProfileIds(
+                array_map(static fn (AccountProfile $profile): string => (string) $profile->_id, $profiles)
+            );
 
         $queries = collect($connection->getQueryLog());
         $connection->disableQueryLog();
@@ -252,20 +257,21 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             )
         );
 
-        $profileId = (string) $profile->_id;
+        $profileId = (string) $profiles[0]->_id;
+        $this->assertCount(3, $resolved);
         $this->assertArrayHasKey($profileId, $resolved);
         $this->assertSame(
-            'Public Resolver Budget Venue',
+            'Public Resolver Budget Venue 1',
             data_get($resolved, "{$profileId}.venue.display_name")
         );
         $this->assertSame(
-            '/parceiro/public-resolver-budget-venue',
+            '/parceiro/public-resolver-budget-venue-1',
             data_get($resolved, "{$profileId}.venue.public_detail_path")
         );
         $this->assertLessThanOrEqual(
             3,
             $queries->count(),
-            "Public physical host resolution must stay within the cold <=3 statement ceiling. Queries: {$queryLogJson}"
+            "Public physical host resolution must stay within the cold <=3 statement ceiling for three profiles. Queries: {$queryLogJson}"
         );
         $this->assertCount(
             2,
