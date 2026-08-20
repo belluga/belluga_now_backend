@@ -50,6 +50,7 @@ final class TenantRequestLifecycleTrace
             'path' => '/'.ltrim($request->path(), '/'),
             'host_hash' => $this->redactIdentifier($request->getHost()),
             'pid' => getmypid(),
+            'laravel_start_to_tenancy_ms' => $this->laravelStartToTenancyMilliseconds(),
         ]);
 
         $this->armConnectionTrace(
@@ -259,6 +260,20 @@ final class TenantRequestLifecycleTrace
         }
 
         return round((hrtime(true) - $this->startedAtNanoseconds) / 1_000_000, 3);
+    }
+
+    private function laravelStartToTenancyMilliseconds(): ?float
+    {
+        if (! defined('LARAVEL_START')) {
+            return null;
+        }
+
+        $laravelStart = constant('LARAVEL_START');
+        if (! is_numeric($laravelStart)) {
+            return null;
+        }
+
+        return round(max(0.0, (microtime(true) - (float) $laravelStart) * 1_000), 3);
     }
 
     /**
