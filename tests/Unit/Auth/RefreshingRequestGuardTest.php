@@ -16,9 +16,11 @@ final class RefreshingRequestGuardTest extends TestCase
         $principalA = $this->createMock(Authenticatable::class);
         $principalB = $this->createMock(Authenticatable::class);
         $callbackInvocations = 0;
+        $observedPaths = [];
         $guard = new RefreshingRequestGuard(
-            function () use (&$callbackInvocations, $principalA, $principalB): Authenticatable {
+            function (Request $request) use (&$callbackInvocations, &$observedPaths, $principalA, $principalB): Authenticatable {
                 $callbackInvocations++;
+                $observedPaths[] = $request->getPathInfo();
 
                 return $callbackInvocations === 1 ? $principalA : $principalB;
             },
@@ -30,6 +32,7 @@ final class RefreshingRequestGuardTest extends TestCase
         $this->assertSame($guard, $guard->setRequest(Request::create('/second')));
         $this->assertSame($principalB, $guard->user());
         $this->assertSame(2, $callbackInvocations);
+        $this->assertSame(['/first', '/second'], $observedPaths);
     }
 
     public function test_explicit_principal_survives_request_rebind_without_callback_resolution(): void
@@ -54,21 +57,24 @@ final class RefreshingRequestGuardTest extends TestCase
     public function test_forgetting_explicit_principal_restores_callback_resolution_on_next_request(): void
     {
         $explicitPrincipal = $this->createMock(Authenticatable::class);
-        $callbackPrincipal = $this->createMock(Authenticatable::class);
+        $callbackPrincipalA = $this->createMock(Authenticatable::class);
+        $callbackPrincipalB = $this->createMock(Authenticatable::class);
         $callbackInvocations = 0;
         $guard = new RefreshingRequestGuard(
-            function () use (&$callbackInvocations, $callbackPrincipal): Authenticatable {
+            function () use (&$callbackInvocations, $callbackPrincipalA, $callbackPrincipalB): Authenticatable {
                 $callbackInvocations++;
 
-                return $callbackPrincipal;
+                return $callbackInvocations === 1 ? $callbackPrincipalA : $callbackPrincipalB;
             },
             Request::create('/initial'),
         );
 
         $guard->setUser($explicitPrincipal);
         $this->assertSame($guard, $guard->forgetUser());
-        $this->assertSame($guard, $guard->setRequest(Request::create('/after-forget')));
-        $this->assertSame($callbackPrincipal, $guard->user());
-        $this->assertSame(1, $callbackInvocations);
+        $this->assertSame($guard, $guard->setRequest(Request::create('/after-forget-first')));
+        $this->assertSame($callbackPrincipalA, $guard->user());
+        $this->assertSame($guard, $guard->setRequest(Request::create('/after-forget-second')));
+        $this->assertSame($callbackPrincipalB, $guard->user());
+        $this->assertSame(2, $callbackInvocations);
     }
 }
