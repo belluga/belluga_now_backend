@@ -8,6 +8,7 @@ use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
+use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
@@ -187,6 +188,94 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             'idx_event_occurrences_public_agenda_geo_v1',
             $this->indexNames('event_occurrences'),
             'Nearby Home agenda must narrow published, non-deleted occurrences with its dedicated geo index.'
+        );
+    }
+
+    public function test_public_physical_host_resolution_reuses_profile_type_reads(): void
+    {
+        $publicPoiType = TenantProfileType::query()->create([
+            'type' => 'resolver-budget-venue',
+            'label' => 'Resolver Budget Venue',
+            'labels' => [
+                'singular' => 'Resolver Budget Venue',
+                'plural' => 'Resolver Budget Venues',
+            ],
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
+                'is_publicly_navigable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $account = Account::query()->create([
+            'name' => 'Public Resolver Budget Account',
+            'document' => 'DOC-PUBLIC-RESOLVER-BUDGET',
+        ]);
+
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => (string) $publicPoiType->type,
+            'display_name' => 'Public Resolver Budget Venue',
+            'slug' => 'public-resolver-budget-venue',
+            'taxonomy_terms' => [],
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.1234, -20.5678],
+            ],
+            'visibility' => 'public',
+            'is_active' => true,
+        ]);
+
+        $connection = DB::connection('tenant');
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+
+        $resolved = app(AccountProfileResolverAdapter::class)
+            ->resolveExistingPublicPhysicalHostsByProfileIds([(string) $profile->_id]);
+
+        $queries = collect($connection->getQueryLog());
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
+        $queryLogJson = json_encode($queries->all(), JSON_UNESCAPED_SLASHES);
+        $profileTypeQueries = $queries->filter(
+            static fn (array $query): bool => str_contains(
+                json_encode($query, JSON_UNESCAPED_SLASHES),
+                'account_profile_types'
+            )
+        );
+        $accountProfileQueries = $queries->filter(
+            static fn (array $query): bool => str_contains(
+                json_encode($query, JSON_UNESCAPED_SLASHES),
+                'account_profiles'
+            )
+        );
+
+        $profileId = (string) $profile->_id;
+        $this->assertArrayHasKey($profileId, $resolved);
+        $this->assertSame(
+            'Public Resolver Budget Venue',
+            data_get($resolved, "{$profileId}.venue.display_name")
+        );
+        $this->assertSame(
+            '/parceiro/public-resolver-budget-venue',
+            data_get($resolved, "{$profileId}.venue.public_detail_path")
+        );
+        $this->assertLessThanOrEqual(
+            3,
+            $queries->count(),
+            "Public physical host resolution must stay within the cold <=3 statement ceiling. Queries: {$queryLogJson}"
+        );
+        $this->assertCount(
+            2,
+            $profileTypeQueries,
+            "Public physical host resolution must reuse a bounded pair of account_profile_types lookups. Queries: {$queryLogJson}"
+        );
+        $this->assertCount(
+            1,
+            $accountProfileQueries,
+            "Public physical host resolution must fetch account_profiles once after type filtering. Queries: {$queryLogJson}"
         );
     }
 

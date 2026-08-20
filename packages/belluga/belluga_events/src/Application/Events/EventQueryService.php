@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
+use App\Application\Tenants\TenantRequestLifecycleTrace;
 use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
@@ -79,6 +80,7 @@ class EventQueryService
         $useGeo = $filters['use_geo'] && ! $filters['confirmed_only'];
         $raw = $this->runAgendaQuery($filters, $userId, $skip, $limit, $useGeo);
 
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.selection_catalog.start');
         $runtimeCatalog = $this->eventDiscoveryFilterCatalog->buildCanonicalCatalog(
             'home.events',
             is_array($raw['discovery_filter_facets'] ?? null)
@@ -91,6 +93,7 @@ class EventQueryService
                 'primary' => $filters['categories'],
                 'taxonomy' => $this->groupTaxonomySelectionsByType($filters['taxonomy']),
             ], $runtimeCatalog);
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.selection_catalog.complete');
 
         if ($repairedSelection['changed']) {
             $filters['categories'] = $repairedSelection['primary'];
@@ -104,8 +107,12 @@ class EventQueryService
         $hasMore = count($pageRows) > $pageSize;
         $pageSlice = array_slice($pageRows, 0, $pageSize);
 
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.hydration.start');
+        $items = $this->formatAgendaEvents($pageSlice, $userId);
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.hydration.complete');
+
         return [
-            'items' => $this->formatAgendaEvents($pageSlice, $userId),
+            'items' => $items,
             'has_more' => $hasMore,
             'discovery_filter_facets' => $raw['discovery_filter_facets']
                 ?? $this->emptyAgendaDiscoveryFilterFacetsPayload(),
@@ -1225,7 +1232,9 @@ class EventQueryService
         ]);
 
         /** @var Collection<int, EventOccurrence> $events */
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.aggregate.start');
         $events = EventOccurrence::raw(fn ($collection) => $collection->aggregate($pipeline));
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.aggregate.complete');
         $payload = $this->normalizeArray($events->first());
 
         return [

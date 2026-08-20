@@ -12,6 +12,9 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Application\Tenants\TenantRequestLifecycleTrace;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
+use Belluga\Events\Application\Events\EventOccurrenceSyncService;
+use Belluga\Events\Models\Tenants\Event;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
@@ -382,6 +385,108 @@ class TenantRequestLifecycleTraceTest extends TestCase
         );
         $this->assertFalse(
             (bool) $this->firstEventValue($agendaTrace['events'], 'middleware.auth.last_used_at.passed', 'write_performed')
+        );
+
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_anonymous_agenda_trace_requires_endpoint_local_attribution_boundaries(): void
+    {
+        $tenant = $this->primaryTenant();
+        $event = $this->createPublishedFutureGeoAgendaEvent($tenant);
+
+        $identity = $this->postJson(
+            $this->apiUrlForHost($this->tenantHost($tenant), 'anonymous/identities'),
+            [
+                'device_name' => 'tenant-trace-agenda-device',
+                'fingerprint' => [
+                    'hash' => hash('sha256', 'tenant-trace-agenda-device'),
+                    'user_agent' => 'LifecycleTraceTest/1.0',
+                    'locale' => 'en-US',
+                ],
+                'metadata' => [
+                    'source' => 'lifecycle-trace-agenda-test',
+                ],
+            ],
+            ['Accept' => 'application/json'],
+        );
+
+        $identity->assertStatus(201);
+        $token = (string) $identity->json('data.token');
+        $this->assertNotSame('', trim($token));
+
+        $agenda = $this->getJson(
+            $this->apiUrlForHost(
+                $this->tenantHost($tenant),
+                'agenda?page=1&confirmed_only=0&past_only=0&origin_lat=-20.671339&origin_lng=-40.495395&max_distance_meters=50000',
+            ),
+            [...$this->traceHeaders(), 'Authorization' => "Bearer {$token}"],
+        );
+
+        $agenda->assertOk();
+        $eventIds = array_map(
+            static fn (mixed $item): string => (string) (is_array($item) ? ($item['event_id'] ?? '') : ''),
+            $agenda->json('items') ?? [],
+        );
+        $this->assertContains((string) $event->_id, $eventIds);
+        $agenda->assertJsonPath('discovery_filter_facets.surface', 'home.events');
+        $agenda->assertJsonPath('discovery_filter_catalog.surface', 'home.events');
+
+        $trace = $this->completedTrace();
+        $this->assertSame($trace, $this->responseTrace($agenda));
+
+        $stages = array_column($trace['events'], 'stage');
+
+        $this->assertStageSequence($stages, [
+            'tenant.switch.complete',
+            'middleware.auth.start',
+            'middleware.auth.token_lookup.start',
+            'middleware.auth.token_lookup.resolved',
+            'middleware.auth.principal_hydration.start',
+            'middleware.auth.principal_hydration.resolved',
+            'middleware.auth.current_token_binding.start',
+            'middleware.auth.current_token_binding.passed',
+            'middleware.auth.last_used_at.start',
+            'middleware.auth.last_used_at.passed',
+            'middleware.auth.passed',
+            'middleware.tenant_access.enter',
+            'middleware.tenant_access.passed',
+            'endpoint.agenda.controller.enter',
+            'endpoint.agenda.payload_ready',
+            'endpoint.agenda.response_ready',
+            'request.response_handoff',
+        ]);
+        $this->assertSame(
+            'tenant_account_user',
+            $this->firstEventValue($trace['events'], 'middleware.auth.passed', 'principal_kind'),
+        );
+
+        $this->assertStageSequence($stages, [
+            'endpoint.agenda.controller.enter',
+            'endpoint.agenda.aggregate.start',
+            'endpoint.agenda.aggregate.complete',
+            'endpoint.agenda.selection_catalog.start',
+            'endpoint.agenda.selection_catalog.complete',
+            'endpoint.agenda.hydration.start',
+            'endpoint.agenda.hydration.complete',
+            'endpoint.agenda.payload_ready',
+            'endpoint.agenda.response_catalog.start',
+            'endpoint.agenda.response_catalog.complete',
+            'endpoint.agenda.response_ready',
+        ]);
+        $this->assertCount(1, array_keys($stages, 'endpoint.agenda.aggregate.start'));
+        $this->assertCount(1, array_keys($stages, 'endpoint.agenda.aggregate.complete'));
+        $this->assertContains(
+            'event_occurrences',
+            array_column(
+                $this->mongoCollectionCommandsBetween(
+                    $trace['events'],
+                    'endpoint.agenda.aggregate.start',
+                    'endpoint.agenda.aggregate.complete',
+                    $this->tenantConnectionName(),
+                ),
+                'collection',
+            ),
         );
 
         $this->assertTenantRuntimeReset();
@@ -855,6 +960,53 @@ class TenantRequestLifecycleTraceTest extends TestCase
         DB::setDefaultConnection($this->defaultConnectionAtRest);
 
         return $token;
+    }
+
+    private function createPublishedFutureGeoAgendaEvent(Tenant $tenant): Event
+    {
+        $tenant->makeCurrent();
+
+        try {
+            $startsAt = Carbon::now()->addDay();
+            $event = Event::query()->create([
+                'title' => 'Lifecycle Trace Geo Agenda Event',
+                'content' => 'Trace fixture',
+                'location' => [
+                    'mode' => 'physical',
+                    'geo' => [
+                        'type' => 'Point',
+                        'coordinates' => [-40.495395, -20.671339],
+                    ],
+                ],
+                'geo_location' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.495395, -20.671339],
+                ],
+                'type' => [
+                    'id' => 'lifecycle-trace',
+                    'name' => 'Lifecycle Trace',
+                    'slug' => 'lifecycle-trace',
+                ],
+                'date_time_start' => $startsAt,
+                'date_time_end' => $startsAt->copy()->addHours(2),
+                'categories' => ['culture'],
+                'taxonomy_terms' => [],
+                'publication' => [
+                    'status' => 'published',
+                    'publish_at' => Carbon::now()->subMinute(),
+                ],
+                'is_active' => true,
+            ]);
+
+            $this->app->make(EventOccurrenceSyncService::class)->syncFromEvent($event, [[
+                'date_time_start' => $startsAt,
+                'date_time_end' => $startsAt->copy()->addHours(2),
+            ]]);
+
+            return $event->fresh();
+        } finally {
+            $this->normalizeTenantRuntimeState();
+        }
     }
 
     private function seedEnvironmentSnapshot(Tenant $tenant): void

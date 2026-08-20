@@ -32,19 +32,22 @@ class AgendaController extends Controller
             'items_count' => is_array($payload['items'] ?? null) ? count($payload['items']) : null,
         ]);
 
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.response_catalog.start');
+        $responseCatalog = $this->eventDiscoveryFilterCatalog->buildCanonicalCatalog(
+            'home.events',
+            is_array($payload['discovery_filter_facets'] ?? null)
+                ? $payload['discovery_filter_facets']
+                : null,
+            $request->getSchemeAndHttpHost()
+        );
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.response_catalog.complete');
+
         $response = [
             'tenant_id' => $this->tenantContext->resolveCurrentTenantId(),
             'items' => $payload['items'],
             'has_more' => $payload['has_more'],
             'discovery_filter_facets' => $payload['discovery_filter_facets'] ?? null,
-            'discovery_filter_catalog' => $this->eventDiscoveryFilterCatalog
-                ->buildCanonicalCatalog(
-                    'home.events',
-                    is_array($payload['discovery_filter_facets'] ?? null)
-                        ? $payload['discovery_filter_facets']
-                        : null,
-                    $request->getSchemeAndHttpHost()
-                ),
+            'discovery_filter_catalog' => $responseCatalog,
         ];
 
         app(TenantRequestLifecycleTrace::class)->record('endpoint.agenda.response_ready');
