@@ -37,21 +37,35 @@ final class RefreshingRequestGuardTest extends TestCase
 
     public function test_explicit_principal_survives_request_rebind_without_callback_resolution(): void
     {
-        $principal = $this->createMock(Authenticatable::class);
+        $callbackPrincipal = $this->createMock(Authenticatable::class);
+        $explicitPrincipal = $this->createMock(Authenticatable::class);
+        $replacementPrincipal = $this->createMock(Authenticatable::class);
         $callbackInvocations = 0;
+        $observedPaths = [];
         $guard = new RefreshingRequestGuard(
-            function () use (&$callbackInvocations): ?Authenticatable {
+            function (Request $request) use (&$callbackInvocations, &$observedPaths, $callbackPrincipal): Authenticatable {
                 $callbackInvocations++;
+                $observedPaths[] = $request->getPathInfo();
 
-                return null;
+                return $callbackPrincipal;
             },
             Request::create('/initial'),
         );
 
-        $this->assertSame($guard, $guard->setUser($principal));
-        $this->assertSame($guard, $guard->setRequest(Request::create('/rebound')));
-        $this->assertSame($principal, $guard->user());
-        $this->assertSame(0, $callbackInvocations);
+        $this->assertSame($guard, $guard->setRequest(Request::create('/callback')));
+        $this->assertSame($callbackPrincipal, $guard->user());
+        $this->assertSame(1, $callbackInvocations);
+
+        $this->assertSame($guard, $guard->setUser($explicitPrincipal));
+        $this->assertSame($guard, $guard->setRequest(Request::create('/explicit')));
+        $this->assertSame($explicitPrincipal, $guard->user());
+        $this->assertSame(1, $callbackInvocations);
+
+        $this->assertSame($guard, $guard->setUser($replacementPrincipal));
+        $this->assertSame($guard, $guard->setRequest(Request::create('/replacement')));
+        $this->assertSame($replacementPrincipal, $guard->user());
+        $this->assertSame(1, $callbackInvocations);
+        $this->assertSame(['/callback'], $observedPaths);
     }
 
     public function test_forgetting_explicit_principal_restores_callback_resolution_on_next_request(): void
