@@ -6,7 +6,6 @@ namespace Tests\Feature\Profile;
 
 use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Models\Landlord\LandlordUser;
-use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
@@ -35,7 +34,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
             self::$bootstrapped = true;
         }
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
     }
 
     public function test_registered_current_tenant_identity_can_permanently_delete_itself(): void
@@ -56,7 +55,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
             ->assertNoContent()
             ->assertHeader('X-Api-Security-Domain', 'tenant_public_profile_delete');
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $this->assertNull(AccountUser::withTrashed()->find((string) $user->_id));
     }
 
@@ -74,7 +73,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
             'confirmation' => 'remove_account',
         ])->assertNoContent();
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $this->assertNull(AccountUser::withTrashed()->find((string) $user->_id));
     }
 
@@ -92,7 +91,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
             'confirmation' => 'remove_account',
         ])->assertNoContent();
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $this->assertNull(AccountUser::withTrashed()->find((string) $user->_id));
     }
 
@@ -112,7 +111,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
         )->assertUnprocessable()
             ->assertJsonValidationErrors(['confirmation']);
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $this->assertNotNull(AccountUser::query()->find((string) $user->_id));
     }
 
@@ -129,7 +128,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
             'confirmation' => 'remove_account',
         ])->assertForbidden();
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $this->assertNotNull(AccountUser::query()->find((string) $anonymous->_id));
     }
 
@@ -159,7 +158,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
         ])->assertUnprocessable()
             ->assertJsonValidationErrors(['confirmation']);
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $this->assertNotNull(AccountUser::query()->find((string) $user->_id));
 
         $this->deleteJson("{$this->base_api_tenant}profile", [
@@ -167,7 +166,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
         ])->assertUnprocessable()
             ->assertJsonValidationErrors(['confirmation']);
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $this->assertNotNull(AccountUser::query()->find((string) $user->_id));
     }
 
@@ -180,8 +179,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
 
     private function actingAsTenantIdentity(AccountUser $user): void
     {
-        $tenant = Tenant::query()->firstOrFail();
-        $tenant->makeCurrent();
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
         $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
             $user,
             'current-tenant-account-deletion-test',

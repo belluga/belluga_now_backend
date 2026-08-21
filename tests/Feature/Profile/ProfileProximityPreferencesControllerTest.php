@@ -8,7 +8,6 @@ use App\Application\Accounts\AccountUserService;
 use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
-use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
@@ -46,8 +45,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             self::$bootstrapped = true;
         }
 
-        $tenant = Tenant::query()->firstOrFail();
-        $tenant->makeCurrent();
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
 
         ProximityPreference::query()->delete();
 
@@ -169,7 +167,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             'manual_coordinate',
         );
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $stored = ProximityPreference::query()
             ->where('owner_user_id', (string) $anonymous->_id)
             ->firstOrFail();
@@ -211,7 +209,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.location_preference.mode', 'live_device_location');
         $response->assertJsonPath('data.location_preference.fixed_reference', null);
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $stored = ProximityPreference::query()
             ->where('owner_user_id', (string) $user->_id)
             ->firstOrFail();
@@ -247,7 +245,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             $getResponse->assertStatus(200);
             $getResponse->assertJsonPath('data.use_reference_point_for_routes', $value);
 
-            Tenant::query()->firstOrFail()->makeCurrent();
+            $this->makeCanonicalTenantCurrent($this->tenant);
             $stored = ProximityPreference::query()
                 ->where('owner_user_id', (string) $user->_id)
                 ->firstOrFail();
@@ -318,7 +316,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             'active',
         );
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         TenantProfileType::query()
             ->where('type', 'hotel')
             ->firstOrFail()
@@ -435,7 +433,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             'active',
         );
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         TenantProfileType::query()
             ->where('type', 'hotel')
             ->firstOrFail()
@@ -505,8 +503,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
      */
     private function actingAsTenantUser(AccountUser $user, array $abilities = ['account-users:view']): void
     {
-        $tenant = Tenant::query()->firstOrFail();
-        $tenant->makeCurrent();
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
         $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
             $user,
             'profile-proximity-test',

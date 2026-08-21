@@ -58,7 +58,7 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
             self::$bootstrapped = true;
         }
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
     }
 
     public function test_direct_current_user_records_are_erased_and_shared_records_survive(): void
@@ -226,7 +226,7 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
             'confirmation' => 'remove_account',
         ])->assertNoContent();
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $this->assertNull(AccountUser::withTrashed()->find($targetId));
         $this->assertNotNull(AccountUser::query()->find($otherId));
         $this->assertNull(AccountProfile::withTrashed()->find((string) $personalProfile->_id));
@@ -323,7 +323,10 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
             static fn (mixed $value): bool => trim((string) $value) !== '',
         )));
 
-        app(CurrentTenantAccountDeletionService::class)->delete(Tenant::query()->firstOrFail(), $reloaded);
+        app(CurrentTenantAccountDeletionService::class)->delete(
+            $this->resolveCanonicalTenant($this->tenant),
+            $reloaded,
+        );
 
         $this->assertFalse(PhoneOtpChallenge::query()->where('phone_hash', $phoneHash)->exists());
         $this->assertNull(AccountUser::withTrashed()->find($targetId));
@@ -431,7 +434,7 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
         $this->assertCount(2, $accountOwnershipReads, "Account ownership must use preflight + transactional revalidation bulk reads: {$queryLogJson}");
         $this->assertCount(2, $profileGraphReads, "Profile graph must use preflight + transactional revalidation bulk reads: {$queryLogJson}");
         $this->assertCount(2, $membershipReads, "Membership cardinality must use preflight + transactional revalidation bulk reads: {$queryLogJson}");
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $this->assertNull(AccountUser::withTrashed()->find($targetId));
 
         return [
@@ -444,8 +447,7 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
 
     private function actingAsTenantIdentity(AccountUser $user): void
     {
-        $tenant = Tenant::query()->firstOrFail();
-        $tenant->makeCurrent();
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
         $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
             $user,
             'current-tenant-account-erasure-test',
