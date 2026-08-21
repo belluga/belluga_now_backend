@@ -137,6 +137,7 @@ class TenantUsersControllerTest extends TestCaseTenant
             ->deleteJson(sprintf('%s/%s', $this->baseUrl, $user->_id))
             ->assertOk();
 
+        Tenant::query()->where('subdomain', 'tenant-theta')->firstOrFail()->makeCurrent();
         $this->assertSoftDeleted('account_users', ['_id' => $user->_id], 'tenant');
     }
 
@@ -149,6 +150,7 @@ class TenantUsersControllerTest extends TestCaseTenant
             ->postJson(sprintf('%s/%s/restore', $this->baseUrl, $user->_id))
             ->assertOk();
 
+        Tenant::query()->where('subdomain', 'tenant-theta')->firstOrFail()->makeCurrent();
         $this->assertFalse($user->fresh()->trashed());
     }
 

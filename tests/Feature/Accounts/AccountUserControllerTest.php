@@ -89,6 +89,7 @@ class AccountUserControllerTest extends TestCase
         $response->assertCreated();
         $response->assertJsonPath('data.name', 'New Account User');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertDatabaseHas('account_users', [
             'name' => 'New Account User',
         ], 'tenant');
@@ -111,6 +112,7 @@ class AccountUserControllerTest extends TestCase
         $deleteResponse = $this->deleteJson($this->baseUrl.'/'.$user->_id);
         $deleteResponse->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSoftDeleted('account_users', ['_id' => $user->_id], 'tenant');
     }
 

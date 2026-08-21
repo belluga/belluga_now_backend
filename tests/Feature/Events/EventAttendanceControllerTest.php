@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Events;
 
 use App\Application\Accounts\AccountUserService;
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Push\PushChannelNamingService;
@@ -23,7 +24,6 @@ use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
-use Laravel\Sanctum\Sanctum;
 use Tests\Fakes\FakePushTopicTransport;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -75,7 +75,13 @@ class EventAttendanceControllerTest extends TestCaseTenant
         $this->user = $this->createAccountUser('Attendance User');
         $this->topicTransport = new FakePushTopicTransport;
         $this->app->instance(PushTopicTransportContract::class, $this->topicTransport);
-        Sanctum::actingAs($this->user, ['*']);
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->user,
+            'event-attendance-controller-test-token',
+            ['*'],
+            accountId: (string) $this->account->_id,
+        );
+        $this->withToken($token->plainTextToken);
     }
 
     public function test_confirm_creates_active_commitment_and_lists_confirmed_occurrences(): void
@@ -92,6 +98,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
         $response->assertJsonPath('kind', 'free_confirmation');
         $response->assertJsonPath('status', 'active');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertDatabaseCount('attendance_commitments', 1);
 
         $list = $this->getJson("{$this->base_api_tenant}events/attendance/confirmed");
@@ -117,6 +124,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
         $response->assertJsonPath('occurrence_id', $occurrenceId);
         $response->assertJsonPath('status', 'canceled');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $commitment = AttendanceCommitment::query()
             ->where('user_id', (string) $this->user->_id)
             ->where('event_id', (string) $event->_id)
@@ -173,6 +181,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
     {
         auth('sanctum')->forgetUser();
         auth()->forgetGuards();
+        $this->withoutToken();
 
         $event = $this->createEvent();
         $occurrenceId = $this->firstOccurrenceId($event);
@@ -181,6 +190,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
             'occurrence_id' => $occurrenceId,
         ]);
         $response->assertStatus(401);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertDatabaseCount('attendance_commitments', 0);
     }
 
@@ -210,6 +220,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
         $response->assertOk();
         $response->assertJsonPath('status', 'active');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $firstInvite = $firstInvite->fresh();
         $secondInvite = $secondInvite->fresh();
 
@@ -258,6 +269,7 @@ class EventAttendanceControllerTest extends TestCaseTenant
             'occurrence_id' => $firstOccurrenceId,
         ])->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame('superseded', (string) $sameOccurrenceInvite->fresh()?->status);
         $this->assertSame('pending', (string) $otherOccurrenceInvite->fresh()?->status);
     }

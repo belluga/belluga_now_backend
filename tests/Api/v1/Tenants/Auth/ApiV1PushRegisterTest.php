@@ -50,7 +50,7 @@ class ApiV1PushRegisterTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('ok', true);
 
-        Tenant::current()?->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
 
         $device = PushDevice::query()
             ->where('device_id', 'device-123')
@@ -88,7 +88,7 @@ class ApiV1PushRegisterTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('ok', true);
 
-        Tenant::current()?->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
 
         $device = PushDevice::query()
             ->where('device_id', 'device-456')
@@ -102,7 +102,7 @@ class ApiV1PushRegisterTest extends TestCaseTenant
     {
         $this->seedPushRuntimeReady();
         $headers = $this->issueAnonymousHeaders();
-        Tenant::current()?->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $allUsersTopic = $this->app->make(PushChannelNamingService::class)->allUsersTopic();
 
         $this->json(

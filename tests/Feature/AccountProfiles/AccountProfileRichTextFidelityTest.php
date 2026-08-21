@@ -91,6 +91,8 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
 
         $response->assertCreated();
         $profileId = (string) $response->json('data.account_profile.id');
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $stored = AccountProfile::query()->findOrFail($profileId);
 
         $expectedBio = '<p>Linha 1 🎉<br />Linha 2</p>';
@@ -134,6 +136,8 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
         );
 
         $response->assertOk();
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $stored = $profile->fresh();
 
         $this->assertSame('', $response->json('data.bio'));
@@ -165,6 +169,8 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
         );
 
         $response->assertOk();
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $stored = $profile->fresh();
 
         $this->assertSame($bio, $response->json('data.bio'));

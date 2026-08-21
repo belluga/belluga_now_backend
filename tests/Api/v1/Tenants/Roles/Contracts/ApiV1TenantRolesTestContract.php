@@ -7,6 +7,12 @@ use Tests\TestCaseTenant;
 
 abstract class ApiV1TenantRolesTestContract extends TestCaseTenant
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->ensureCanonicalTenantExists($this->tenant);
+    }
+
     public function testRoleRolesManagerCreate(): void
     {
         $this->tenant->role_roles_manager->name = 'Roles Manager';

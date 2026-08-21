@@ -89,6 +89,7 @@ class AccountRoleTemplatesControllerTest extends TestCase
         $response->assertCreated();
         $response->assertJsonPath('data.name', 'Support');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertDatabaseHas('account_role_templates', [
             'name' => 'Support',
         ], 'tenant');
@@ -135,6 +136,7 @@ class AccountRoleTemplatesControllerTest extends TestCase
 
         $response->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSoftDeleted('account_role_templates', ['_id' => $roleToDelete->_id], 'tenant');
         $this->assertEquals(
             $fallback->slug,

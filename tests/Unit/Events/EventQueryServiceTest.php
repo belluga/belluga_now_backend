@@ -14,6 +14,7 @@ use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventDiscoveryFilterCatalogContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
+use Belluga\Events\Contracts\EventRequestLifecycleTraceContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
@@ -82,6 +83,7 @@ class EventQueryServiceTest extends TestCase
                 $legacyProfileGroupMemberStore,
             ),
             Mockery::mock(EventDiscoveryFilterCatalogContract::class),
+            Mockery::mock(EventRequestLifecycleTraceContract::class),
         );
     }
 }

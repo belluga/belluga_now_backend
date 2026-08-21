@@ -171,6 +171,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             )->assertCreated()->assertJsonPath('data.type', $type);
         }
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
             ['artist', 'gallery', 'venue'],
             TenantProfileType::query()->orderBy('type')->pluck('type')->all(),
@@ -253,6 +254,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
         $response->assertJsonPath('data.capabilities.is_reference_location_enabled', false);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'hotel')->firstOrFail();
         $this->assertFalse((bool) ($model->capabilities['is_reference_location_enabled'] ?? false));
     }
@@ -278,6 +280,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.has_events', false);
         $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'expo')->firstOrFail();
         $this->assertTrue((bool) ($model->capabilities['has_nested_profile_groups'] ?? false));
     }
@@ -305,6 +308,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.is_publicly_discoverable', true);
         $response->assertJsonPath('data.capabilities.is_favoritable', true);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'delegate')->firstOrFail();
         $this->assertFalse((bool) ($model->capabilities['is_queryable'] ?? true));
         $this->assertTrue((bool) ($model->capabilities['is_publicly_navigable'] ?? false));
@@ -534,6 +538,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $this->assertStringContainsString('/api/v1/media/account-profile-types/', $typeAssetUrl);
         $this->assertSame($typeAssetUrl, $response->json('data.poi_visual.image_url'));
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'gallery')->firstOrFail();
         $this->assertSame('#5E35B1', data_get($model->visual, 'color'));
         $this->assertTypeAssetStored((string) $model->getKey(), 'account_profile_types');
@@ -688,6 +693,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.has_events', true);
         $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $this->assertTrue((bool) ($model->capabilities['is_favoritable'] ?? false));
         $this->assertTrue((bool) ($model->capabilities['is_publicly_discoverable'] ?? false));
@@ -817,6 +823,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['type']);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertTrue(TenantProfileType::query()->where('type', 'personal')->exists());
         $this->assertFalse(TenantProfileType::query()->where('type', 'creator')->exists());
         $this->assertSame(
@@ -873,6 +880,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['type']);
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertTrue(TenantProfileType::query()->where('type', 'soft-reference')->exists());
         $this->assertFalse(TenantProfileType::query()->where('type', 'soft-reference-renamed')->exists());
         $this->assertTrue(
@@ -910,6 +919,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['type']);
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertTrue(TenantProfileType::query()->where('type', 'delete-reference')->exists());
         $this->assertTrue(AccountProfile::query()->whereKey($profile->getKey())->exists());
     }
@@ -942,6 +953,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('data.type', 'metadata-reference');
         $response->assertJsonPath('data.label', 'Updated Metadata Reference');
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertTrue(
             AccountProfile::query()
                 ->whereKey($profile->getKey())
@@ -970,6 +983,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         $renameResponse->assertStatus(200);
         $renameResponse->assertJsonPath('data.type', 'unreferenced-type-renamed');
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertFalse(TenantProfileType::query()->where('type', 'unreferenced-type')->exists());
         $this->assertTrue(TenantProfileType::query()->where('type', 'unreferenced-type-renamed')->exists());
 
@@ -980,6 +995,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         );
 
         $deleteResponse->assertStatus(200);
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertFalse(TenantProfileType::query()->where('type', 'unreferenced-type-renamed')->exists());
     }
 
@@ -1036,6 +1053,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
         $profileId = (string) $profile->_id;
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $remaining = MapPoi::query()
             ->where('ref_type', 'account_profile')
             ->where(function ($query) use ($profileId): void {
@@ -1162,6 +1181,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.poi_visual.mode', 'image');
         $response->assertJsonPath('data.poi_visual.image_source', 'avatar');
         $profileId = (string) $profile->_id;
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $projectionQuery = MapPoi::query()
             ->where('ref_type', 'account_profile')
             ->where(function ($query) use ($profileId): void {
@@ -1262,6 +1283,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             $typeAssetUri .= '?'.$typeAssetQuery;
         }
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $this->assertTypeAssetStored((string) $model->getKey(), 'account_profile_types');
         $profileId = (string) $profile->_id;
@@ -1337,6 +1359,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
         $response->assertJsonPath('data.capabilities.is_reference_location_enabled', false);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $this->assertFalse((bool) ($model->capabilities['is_reference_location_enabled'] ?? false));
     }

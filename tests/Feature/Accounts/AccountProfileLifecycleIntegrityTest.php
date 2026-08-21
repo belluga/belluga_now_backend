@@ -66,6 +66,7 @@ class AccountProfileLifecycleIntegrityTest extends TestCaseTenant
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['account_profile_lifecycle']);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertNull(AccountProfile::query()->find((string) $profile->_id)?->deleted_at);
         $this->assertSame(
             1,
@@ -87,6 +88,7 @@ class AccountProfileLifecycleIntegrityTest extends TestCaseTenant
         );
 
         $response->assertStatus(404);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertNotNull(AccountProfile::query()->find((string) $profile->_id));
         $this->assertSame(
             1,
@@ -110,6 +112,7 @@ class AccountProfileLifecycleIntegrityTest extends TestCaseTenant
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['account_profile_lifecycle']);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertNotNull(AccountProfile::onlyTrashed()->find((string) $profile->_id));
         $this->assertSame(
             0,

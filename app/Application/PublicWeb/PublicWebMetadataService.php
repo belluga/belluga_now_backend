@@ -7,7 +7,6 @@ namespace App\Application\PublicWeb;
 use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileHeroImageResolver;
 use App\Application\AccountProfiles\AccountProfileQueryService;
-use App\Application\Branding\BrandingManifestService;
 use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\StaticAssets\StaticAssetQueryService;
 use App\Models\Landlord\Landlord;
@@ -24,7 +23,6 @@ use Illuminate\Support\Str;
 class PublicWebMetadataService
 {
     public function __construct(
-        private readonly BrandingManifestService $brandingManifestService,
         private readonly AccountProfileQueryService $accountProfileQueryService,
         private readonly AccountProfileFormatterService $accountProfileFormatterService,
         private readonly AccountProfileHeroImageResolver $accountProfileHeroImages,
@@ -40,38 +38,7 @@ class PublicWebMetadataService
      */
     public function defaultMetadata(?string $path = null): array
     {
-        $tenant = $this->currentTenant();
-        $landlord = $tenant === null ? $this->currentLandlord() : null;
-        $branding = $this->resolveCurrentBrandingData();
-        $siteName = trim((string) ($tenant?->name ?? $landlord?->name ?? config('app.name', 'Belluga Now')));
-        $siteName = $siteName !== '' ? $siteName : 'Belluga Now';
-
-        $title = trim((string) data_get($branding, 'public_web_metadata.default_title', ''));
-        if ($title === '') {
-            $title = $siteName;
-        }
-
-        $description = trim((string) data_get($branding, 'public_web_metadata.default_description', ''));
-        if ($description === '') {
-            $description = trim((string) ($tenant?->description ?? ''));
-        }
-        if ($description === '') {
-            $description = "Descubra eventos, parceiros e lugares em {$siteName}.";
-        }
-
-        $metadata = [
-            'title' => $title,
-            'description' => $this->excerpt($description),
-            'image' => $this->resolveImageUrl([
-                $this->resolveBrandingFallbackImage($tenant, $landlord),
-                $this->defaultImageUrl(),
-            ]),
-            'canonical_url' => $this->canonicalUrlForPath($path),
-            'site_name' => $siteName,
-            'type' => 'website',
-        ];
-
-        return $this->enrichImageMetadata($metadata, $tenant, $landlord);
+        return $this->defaultMetadataForContext($path, $this->resolveRequestContext());
     }
 
     /**
@@ -79,7 +46,8 @@ class PublicWebMetadataService
      */
     public function accountProfileMetadata(string $slug): array
     {
-        $metadata = $this->defaultMetadata('/parceiro/'.$slug);
+        $context = $this->resolveRequestContext();
+        $metadata = $this->defaultMetadataForContext('/parceiro/'.$slug, $context);
 
         try {
             $profile = $this->accountProfileQueryService->publicFindBySlugOrFail($slug);
@@ -108,7 +76,7 @@ class PublicWebMetadataService
         $metadata['canonical_url'] = $this->canonicalUrlForPath('/parceiro/'.trim((string) ($payload['slug'] ?? $slug)));
         $metadata['type'] = 'profile';
 
-        return $this->enrichImageMetadata($metadata, $this->currentTenant(), null);
+        return $this->enrichImageMetadataForContext($metadata, $context);
     }
 
     /**
@@ -116,7 +84,8 @@ class PublicWebMetadataService
      */
     public function eventMetadata(string $slug): array
     {
-        $metadata = $this->defaultMetadata('/agenda/evento/'.$slug);
+        $context = $this->resolveRequestContext();
+        $metadata = $this->defaultMetadataForContext('/agenda/evento/'.$slug, $context);
 
         try {
             $event = $this->eventQueryService->findByIdOrSlug($slug);
@@ -147,7 +116,7 @@ class PublicWebMetadataService
         $metadata['canonical_url'] = $this->canonicalUrlForPath('/agenda/evento/'.trim((string) ($payload['slug'] ?? $slug)));
         $metadata['type'] = 'article';
 
-        return $this->enrichImageMetadata($metadata, $this->currentTenant(), null);
+        return $this->enrichImageMetadataForContext($metadata, $context);
     }
 
     /**
@@ -155,7 +124,8 @@ class PublicWebMetadataService
      */
     public function staticAssetMetadata(string $assetRef): array
     {
-        $metadata = $this->defaultMetadata('/static/'.$assetRef);
+        $context = $this->resolveRequestContext();
+        $metadata = $this->defaultMetadataForContext('/static/'.$assetRef, $context);
 
         try {
             $asset = $this->staticAssetQueryService->findByIdOrSlug($assetRef);
@@ -181,7 +151,7 @@ class PublicWebMetadataService
         $metadata['canonical_url'] = $this->canonicalUrlForPath('/static/'.trim((string) ($payload['slug'] ?? $assetRef)));
         $metadata['type'] = 'place';
 
-        return $this->enrichImageMetadata($metadata, $this->currentTenant(), null);
+        return $this->enrichImageMetadataForContext($metadata, $context);
     }
 
     /**
@@ -194,7 +164,8 @@ class PublicWebMetadataService
         if ($normalizedCode !== '') {
             $path .= '?code='.rawurlencode($normalizedCode);
         }
-        $metadata = $this->defaultMetadata($path);
+        $context = $this->resolveRequestContext();
+        $metadata = $this->defaultMetadataForContext($path, $context);
 
         if ($normalizedCode === '') {
             return $metadata;
@@ -230,7 +201,7 @@ class PublicWebMetadataService
         $metadata['canonical_url'] = $this->canonicalUrlForPath($path);
         $metadata['type'] = 'article';
 
-        return $this->enrichImageMetadata($metadata, $this->currentTenant(), null);
+        return $this->enrichImageMetadataForContext($metadata, $context);
     }
 
     private function canonicalUrlForPath(?string $path = null): string
@@ -245,16 +216,6 @@ class PublicWebMetadataService
         }
 
         return $base.$normalizedPath;
-    }
-
-    private function defaultImageUrl(): string
-    {
-        return $this->resolveImageUrl([
-            $this->brandingManifestService->resolveLogoSetting('dark_logo_uri'),
-            $this->brandingManifestService->resolveLogoSetting('light_logo_uri'),
-            $this->brandingManifestService->resolvePwaIcon('icon512_uri'),
-            '/logo-dark.png',
-        ]);
     }
 
     /**
@@ -301,28 +262,93 @@ class PublicWebMetadataService
     }
 
     /**
-     * @return array<string, mixed>
+     * @param  array{
+     *   tenant: ?Tenant,
+     *   landlord: Landlord,
+     *   branding: array<string, mixed>,
+     *   base_url: string,
+     *   tenant_branding_image_url: ?string,
+     *   landlord_branding_image_url: ?string,
+     *   branding_fallback_image_url: ?string
+     * }  $context
+     * @return array<string, string>
      */
-    private function resolveCurrentBrandingData(): array
+    private function defaultMetadataForContext(?string $path, array $context): array
     {
-        $landlordBranding = $this->normalizeBrandingData($this->currentLandlord()->branding_data ?? null);
-        $tenantBranding = $this->normalizeBrandingData($this->currentTenant()?->branding_data ?? null);
+        $tenant = $context['tenant'];
+        $landlord = $context['landlord'];
+        $branding = $context['branding'];
+        $siteName = trim((string) ($tenant?->name ?? $landlord->name ?? config('app.name', 'Belluga Now')));
+        $siteName = $siteName !== '' ? $siteName : 'Belluga Now';
 
-        return ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
+        $title = trim((string) data_get($branding, 'public_web_metadata.default_title', ''));
+        if ($title === '') {
+            $title = $siteName;
+        }
+
+        $description = trim((string) data_get($branding, 'public_web_metadata.default_description', ''));
+        if ($description === '') {
+            $description = trim((string) ($tenant?->description ?? ''));
+        }
+        if ($description === '') {
+            $description = "Descubra eventos, parceiros e lugares em {$siteName}.";
+        }
+
+        $metadata = [
+            'title' => $title,
+            'description' => $this->excerpt($description),
+            'image' => $this->resolveImageUrl([
+                $context['branding_fallback_image_url'],
+                $this->defaultImageUrlForContext($context),
+            ]),
+            'canonical_url' => $this->canonicalUrlForPath($path),
+            'site_name' => $siteName,
+            'type' => 'website',
+        ];
+
+        return $this->enrichImageMetadataForContext($metadata, $context);
+    }
+
+    /**
+     * @return array{
+     *   tenant: ?Tenant,
+     *   landlord: Landlord,
+     *   branding: array<string, mixed>,
+     *   base_url: string,
+     *   tenant_branding_image_url: ?string,
+     *   landlord_branding_image_url: ?string,
+     *   branding_fallback_image_url: ?string
+     * }
+     */
+    private function resolveRequestContext(): array
+    {
+        $tenant = Tenant::current();
+        $landlord = $this->currentLandlord();
+        $baseUrl = request()->getSchemeAndHttpHost();
+        $tenantBranding = $this->normalizeBrandingData($tenant?->branding_data ?? null);
+        $landlordBranding = $this->normalizeBrandingData($landlord->branding_data ?? null);
+        $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
             mainArray: $landlordBranding,
             overrideArray: $tenantBranding
         );
-    }
+        $tenantBrandingImageUrl = $tenant instanceof Tenant
+            ? $this->resolveBrandablePublicWebImageUrl($tenant, $tenantBranding, $baseUrl)
+            : null;
+        $landlordBrandingImageUrl = $this->resolveBrandablePublicWebImageUrl(
+            $landlord,
+            $landlordBranding,
+            $baseUrl,
+        );
 
-    private function currentTenant(): ?Tenant
-    {
-        $tenant = Tenant::current();
-
-        if ($tenant === null) {
-            return null;
-        }
-
-        return $tenant->fresh() ?? $tenant;
+        return [
+            'tenant' => $tenant,
+            'landlord' => $landlord,
+            'branding' => $branding,
+            'base_url' => $baseUrl,
+            'tenant_branding_image_url' => $tenantBrandingImageUrl,
+            'landlord_branding_image_url' => $landlordBrandingImageUrl,
+            'branding_fallback_image_url' => $tenantBrandingImageUrl ?? $landlordBrandingImageUrl,
+        ];
     }
 
     private function currentLandlord(): Landlord
@@ -354,42 +380,21 @@ class PublicWebMetadataService
         return [];
     }
 
-    private function resolveBrandingFallbackImage(?Tenant $tenant, ?Landlord $landlord): ?string
+    /**
+     * @param  array{
+     *   branding: array<string, mixed>
+     * }  $context
+     */
+    private function defaultImageUrlForContext(array $context): string
     {
-        $baseUrl = request()->getSchemeAndHttpHost();
+        $branding = $context['branding'];
 
-        if ($tenant !== null) {
-            $tenantImage = trim((string) data_get(
-                $this->normalizeBrandingData($tenant->branding_data ?? null),
-                'public_web_metadata.default_image',
-                '',
-            ));
-
-            if ($tenantImage !== '') {
-                return $this->brandingPublicWebMediaService->normalizePublicUrl(
-                    $baseUrl,
-                    $tenant,
-                    $tenantImage,
-                );
-            }
-        }
-
-        $resolvedLandlord = $landlord ?? $this->currentLandlord();
-        $landlordImage = trim((string) data_get(
-            $this->normalizeBrandingData($resolvedLandlord->branding_data ?? null),
-            'public_web_metadata.default_image',
-            '',
-        ));
-
-        if ($landlordImage === '') {
-            return null;
-        }
-
-        return $this->brandingPublicWebMediaService->normalizePublicUrl(
-            $baseUrl,
-            $resolvedLandlord,
-            $landlordImage,
-        );
+        return $this->resolveImageUrl([
+            data_get($branding, 'logo_settings.dark_logo_uri'),
+            data_get($branding, 'logo_settings.light_logo_uri'),
+            data_get($branding, 'pwa_icon.icon512_uri'),
+            '/logo-dark.png',
+        ]);
     }
 
     private function sanitizeText(string $value): string
@@ -413,10 +418,9 @@ class PublicWebMetadataService
      * @param  array<string, string>  $metadata
      * @return array<string, string>
      */
-    private function enrichImageMetadata(
+    private function enrichImageMetadataForContext(
         array $metadata,
-        ?Tenant $tenant,
-        ?Landlord $landlord,
+        array $context,
     ): array {
         $imageUrl = trim((string) ($metadata['image'] ?? ''));
         $title = trim((string) ($metadata['title'] ?? $metadata['site_name'] ?? ''));
@@ -429,11 +433,7 @@ class PublicWebMetadataService
         $metadata['image_height'] = '';
         $metadata['image_alt'] = $title;
 
-        $properties = $this->resolveBrandingImagePropertiesForSelectedImage(
-            $tenant,
-            $landlord,
-            $imageUrl,
-        );
+        $properties = $this->resolveBrandingImagePropertiesForSelectedImage($context, $imageUrl);
 
         if ($properties !== []) {
             if ($metadata['image_type'] === '' && trim((string) ($properties['type'] ?? '')) !== '') {
@@ -447,38 +447,36 @@ class PublicWebMetadataService
     }
 
     /**
+     * @param  array{
+     *   tenant: ?Tenant,
+     *   landlord: Landlord,
+     *   base_url: string,
+     *   tenant_branding_image_url: ?string,
+     *   landlord_branding_image_url: ?string
+     * }  $context
      * @return array{width:string,height:string,type:string}|array{}
      */
     private function resolveBrandingImagePropertiesForSelectedImage(
-        ?Tenant $tenant,
-        ?Landlord $landlord,
+        array $context,
         string $imageUrl,
     ): array {
         if ($imageUrl === '') {
             return [];
         }
 
-        $baseUrl = request()->getSchemeAndHttpHost();
+        $baseUrl = $context['base_url'];
+        $tenant = $context['tenant'];
 
-        if ($tenant !== null) {
-            $tenantBrandingImage = $this->resolveBrandablePublicWebImageUrl($tenant, $baseUrl);
-            if ($tenantBrandingImage !== null && $tenantBrandingImage === $imageUrl) {
-                return $this->brandingPublicWebMediaService->resolveImagePropertiesForBaseUrl(
-                    $tenant,
-                    $baseUrl,
-                );
-            }
+        if ($tenant instanceof Tenant && $context['tenant_branding_image_url'] === $imageUrl) {
+            return $this->brandingPublicWebMediaService->resolveImagePropertiesForBaseUrl(
+                $tenant,
+                $baseUrl,
+            );
         }
 
-        $resolvedLandlord = $landlord ?? $this->currentLandlord();
-        $landlordBrandingImage = $this->resolveBrandablePublicWebImageUrl(
-            $resolvedLandlord,
-            $baseUrl,
-        );
-
-        if ($landlordBrandingImage !== null && $landlordBrandingImage === $imageUrl) {
+        if ($context['landlord_branding_image_url'] === $imageUrl) {
             return $this->brandingPublicWebMediaService->resolveImagePropertiesForBaseUrl(
-                $resolvedLandlord,
+                $context['landlord'],
                 $baseUrl,
             );
         }
@@ -488,13 +486,10 @@ class PublicWebMetadataService
 
     private function resolveBrandablePublicWebImageUrl(
         Tenant|Landlord $brandable,
+        array $branding,
         string $baseUrl,
     ): ?string {
-        $rawImage = trim((string) data_get(
-            $this->normalizeBrandingData($brandable->branding_data ?? null),
-            'public_web_metadata.default_image',
-            '',
-        ));
+        $rawImage = trim((string) data_get($branding, 'public_web_metadata.default_image', ''));
 
         if ($rawImage === '') {
             return null;

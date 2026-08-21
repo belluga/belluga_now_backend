@@ -183,6 +183,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         }
         $this->assertSame($typeAssetUrl, $response->json('data.poi_visual.image_url'));
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $model = StaticProfileType::query()->where('type', 'landmark')->firstOrFail();
         $this->assertSame('#00897B', data_get($model->visual, 'color'));
         $this->assertTypeAssetStored((string) $model->getKey(), 'static_profile_types');
@@ -395,6 +396,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.type', 'landmark');
         $response->assertJsonPath('data.map_category', 'landmark');
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $this->assertTrue(StaticProfileType::query()->where('type', 'landmark')->exists());
         $this->assertFalse(StaticProfileType::query()->where('type', 'poi')->exists());
         $this->assertSame(
@@ -469,6 +471,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.type', 'poi');
         $response->assertJsonPath('data.map_category', 'landmark');
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $this->assertSame(
             'landmark',
             (string) (
@@ -612,6 +615,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.poi_visual.mode', 'image');
         $response->assertJsonPath('data.poi_visual.image_source', 'cover');
         $assetId = (string) $asset->_id;
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $projectionQuery = MapPoi::query()
             ->where('ref_type', 'static')
             ->where(function ($query) use ($assetId): void {
@@ -711,6 +715,7 @@ class StaticProfileTypesControllerTest extends TestCaseTenant
             $typeAssetUri .= '?'.$typeAssetQuery;
         }
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $model = StaticProfileType::query()->where('type', 'beach')->firstOrFail();
         $this->assertTypeAssetStored((string) $model->getKey(), 'static_profile_types');
         $assetId = (string) $asset->_id;

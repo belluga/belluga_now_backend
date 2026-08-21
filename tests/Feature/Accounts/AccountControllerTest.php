@@ -189,6 +189,7 @@ class AccountControllerTest extends TestCase
 
         $createResponse->assertCreated();
         $accountSlug = $createResponse->json('data.account.slug');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $account = Account::query()->where('slug', $accountSlug)->firstOrFail();
         $role = $account->roleTemplates()->firstOrFail();
 
@@ -319,6 +320,7 @@ class AccountControllerTest extends TestCase
         $userOwnedCreateResponse->assertCreated();
 
         $userOwnedSlug = $userOwnedCreateResponse->json('data.account.slug');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $userOwnedAccount = Account::query()->where('slug', $userOwnedSlug)->firstOrFail();
         $userOwnedRole = $userOwnedAccount->roleTemplates()->firstOrFail();
 
@@ -485,6 +487,7 @@ class AccountControllerTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('data.ownership_state', 'unmanaged');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $updated = Account::query()->where('slug', $accountSlug)->firstOrFail();
         $this->assertSame('unmanaged', $updated->ownership_state);
         $this->assertNull($updated->organization_id);
@@ -507,6 +510,7 @@ class AccountControllerTest extends TestCase
             AccountPublicationStateService::PUBLISHED,
         );
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $updated = Account::query()->where('slug', $accountSlug)->firstOrFail();
         $this->assertSame(
             AccountPublicationStateService::PUBLISHED,
@@ -537,6 +541,7 @@ class AccountControllerTest extends TestCase
             AccountPublicationStateService::DRAFT,
         );
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $updated = Account::query()->where('slug', $accountSlug)->firstOrFail();
         $this->assertSame(
             AccountPublicationStateService::DRAFT,
@@ -582,6 +587,7 @@ class AccountControllerTest extends TestCase
         $partialResponse->assertStatus(422);
         $partialResponse->assertJsonValidationErrors(['publication.status']);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $updated = Account::query()->where('slug', $accountSlug)->firstOrFail();
         $this->assertSame(
             AccountPublicationStateService::DRAFT,
@@ -609,6 +615,7 @@ class AccountControllerTest extends TestCase
         $publishedPartialResponse->assertStatus(422);
         $publishedPartialResponse->assertJsonValidationErrors(['publication.status']);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $publishedAccount = Account::query()->where('slug', $accountSlug)->firstOrFail();
         $this->assertSame(
             AccountPublicationStateService::PUBLISHED,
@@ -696,6 +703,7 @@ class AccountControllerTest extends TestCase
         $this->app->forgetInstance(AccountManagementService::class);
         $this->app->forgetInstance(AccountProfileNestedPublicMembersProjectionService::class);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         try {
             $this->app->make(AccountManagementService::class)->update($account->fresh(), [
                 'publication' => [
@@ -763,6 +771,7 @@ class AccountControllerTest extends TestCase
         $response = $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}");
 
         $response->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertNotNull(
             Account::onlyTrashed()->where('slug', $accountSlug)->first()
         );
@@ -788,6 +797,7 @@ class AccountControllerTest extends TestCase
 
         $accountSlug = (string) $createResponse->json('data.account.slug');
         $profileId = (string) $createResponse->json('data.account_profile.id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $controlAccount = Account::create([
             'name' => 'Control Account',
             'document' => 'CTRL'.uniqid(),
@@ -824,6 +834,7 @@ class AccountControllerTest extends TestCase
         $response = $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}");
 
         $response->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertFalse(
             MapPoi::query()
                 ->where('ref_type', 'account_profile')
@@ -855,6 +866,7 @@ class AccountControllerTest extends TestCase
 
         $accountSlug = (string) $createResponse->json('data.account.slug');
         $profileId = (string) $createResponse->json('data.account_profile.id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $trashedProfile = AccountProfile::query()->findOrFail($profileId);
         $trashedProfile->delete();
 
@@ -894,6 +906,7 @@ class AccountControllerTest extends TestCase
         $response = $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}");
 
         $response->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertFalse(
             MapPoi::query()
                 ->where('ref_type', 'account_profile')
@@ -925,6 +938,7 @@ class AccountControllerTest extends TestCase
 
         $accountSlug = (string) $createResponse->json('data.account.slug');
         $profileId = (string) $createResponse->json('data.account_profile.id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $controlAccount = Account::create([
             'name' => 'Force Delete Control Account',
             'document' => 'CTRL'.uniqid(),
@@ -954,6 +968,7 @@ class AccountControllerTest extends TestCase
         $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}")
             ->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         MapPoi::query()->create([
             'ref_type' => 'account_profile',
             'ref_id' => $profileId,
@@ -974,6 +989,7 @@ class AccountControllerTest extends TestCase
         $response = $this->postJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}/force_delete");
 
         $response->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertFalse(
             MapPoi::query()
                 ->where('ref_type', 'account_profile')

@@ -3,6 +3,7 @@
 namespace App\Http\Api\v1\Controllers;
 
 use App\Application\Environment\EnvironmentResolverService;
+use App\Application\Tenants\TenantRequestLifecycleTrace;
 use App\Http\Api\v1\Requests\EnvironmentRequest;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
@@ -15,6 +16,8 @@ class EnvironmentController extends Controller
 
     public function showEnvironmentData(EnvironmentRequest $request): JsonResponse
     {
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.environment.controller.enter');
+
         $resolved = $this->environmentService->resolve([
             ...$request->validated(),
             'resolved_app_domain_tenant' => $request->resolvedAppDomainTenant(),
@@ -40,6 +43,8 @@ class EnvironmentController extends Controller
             'profile_types' => $resolved['profile_types'] ?? [],
             'settings' => $resolved['settings'] ?? [],
         ];
+
+        app(TenantRequestLifecycleTrace::class)->record('endpoint.environment.response_ready');
 
         return response()->json($payload);
     }
