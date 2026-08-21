@@ -3,7 +3,6 @@
 namespace Tests\Api\v1\Tenants\Auth;
 
 use App\Application\Auth\TenantScopedAccessTokenService;
-use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Support\Helpers\PhoneNumberParser;
@@ -116,7 +115,7 @@ class ApiV1TenantMeTest extends TestCaseTenant
             ]
         )->assertStatus(200);
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $profile = AccountProfile::query()
             ->where('created_by', (string) $user->_id)
             ->where('created_by_type', 'tenant')
