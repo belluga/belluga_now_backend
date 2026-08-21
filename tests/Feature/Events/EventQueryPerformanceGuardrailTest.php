@@ -417,9 +417,20 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
 
-        $connection = DB::connection('tenant');
-        $connection->flushQueryLog();
-        $connection->enableQueryLog();
+        $tenantConnections = [];
+        $tenantConnection = DB::connection('tenant');
+        $tenantConnection->flushQueryLog();
+        $tenantConnection->enableQueryLog();
+        $tenantConnections[] = $tenantConnection;
+        app('events')->listen(\Illuminate\Database\Events\ConnectionEstablished::class, static function ($event) use (&$tenantConnections): void {
+            if ($event->connection->getName() !== 'tenant') {
+                return;
+            }
+
+            $event->connection->flushQueryLog();
+            $event->connection->enableQueryLog();
+            $tenantConnections[] = $event->connection;
+        });
 
         $response = $this->getJson(
             "{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=budget&page=1&page_size=2"
@@ -428,9 +439,8 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonCount(2, 'data');
 
-        $queries = collect($connection->getQueryLog());
-        $connection->disableQueryLog();
-        $connection->flushQueryLog();
+        $queries = collect($tenantConnections)
+            ->flatMap(static fn ($connection): array => $connection->getQueryLog());
         $queryLogJson = json_encode($queries->all(), JSON_UNESCAPED_SLASHES);
         $profileTypeQueries = $queries->filter(
             static fn (array $query): bool => str_contains(
@@ -540,6 +550,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $createResponse->assertStatus(201);
 
         $eventId = (string) $createResponse->json('data.event_id');
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $event = Event::query()->findOrFail($eventId);
         $occurrence = EventOccurrence::query()
             ->where('event_id', $eventId)
@@ -1062,6 +1073,8 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             ]
         );
         $response->assertCreated();
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
 
         return Event::query()->where('title', $title)->firstOrFail()->fresh();
     }

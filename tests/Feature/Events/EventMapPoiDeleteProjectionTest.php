@@ -103,6 +103,7 @@ class EventMapPoiDeleteProjectionTest extends TestCaseTenant
         $createResponse->assertStatus(201);
 
         $eventId = (string) $createResponse->json('data.event_id');
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $event = Event::query()->find($eventId);
         $this->assertNotNull($event);
 
@@ -112,6 +113,7 @@ class EventMapPoiDeleteProjectionTest extends TestCaseTenant
         ]));
         $controlResponse->assertStatus(201);
         $controlEventId = (string) $controlResponse->json('data.event_id');
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $controlEvent = Event::query()->find($controlEventId);
         $this->assertNotNull($controlEvent);
 
@@ -127,6 +129,7 @@ class EventMapPoiDeleteProjectionTest extends TestCaseTenant
         $deleteResponse = $this->deleteJson("{$this->accountEventsBase}/{$eventId}");
 
         $deleteResponse->assertStatus(200);
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $this->assertFalse(
             MapPoi::query()
                 ->where('ref_type', 'event')

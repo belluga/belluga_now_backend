@@ -85,6 +85,7 @@ class StaticAssetsProjectionVisualTest extends TestCaseTenant
         $assetId = (string) $response->json('data.id');
         $this->assertNotSame('', $assetId);
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $projection = MapPoi::query()
             ->where('ref_type', 'static')
             ->where('ref_id', $assetId)

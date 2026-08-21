@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Profile;
 
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
@@ -45,7 +46,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
             'phones' => ['+5527999990101'],
         ]);
 
-        Sanctum::actingAs($user, ['*']);
+        $this->actingAsTenantIdentity($user);
 
         $response = $this->deleteJson("{$this->base_api_tenant}profile", [
             'confirmation' => 'remove_account',
@@ -55,6 +56,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
             ->assertNoContent()
             ->assertHeader('X-Api-Security-Domain', 'tenant_public_profile_delete');
 
+        Tenant::query()->firstOrFail()->makeCurrent();
         $this->assertNull(AccountUser::withTrashed()->find((string) $user->_id));
     }
 
@@ -66,12 +68,13 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
             'phones' => ['+5527999990103'],
         ]);
 
-        Sanctum::actingAs($user, ['*']);
+        $this->actingAsTenantIdentity($user);
 
         $this->deleteJson("{$this->base_api_tenant}profile", [
             'confirmation' => 'remove_account',
         ])->assertNoContent();
 
+        Tenant::query()->firstOrFail()->makeCurrent();
         $this->assertNull(AccountUser::withTrashed()->find((string) $user->_id));
     }
 
@@ -83,12 +86,13 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
             'phones' => ['+5527999990199'],
         ]);
 
-        Sanctum::actingAs($user, ['*']);
+        $this->actingAsTenantIdentity($user);
 
         $this->deleteJson("{$this->base_api_tenant}profile?app_domain=com.example.mobile", [
             'confirmation' => 'remove_account',
         ])->assertNoContent();
 
+        Tenant::query()->firstOrFail()->makeCurrent();
         $this->assertNull(AccountUser::withTrashed()->find((string) $user->_id));
     }
 
@@ -100,7 +104,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
             'phones' => ['+5527999990198'],
         ]);
 
-        Sanctum::actingAs($user, ['*']);
+        $this->actingAsTenantIdentity($user);
 
         $this->deleteJson(
             "{$this->base_api_tenant}profile?app_domain=com.example.mobile&target_user_id={$user->_id}",
@@ -108,6 +112,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
         )->assertUnprocessable()
             ->assertJsonValidationErrors(['confirmation']);
 
+        Tenant::query()->firstOrFail()->makeCurrent();
         $this->assertNotNull(AccountUser::query()->find((string) $user->_id));
     }
 
@@ -118,12 +123,13 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
             'fingerprints' => [['hash' => hash('sha256', 'delete-anonymous')]],
         ]);
 
-        Sanctum::actingAs($anonymous, ['*']);
+        $this->actingAsTenantIdentity($anonymous);
 
         $this->deleteJson("{$this->base_api_tenant}profile", [
             'confirmation' => 'remove_account',
         ])->assertForbidden();
 
+        Tenant::query()->firstOrFail()->makeCurrent();
         $this->assertNotNull(AccountUser::query()->find((string) $anonymous->_id));
     }
 
@@ -145,7 +151,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
             'phones' => ['+5527999990102'],
         ]);
 
-        Sanctum::actingAs($user, ['*']);
+        $this->actingAsTenantIdentity($user);
 
         $this->deleteJson("{$this->base_api_tenant}profile", [
             'confirmation' => 'remove_account',
@@ -153,6 +159,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
         ])->assertUnprocessable()
             ->assertJsonValidationErrors(['confirmation']);
 
+        Tenant::query()->firstOrFail()->makeCurrent();
         $this->assertNotNull(AccountUser::query()->find((string) $user->_id));
 
         $this->deleteJson("{$this->base_api_tenant}profile", [
@@ -160,6 +167,7 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
         ])->assertUnprocessable()
             ->assertJsonValidationErrors(['confirmation']);
 
+        Tenant::query()->firstOrFail()->makeCurrent();
         $this->assertNotNull(AccountUser::query()->find((string) $user->_id));
     }
 
@@ -168,5 +176,18 @@ class CurrentTenantAccountDeletionControllerTest extends TestCaseTenant
         $this->deleteJson("{$this->base_api_tenant}profile", [
             'confirmation' => 'remove_account',
         ])->assertUnauthorized();
+    }
+
+    private function actingAsTenantIdentity(AccountUser $user): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $user,
+            'current-tenant-account-deletion-test',
+            [],
+            tenantId: (string) $tenant->_id,
+        );
+        $this->withToken($token->plainTextToken);
     }
 }

@@ -192,6 +192,7 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.allowed_taxonomies.0', 'music_genre');
         $response->assertJsonPath('data.allowed_taxonomies.1', 'audience');
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $stored = EventType::query()->where('slug', 'festival')->firstOrFail();
         $this->assertSame(['music_genre', 'audience'], $stored->allowed_taxonomies);
     }
@@ -288,6 +289,7 @@ class EventTypesControllerTest extends TestCaseTenant
         $this->assertStringContainsString('/api/v1/media/event-types/', $typeAssetUrl);
         $this->assertSame($typeAssetUrl, $response->json('data.poi_visual.image_url'));
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $model = EventType::query()->where('slug', 'festival')->firstOrFail();
         $this->assertSame('#0F6FAE', data_get($model->visual, 'color'));
         $this->assertTypeAssetStored((string) $model->getKey(), 'event_types');
@@ -312,6 +314,7 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('data.description', null);
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $stored = EventType::query()->findOrFail($eventType->_id);
         $this->assertNull($stored->description);
     }
@@ -339,6 +342,7 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.allowed_taxonomies.0', 'audience');
         $response->assertJsonMissingPath('data.allowed_taxonomies.1');
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $stored = EventType::query()->findOrFail($eventType->_id);
         $this->assertSame(['audience'], $stored->allowed_taxonomies);
     }
@@ -399,6 +403,7 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('data.name', 'Live Show');
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $this->assertSame(
             'Live Show',
             (string) (Event::query()->findOrFail($event->_id)->type['name'] ?? '')
@@ -496,6 +501,7 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.color', '#334455');
         $response->assertJsonPath('data.icon_color', '#101010');
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $updatedEvent = Event::query()->findOrFail($event->_id);
         $this->assertSame('restaurant', data_get($updatedEvent->type, 'icon'));
         $this->assertSame('#334455', data_get($updatedEvent->type, 'color'));
@@ -616,6 +622,7 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.visual.color', '#334455');
         $response->assertJsonPath('data.visual.icon_color', '#FFFFFF');
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $updatedType = EventType::query()->findOrFail($eventType->_id);
         $this->assertSame('music_note', $updatedType->icon);
         $this->assertSame('#334455', $updatedType->color);
@@ -763,6 +770,7 @@ class EventTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.poi_visual.mode', 'image');
         $response->assertJsonPath('data.poi_visual.image_source', 'cover');
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $updatedEvent = Event::query()->findOrFail($event->_id);
         $this->assertSame('image', data_get($updatedEvent->type, 'visual.mode'));
         $this->assertSame('cover', data_get($updatedEvent->type, 'visual.image_source'));

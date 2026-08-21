@@ -274,6 +274,7 @@ class PasswordRegistrationControllerTest extends TestCase
                 'email' => $email,
             ])->assertOk();
 
+        Tenant::query()->firstOrFail()->makeCurrent();
         $user = \App\Models\Tenants\AccountUser::query()
             ->where('emails', 'all', [strtolower($email)])
             ->firstOrFail();
@@ -369,6 +370,7 @@ class PasswordRegistrationControllerTest extends TestCase
                 'email' => $email,
             ])->assertOk();
 
+        Tenant::query()->firstOrFail()->makeCurrent();
         $user = \App\Models\Tenants\AccountUser::query()
             ->where('emails', 'all', [strtolower($email)])
             ->firstOrFail();
@@ -479,6 +481,7 @@ class PasswordRegistrationControllerTest extends TestCase
                 'email' => $email,
             ])->assertOk();
 
+        Tenant::query()->firstOrFail()->makeCurrent();
         $user = \App\Models\Tenants\AccountUser::query()
             ->where('emails', 'all', [strtolower($email)])
             ->firstOrFail();
@@ -607,6 +610,7 @@ class PasswordRegistrationControllerTest extends TestCase
             ]);
         $first->assertStatus(403);
         $first->assertHeader('X-Api-Security-Domain', 'tenant_public_password_login');
+        Tenant::query()->firstOrFail()->makeCurrent();
 
         $second = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.92'])
             ->withHeaders($headers)
