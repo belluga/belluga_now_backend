@@ -777,6 +777,13 @@ class TenantRequestLifecycleTraceTest extends TestCase
                 $event['t_ms'] = round((float) $event['t_ms'], 3);
             }
 
+            if (array_key_exists('laravel_start_to_tenancy_ms', $event)) {
+                $event['laravel_start_to_tenancy_ms'] = round(
+                    (float) $event['laravel_start_to_tenancy_ms'],
+                    3,
+                );
+            }
+
             return $event;
         }, $trace['events']);
 
