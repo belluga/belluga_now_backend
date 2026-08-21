@@ -5,15 +5,14 @@ declare(strict_types=1);
 namespace Tests\Feature\Profile;
 
 use App\Application\Accounts\AccountUserService;
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
-use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\ProximityPreference;
 use App\Models\Tenants\TenantProfileType;
-use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -46,8 +45,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             self::$bootstrapped = true;
         }
 
-        $tenant = Tenant::query()->firstOrFail();
-        $tenant->makeCurrent();
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
 
         ProximityPreference::query()->delete();
 
@@ -64,7 +62,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
     public function test_authenticated_identity_can_update_and_read_proximity_preferences(): void
     {
         $user = $this->createRegisteredUser();
-        Sanctum::actingAs($user, ['account-users:view']);
+        $this->actingAsTenantUser($user);
 
         $payload = [
             'max_distance_meters' => 25000,
@@ -140,7 +138,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             ],
         ]);
 
-        Sanctum::actingAs($anonymous, []);
+        $this->actingAsTenantUser($anonymous, []);
 
         $payload = [
             'max_distance_meters' => 12000,
@@ -169,6 +167,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             'manual_coordinate',
         );
 
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $stored = ProximityPreference::query()
             ->where('owner_user_id', (string) $anonymous->_id)
             ->firstOrFail();
@@ -187,7 +186,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
     public function test_live_device_mode_clears_fixed_reference_payload(): void
     {
         $user = $this->createRegisteredUser();
-        Sanctum::actingAs($user, ['account-users:view']);
+        $this->actingAsTenantUser($user);
 
         $response = $this->putJson(
             "{$this->base_api_tenant}profile/proximity-preferences",
@@ -210,6 +209,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.location_preference.mode', 'live_device_location');
         $response->assertJsonPath('data.location_preference.fixed_reference', null);
 
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $stored = ProximityPreference::query()
             ->where('owner_user_id', (string) $user->_id)
             ->firstOrFail();
@@ -220,7 +220,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
     public function test_route_reference_point_policy_preserves_nullable_boolean_values(): void
     {
         $user = $this->createRegisteredUser();
-        Sanctum::actingAs($user, ['account-users:view']);
+        $this->actingAsTenantUser($user);
 
         foreach ([null, true, false] as $value) {
             $response = $this->putJson(
@@ -245,6 +245,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             $getResponse->assertStatus(200);
             $getResponse->assertJsonPath('data.use_reference_point_for_routes', $value);
 
+            $this->makeCanonicalTenantCurrent($this->tenant);
             $stored = ProximityPreference::query()
                 ->where('owner_user_id', (string) $user->_id)
                 ->firstOrFail();
@@ -256,7 +257,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
     public function test_entity_reference_resolves_disabled_when_source_type_loses_poi_prerequisite(): void
     {
         $user = $this->createRegisteredUser();
-        Sanctum::actingAs($user, ['account-users:view']);
+        $this->actingAsTenantUser($user);
 
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'hotel'],
@@ -315,6 +316,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             'active',
         );
 
+        $this->makeCanonicalTenantCurrent($this->tenant);
         TenantProfileType::query()
             ->where('type', 'hotel')
             ->firstOrFail()
@@ -372,7 +374,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
     public function test_entity_reference_resolves_disabled_when_source_type_loses_reference_location_capability(): void
     {
         $user = $this->createRegisteredUser();
-        Sanctum::actingAs($user, ['account-users:view']);
+        $this->actingAsTenantUser($user);
 
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'hotel'],
@@ -431,6 +433,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             'active',
         );
 
+        $this->makeCanonicalTenantCurrent($this->tenant);
         TenantProfileType::query()
             ->where('type', 'hotel')
             ->firstOrFail()
@@ -488,11 +491,27 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
     public function test_missing_preference_returns_not_found(): void
     {
         $user = $this->createRegisteredUser();
-        Sanctum::actingAs($user, ['account-users:view']);
+        $this->actingAsTenantUser($user);
 
         $response = $this->getJson("{$this->base_api_tenant}profile/proximity-preferences");
 
         $response->assertStatus(404);
+    }
+
+    /**
+     * @param  array<int, string>  $abilities
+     */
+    private function actingAsTenantUser(AccountUser $user, array $abilities = ['account-users:view']): void
+    {
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $user,
+            'profile-proximity-test',
+            $abilities,
+            tenantId: (string) $tenant->_id,
+            accountId: $abilities === [] ? null : (string) $this->account->_id,
+        );
+        $this->withToken($token->plainTextToken);
     }
 
     private function createRegisteredUser(): AccountUser

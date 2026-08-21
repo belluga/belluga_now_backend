@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Profile;
 
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Profiles\CurrentTenantAccountDeletionService;
 use App\Jobs\Push\UnsubscribePushTokensFromAllTopicsJob;
 use App\Models\Landlord\PersonalAccessToken;
@@ -31,7 +32,6 @@ use Belluga\PushHandler\Models\Tenants\PushMessageAction;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
-use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -58,7 +58,7 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
             self::$bootstrapped = true;
         }
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makeCanonicalTenantCurrent($this->tenant);
     }
 
     public function test_direct_current_user_records_are_erased_and_shared_records_survive(): void
@@ -220,12 +220,13 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
                 ->all(),
         );
 
-        Sanctum::actingAs($target, ['*']);
+        $this->actingAsTenantIdentity($target);
 
         $this->deleteJson("{$this->base_api_tenant}profile", [
             'confirmation' => 'remove_account',
         ])->assertNoContent();
 
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $this->assertNull(AccountUser::withTrashed()->find($targetId));
         $this->assertNotNull(AccountUser::query()->find($otherId));
         $this->assertNull(AccountProfile::withTrashed()->find((string) $personalProfile->_id));
@@ -322,7 +323,10 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
             static fn (mixed $value): bool => trim((string) $value) !== '',
         )));
 
-        app(CurrentTenantAccountDeletionService::class)->delete(Tenant::query()->firstOrFail(), $reloaded);
+        app(CurrentTenantAccountDeletionService::class)->delete(
+            $this->resolveCanonicalTenant($this->tenant),
+            $reloaded,
+        );
 
         $this->assertFalse(PhoneOtpChallenge::query()->where('phone_hash', $phoneHash)->exists());
         $this->assertNull(AccountUser::withTrashed()->find($targetId));
@@ -375,18 +379,28 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
             'created_by_type' => 'tenant',
         ]);
 
+        $tenantConnections = [];
         $connection = DB::connection('tenant');
         $connection->flushQueryLog();
         $connection->enableQueryLog();
+        $tenantConnections[] = $connection;
+        app('events')->listen(\Illuminate\Database\Events\ConnectionEstablished::class, static function ($event) use (&$tenantConnections): void {
+            if ($event->connection->getName() !== 'tenant') {
+                return;
+            }
 
-        Sanctum::actingAs($target, ['*']);
+            $event->connection->flushQueryLog();
+            $event->connection->enableQueryLog();
+            $tenantConnections[] = $event->connection;
+        });
+
+        $this->actingAsTenantIdentity($target);
         $this->deleteJson("{$this->base_api_tenant}profile", [
             'confirmation' => 'remove_account',
         ])->assertNoContent();
 
-        $queries = collect($connection->getQueryLog());
-        $connection->disableQueryLog();
-        $connection->flushQueryLog();
+        $queries = collect($tenantConnections)
+            ->flatMap(static fn ($connection): array => $connection->getQueryLog());
         $queryLogJson = json_encode($queries->all(), JSON_UNESCAPED_SLASHES);
         $initialProfileDiscoveryReads = $queries->filter(static function (array $query): bool {
             $serialized = json_encode($query, JSON_UNESCAPED_SLASHES);
@@ -420,6 +434,7 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
         $this->assertCount(2, $accountOwnershipReads, "Account ownership must use preflight + transactional revalidation bulk reads: {$queryLogJson}");
         $this->assertCount(2, $profileGraphReads, "Profile graph must use preflight + transactional revalidation bulk reads: {$queryLogJson}");
         $this->assertCount(2, $membershipReads, "Membership cardinality must use preflight + transactional revalidation bulk reads: {$queryLogJson}");
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $this->assertNull(AccountUser::withTrashed()->find($targetId));
 
         return [
@@ -428,5 +443,17 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
             'live_profile_graph_discovery' => $profileGraphReads->count(),
             'membership_discovery' => $membershipReads->count(),
         ];
+    }
+
+    private function actingAsTenantIdentity(AccountUser $user): void
+    {
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $user,
+            'current-tenant-account-erasure-test',
+            [],
+            tenantId: (string) $tenant->_id,
+        );
+        $this->withToken($token->plainTextToken);
     }
 }

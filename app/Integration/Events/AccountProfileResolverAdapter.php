@@ -6,6 +6,7 @@ namespace App\Integration\Events;
 
 use App\Application\AccountProfiles\AccountProfileGalleryService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Application\AccountProfiles\AccountProfilePublicCatalogEligibilityPolicy;
 use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
@@ -93,12 +94,15 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
      *   location: array<string, mixed>
      * }
      */
-    private function formatPhysicalHostProfile(AccountProfile $profile): array
+    private function formatPhysicalHostProfile(
+        AccountProfile $profile,
+        ?AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy = null,
+        bool $skipTypeEligibilityValidation = false,
+    ): array
     {
-        $profileType = trim((string) ($profile->profile_type ?? ''));
-        $location = $this->validatedPhysicalHostLocation($profile);
+        $location = $this->validatedPhysicalHostLocation($profile, $skipTypeEligibilityValidation);
         $slug = $this->normalizeSlug($profile->slug ?? null);
-        $canOpenPublicDetail = $this->canOpenPublicDetail($profile);
+        $canOpenPublicDetail = $this->canOpenPublicDetail($profile, $publicCatalogPolicy);
         $baseUrl = request()->getSchemeAndHttpHost();
         $avatarUrl = $this->accountProfileMediaService->normalizePublicUrl(
             $baseUrl,
@@ -714,12 +718,10 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         $query = AccountProfile::query()
             ->whereIn('_id', $ids);
 
+        $publicCatalogPolicy = null;
         if ($publicOnly) {
-            $query->whereRaw(
-                $this->publicCatalogSnapshotReader
-                    ->publicPoiEligibilityPolicy()
-                    ->catalogMatchExpression()
-            );
+            $publicCatalogPolicy = $this->publicCatalogSnapshotReader->publicPoiEligibilityPolicy();
+            $query->whereRaw($publicCatalogPolicy->catalogMatchExpression());
         } else {
             $query->whereIn('profile_type', $this->typeSetProvider->queryablePoiEnabledTypes());
         }
@@ -731,7 +733,11 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             }
 
             try {
-                $resolved[(string) $profile->_id] = $this->formatPhysicalHostProfile($profile);
+                $resolved[(string) $profile->_id] = $this->formatPhysicalHostProfile(
+                    $profile,
+                    $publicCatalogPolicy,
+                    $publicOnly,
+                );
             } catch (ValidationException) {
                 continue;
             }
@@ -743,18 +749,23 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     /**
      * @return array<string, mixed>
      */
-    private function validatedPhysicalHostLocation(AccountProfile $profile): array
+    private function validatedPhysicalHostLocation(
+        AccountProfile $profile,
+        bool $skipTypeEligibilityValidation = false,
+    ): array
     {
-        $profileType = trim((string) ($profile->profile_type ?? ''));
-        if (! $this->isProfileTypeQueryable($profileType)) {
-            throw ValidationException::withMessages([
-                'place_ref.id' => ['Physical host account profile type is not queryable.'],
-            ]);
-        }
-        if (! $this->profileRegistryService->isPoiEnabled($profileType)) {
-            throw ValidationException::withMessages([
-                'place_ref.id' => ['Physical host account profile must have POI capability enabled.'],
-            ]);
+        if (! $skipTypeEligibilityValidation) {
+            $profileType = trim((string) ($profile->profile_type ?? ''));
+            if (! $this->isProfileTypeQueryable($profileType)) {
+                throw ValidationException::withMessages([
+                    'place_ref.id' => ['Physical host account profile type is not queryable.'],
+                ]);
+            }
+            if (! $this->profileRegistryService->isPoiEnabled($profileType)) {
+                throw ValidationException::withMessages([
+                    'place_ref.id' => ['Physical host account profile must have POI capability enabled.'],
+                ]);
+            }
         }
 
         $location = $profile->location ?? null;
@@ -772,11 +783,14 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         return $location;
     }
 
-    private function canOpenPublicDetail(AccountProfile $profile): bool
+    private function canOpenPublicDetail(
+        AccountProfile $profile,
+        ?AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy = null,
+    ): bool
     {
-        return $this->publicCatalogSnapshotReader
+        return ($publicCatalogPolicy ?? $this->publicCatalogSnapshotReader
             ->catalogSnapshot()
-            ->policy()
+            ->policy())
             ->canOpenPublicDetail($profile);
     }
 }

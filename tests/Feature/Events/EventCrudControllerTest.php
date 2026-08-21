@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Events;
 
 use App\Application\Accounts\AccountUserService;
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
@@ -105,12 +106,18 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->userService = $this->app->make(AccountUserService::class);
         $this->user = $this->createAccountUser(['*']);
 
-        Sanctum::actingAs($this->user, [
-            'events:read',
-            'events:create',
-            'events:update',
-            'events:delete',
-        ]);
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->user,
+            'event-crud-controller-test-token',
+            [
+                'events:read',
+                'events:create',
+                'events:update',
+                'events:delete',
+            ],
+            accountId: (string) $this->account->_id,
+        );
+        $this->withToken($token->plainTextToken);
 
         $this->resetCoreProfileTypeBaselines();
 
@@ -178,6 +185,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(201);
         $eventId = (string) $response->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $stored = Event::query()->findOrFail($eventId);
         $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
@@ -201,6 +209,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(201);
         $eventId = (string) $response->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $stored = Event::query()->findOrFail($eventId);
         $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
@@ -224,6 +233,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $expected = '<p>Linha 1 🎉<br />Linha 2</p>';
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $stored = Event::query()->findOrFail($eventId);
         $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
@@ -273,6 +283,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $this->assertNull(data_get($response->json(), 'data.artists'));
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $stored = Event::query()->findOrFail((string) $response->json('data.event_id'));
         $storedOccurrence = $this->occurrenceDocumentAtOrder((string) $stored->_id, 0);
         $this->createOccurrenceGroupHead(
@@ -352,6 +363,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $updated->assertStatus(200);
         $updated->assertJsonPath('data.title', 'Updated Canonical Event');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $storedEvent = Event::query()->findOrFail($eventId);
         $storedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
@@ -597,7 +609,7 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_event_index_filters_by_related_account_profile_id_without_matching_venue_semantics(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
-        Sanctum::actingAs($this->user, ['events:create', 'events:read']);
+        $this->actingAsAccountUser($this->user, ['events:create', 'events:read']);
         $occurrences = $this->makeOccurrences(1);
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
             'title' => 'Band Related Filter Match',
@@ -956,7 +968,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'date_time_end' => $targetDate->copy()->addHours(3),
         ]);
 
-        Sanctum::actingAs($this->user, ['events:create', 'events:read']);
+        $this->actingAsAccountUser($this->user, ['events:create', 'events:read']);
         $matchCreated = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
             'title' => 'Composed Date Filter Match',
             'occurrences' => [[
@@ -1586,7 +1598,7 @@ class EventCrudControllerTest extends TestCaseTenant
             )->_id);
         }
 
-        Sanctum::actingAs($this->user, ['events:create']);
+        $this->actingAsAccountUser($this->user, ['events:create']);
 
         $response = $this->getJson("{$this->accountEventsBase}/account_profile_candidates?type=physical_host&search=main");
 
@@ -1602,7 +1614,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
     public function test_account_events_account_profile_candidates_endpoint_paginates_related_account_profiles_beyond_one_hundred_results(): void
     {
-        Sanctum::actingAs($this->user, ['events:create']);
+        $this->actingAsAccountUser($this->user, ['events:create']);
 
         foreach (range(1, 102) as $index) {
             $this->createAccountProfile(
@@ -1831,6 +1843,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.failed', 0);
         $response->assertJsonPath('data.unchanged', 1);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame($beforeParties, $legacy->fresh()->event_parties);
         $this->assertSame($beforeArtists, $legacy->fresh()->artists);
         $this->assertSame([], $canonical->fresh()->event_parties ?? []);
@@ -1908,6 +1921,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $summary->assertJsonPath('data.failed', 0);
         $summary->assertJsonPath('data.unchanged', 0);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame($beforeParties, $legacy->fresh()->event_parties);
         $this->assertSame($beforeArtists, $legacy->fresh()->artists);
     }
@@ -1958,6 +1972,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $repair->assertJsonPath('data.failed', 0);
         $repair->assertJsonPath('data.unchanged', 1);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $legacy = $legacy->fresh();
         $this->assertCanonicalRelatedAccountStorage(
             $legacy->getAttributes(),
@@ -2055,6 +2070,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $repair->assertJsonPath('data.failed', 0);
         $repair->assertJsonPath('data.unchanged', 0);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $legacy = $legacy->fresh();
         $this->assertCanonicalRelatedAccountStorage(
             $legacy->getAttributes(),
@@ -2190,6 +2206,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $repair->assertJsonPath('data.failed', 0);
         $repair->assertJsonPath('data.unchanged', 0);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertCount(1, $pastLegacy->fresh()->event_parties ?? []);
         $this->assertSame('venue', data_get($pastLegacy->fresh()->event_parties, '0.party_type'));
 
@@ -2259,6 +2276,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $repair->assertJsonPath('data.invalid', 1);
         $repair->assertJsonPath('data.repaired', 1);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $freshEvent = $legacy->fresh();
         $this->assertNull($freshEvent->artists);
 
@@ -2371,6 +2389,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $updated->assertJsonMissingPath('data.linked_account_profiles');
         $updated->assertJsonCount(0, 'data.occurrences.0.profile_groups');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $legacy = $legacy->fresh();
         $occurrence = $this->occurrenceDocumentAtOrder((string) $legacy->_id, 0);
         $this->assertCanonicalRelatedAccountStorage(
@@ -2427,6 +2446,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $repair->assertJsonPath('data.failed', 0);
         $repair->assertJsonPath('data.unchanged', 1);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $fresh = $event->fresh();
         $this->assertSame([], $fresh->event_parties ?? []);
         $this->assertNull($fresh->artists);
@@ -2467,6 +2487,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $repair->assertJsonPath('data.failed', 0);
         $repair->assertJsonPath('data.unchanged', 0);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $legacy = $legacy->fresh();
         $this->assertCanonicalRelatedAccountStorage(
             $legacy->getAttributes(),
@@ -2518,6 +2539,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.taxonomy_terms.0.label', 'Showcase');
 
         $eventId = (string) $response->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $event = Event::query()->findOrFail($eventId);
         $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
@@ -2877,6 +2899,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $storedOccurrences = EventOccurrence::query()
             ->where('event_id', $eventId)
             ->orderBy('starts_at')
@@ -2922,6 +2945,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
 
         $updated->assertStatus(200);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(2, EventOccurrence::query()->where('event_id', $eventId)->count());
 
         $freshSecond = EventOccurrence::query()
@@ -2977,6 +3001,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $storedOccurrences = EventOccurrence::query()
             ->where('event_id', $eventId)
             ->orderBy('starts_at')
@@ -3032,6 +3057,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
 
         $updated->assertStatus(200);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(3, EventOccurrence::query()->where('event_id', $eventId)->count());
 
         $orderedRefs = $this->orderedOccurrenceRefsForEvent($eventId);
@@ -3098,6 +3124,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $storedOccurrences = EventOccurrence::query()
             ->where('event_id', $eventId)
             ->orderBy('starts_at')
@@ -3137,6 +3164,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
 
         $removed->assertStatus(200);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(2, EventOccurrence::query()->where('event_id', $eventId)->count());
 
         $readdedStart = Carbon::now()->addDays(3)->setHour(18)->setMinute(0)->setSecond(0);
@@ -3167,6 +3195,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
 
         $readded->assertStatus(200);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(3, EventOccurrence::query()->where('event_id', $eventId)->count());
 
         $freshFirst = EventOccurrence::query()
@@ -3533,6 +3562,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $event = Event::query()->findOrFail($eventId);
 
         $syncOccurrences = $created->json('data.occurrences') ?? [];
@@ -4090,7 +4120,7 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_event_create_forbidden_without_ability(): void
     {
         $limited = $this->createAccountUser(['*']);
-        Sanctum::actingAs($limited, ['events:read']);
+        $this->actingAsAccountUser($limited, ['events:read']);
 
         $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
 
@@ -4492,6 +4522,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $repair->assertJsonPath('data.failed', 0);
         $repair->assertJsonPath('data.unchanged', 0);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $legacy = $legacy->fresh();
         $this->assertCanonicalRelatedAccountStorage(
             $legacy->getAttributes(),
@@ -4586,6 +4617,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $repair->assertJsonPath('data.failed', 0);
         $repair->assertJsonPath('data.unchanged', 0);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $legacyArchived = Event::withTrashed()->findOrFail($legacyArchivedId);
         $this->assertNotNull($legacyArchived->deleted_at);
         $this->assertCanonicalRelatedAccountStorage(
@@ -4688,6 +4720,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $repair->assertJsonPath('data.failed', 0);
         $repair->assertJsonPath('data.unchanged', 0);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $repaired = Event::withTrashed()->findOrFail($legacyArchivedId);
         $this->assertSame((string) $this->eventType->_id, data_get($repaired->type, 'id'));
         $this->assertSame((string) $this->venue->_id, data_get($repaired->place_ref, 'id'));
@@ -4789,6 +4822,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $repair->assertJsonPath('data.failed', 0);
         $repair->assertJsonPath('data.unchanged', 0);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $repaired = Event::withTrashed()->findOrFail($legacyArchivedId);
         $this->assertNull($repaired->thumb);
 
@@ -4921,6 +4955,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $updateResponse->assertStatus(200);
         $updateResponse->assertJsonPath('data.title', 'Visible After Update');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $event = Event::withTrashed()->findOrFail($eventId);
         $occurrence = $this->occurrenceDocumentAtOrderOrNull($eventId, 0, withTrashed: true);
         $this->assertNotNull($occurrence);
@@ -4950,6 +4985,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $updateResponse->assertStatus(200);
         $updateResponse->assertJsonPath('data.publication.status', 'draft');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $event = Event::withTrashed()->findOrFail($eventId);
         $occurrence = $this->occurrenceDocumentAtOrderOrNull($eventId, 0, withTrashed: true);
         $this->assertNotNull($occurrence);
@@ -5118,6 +5154,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $event = Event::query()->findOrFail($eventId);
         $artistAccountId = (string) $this->artist->account_id;
         $artistAccount = Account::query()->findOrFail($artistAccountId);
@@ -5133,7 +5170,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->assertEmpty($event->account_context_ids ?? []);
 
-        Sanctum::actingAs($this->user, ['events:read']);
+        $this->actingAsAccountUser($this->user, ['events:read']);
         $ownerScopedListBefore = $this->getJson($this->accountEventsBase);
         $ownerScopedListBefore->assertStatus(200);
         $this->assertContains(
@@ -5145,7 +5182,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 ->all()
         );
 
-        Sanctum::actingAs($artistUser, ['events:read']);
+        $this->actingAsAccountUser($artistUser, ['events:read']);
         $artistScopedListBefore = $this->getJson("{$this->base_api_tenant}accounts/{$artistAccount->slug}/events");
         $artistScopedListBefore->assertStatus(200);
         $this->assertNotContains(
@@ -5157,7 +5194,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 ->all()
         );
 
-        Sanctum::actingAs($this->user, ['events:read', 'events:update']);
+        $this->actingAsAccountUser($this->user, ['events:read', 'events:update']);
         $occurrences = $this->withPersistedOccurrenceIdentity($eventId, $this->makeOccurrences(1));
         $response = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
             'occurrences' => $occurrences,
@@ -5166,6 +5203,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonMissingPath('data.event_parties');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $fresh = Event::query()->findOrFail($eventId);
         $this->assertCanonicalRelatedAccountStorage(
             $fresh->getAttributes(),
@@ -5173,7 +5211,7 @@ class EventCrudControllerTest extends TestCaseTenant
         );
         $this->assertEmpty($fresh->account_context_ids ?? []);
 
-        Sanctum::actingAs($this->user, ['events:read']);
+        $this->actingAsAccountUser($this->user, ['events:read']);
         $ownerScopedListAfter = $this->getJson($this->accountEventsBase);
         $ownerScopedListAfter->assertStatus(200);
         $this->assertContains(
@@ -5185,7 +5223,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 ->all()
         );
 
-        Sanctum::actingAs($artistUser, ['events:read']);
+        $this->actingAsAccountUser($artistUser, ['events:read']);
         $artistScopedListAfter = $this->getJson("{$this->base_api_tenant}accounts/{$artistAccount->slug}/events");
         $artistScopedListAfter->assertStatus(200);
         $this->assertNotContains(
@@ -5446,6 +5484,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
 
         $eventId = (string) $response->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $event = Event::query()->find($eventId);
         $this->assertNotNull($event);
 
@@ -5487,6 +5526,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
 
         $eventId = (string) $response->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $event = Event::query()->find($eventId);
         $this->assertNotNull($event);
         $this->assertSame('image', data_get($event->type, 'visual.mode'));
@@ -5548,6 +5588,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.map_poi.enabled', true);
         $response->assertJsonPath('data.capabilities.map_poi.discovery_scope.type', 'range');
         $eventId = (string) $response->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $event = Event::query()->find($eventId);
         $this->assertNotNull($event);
         $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
@@ -5647,6 +5688,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $createResponse->assertStatus(201);
 
             $eventId = (string) $createResponse->json('data.event_id');
+            $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
             $event = Event::query()->find($eventId);
             $this->assertNotNull($event);
             $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
@@ -5666,6 +5708,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 ]]),
             ]);
             $updateResponse->assertStatus(200);
+            $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
             $updated = Event::query()->find($eventId);
             $this->assertNotNull($updated);
             $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($updated);
@@ -5697,6 +5740,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $createResponse->assertStatus(201);
 
             $eventId = (string) $createResponse->json('data.event_id');
+            $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
             $event = Event::query()->find($eventId);
             $this->assertNotNull($event);
             $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
@@ -5741,6 +5785,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $activeResponse->assertStatus(201);
 
             $activeEventId = (string) $activeResponse->json('data.event_id');
+            $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
             $activeEvent = Event::query()->find($activeEventId);
             $this->assertNotNull($activeEvent);
             $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($activeEvent);
@@ -5754,6 +5799,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $inactiveResponse->assertStatus(201);
 
             $inactiveEventId = (string) $inactiveResponse->json('data.event_id');
+            $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
             $inactiveEvent = Event::query()->find($inactiveEventId);
             $this->assertNotNull($inactiveEvent);
             $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($inactiveEvent);
@@ -5793,6 +5839,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
         $createResponse->assertStatus(201);
         $eventId = (string) $createResponse->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $created = Event::query()->find($eventId);
         $this->assertNotNull($created);
         $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($created);
@@ -5813,6 +5860,7 @@ class EventCrudControllerTest extends TestCaseTenant
             ],
         ]);
         $disableResponse->assertStatus(200);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $disabledEvent = Event::query()->find($eventId);
         $this->assertNotNull($disabledEvent);
         $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($disabledEvent);
@@ -5832,6 +5880,7 @@ class EventCrudControllerTest extends TestCaseTenant
             ],
         ]);
         $enableResponse->assertStatus(200);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $enabledEvent = Event::query()->find($eventId);
         $this->assertNotNull($enabledEvent);
         $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($enabledEvent);
@@ -5847,10 +5896,11 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_event_map_poi_projection_ignores_stale_checkpoint_write(): void
     {
         $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
-        $createResponse->assertStatus(201);
+            $createResponse->assertStatus(201);
 
-        $eventId = (string) $createResponse->json('data.event_id');
-        $event = Event::query()->find($eventId);
+            $eventId = (string) $createResponse->json('data.event_id');
+            $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+            $event = Event::query()->find($eventId);
         $this->assertNotNull($event);
 
         $projectionService = $this->app->make(MapPoiProjectionService::class);
@@ -5891,6 +5941,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $this->assertCount(2, $response->json('data.occurrences'));
         $eventId = (string) $response->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
             2,
             EventOccurrence::query()->where('event_id', $eventId)->count()
@@ -6010,6 +6061,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $updated->assertStatus(422);
         $updated->assertJsonValidationErrors(['profile_groups']);
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $freshEventAfterUpdate = Event::query()->findOrFail($eventId);
         $this->assertSame([], $freshEventAfterUpdate->profile_groups ?? []);
         $this->assertSame(
@@ -6042,6 +6094,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $repair = $this->postJson("{$this->tenantAdminEventsBase}/legacy_event_parties/repair");
         $repair->assertStatus(200);
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $freshEvent = $legacy->fresh();
         $freshOccurrence = $this->occurrenceDocumentAtOrder((string) $legacy->_id, 0);
 
@@ -7632,6 +7685,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $mainLocationResponse->assertStatus(422);
         $mainLocationResponse->assertJsonValidationErrors(['place_ref.id']);
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $occurrences = $this->makeOccurrences(1);
         $occurrences[0]['programming_items'] = [[
             'time' => '18:00',
@@ -7813,6 +7867,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $preCutoverEventDetail->assertJsonPath('data.venue.can_open_public_detail', true);
         $preCutoverEventDetail->assertJsonPath('data.venue.public_detail_path', '/parceiro/'.$venueSlug);
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'venue'],
             [
@@ -8056,6 +8111,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $firstReadAgain->assertJsonPath('data.programming_items.0.title', $this->sanitizedProgrammingTitle('Show com a banda'));
         $firstReadAgain->assertJsonPath('data.programming_items.0.linked_account_profiles.0.id', (string) $this->band->_id);
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $freshFirstSelectedOccurrence = $firstSelectedOccurrence->fresh();
         $freshSecondSelectedOccurrence = $secondSelectedOccurrence->fresh();
 
@@ -8541,6 +8597,7 @@ class EventCrudControllerTest extends TestCaseTenant
             InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX + 1,
         );
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $this->assertSame(
             InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX + 1,
             DB::connection('tenant')
@@ -8582,6 +8639,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertStatus(201);
 
         $eventId = (string) $created->json('data.event_id');
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $occurrences = $this->withPersistedOccurrenceIdentity($eventId, $this->makeOccurrences(2));
         $this->assertArrayHasKey('occurrence_id', $occurrences[0]);
         $this->assertArrayHasKey('occurrence_id', $occurrences[1]);
@@ -8611,6 +8669,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $deleted = Event::withTrashed()->find($event->_id);
         $this->assertNotNull($deleted?->deleted_at);
         $occurrence = EventOccurrence::withTrashed()->where('event_id', (string) $event->_id)->first();
@@ -8780,6 +8839,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(500);
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $event = Event::query()->findOrFail($eventId);
         $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
@@ -8807,6 +8867,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(500);
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $event = Event::withTrashed()->findOrFail($eventId);
         $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0, withTrashed: true);
 
@@ -8834,6 +8895,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 ->andThrow(new \RuntimeException('forced publication mirror failure'));
         });
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         try {
             app()->call([new PublishScheduledEventsJob, 'handle']);
             $this->fail('Expected scheduled publication to abort when occurrence mirroring fails.');
@@ -8982,6 +9044,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $accountList->assertStatus(200);
         $this->assertCount(1, $accountList->json('data'));
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $otherAccount = Account::create([
             'name' => 'Other Account',
             'document' => (string) Str::uuid(),
@@ -9013,7 +9076,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'password' => 'Secret!234',
         ], (string) $role->_id);
 
-        Sanctum::actingAs($otherUser, ['events:read', 'events:update']);
+        $this->actingAsAccountUser($otherUser, ['events:read', 'events:update']);
 
         $otherBase = "{$this->base_api_tenant}accounts/{$otherAccount->slug}/events/{$event->_id}";
         $response = $this->patchJson($otherBase, [
@@ -9053,7 +9116,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'password' => 'Secret!234',
         ], (string) $role->_id);
 
-        Sanctum::actingAs($otherUser, ['events:read', 'events:update']);
+        $this->actingAsAccountUser($otherUser, ['events:read', 'events:update']);
 
         $otherBase = "{$this->base_api_tenant}accounts/{$otherAccount->slug}/events/{$event->_id}";
         $response = $this->patchJson($otherBase, [
@@ -9092,7 +9155,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'email' => uniqid('readonly-artist', true).'@example.org',
             'password' => 'Secret!234',
         ], (string) $role->_id);
-        Sanctum::actingAs($otherUser, ['events:read', 'events:update']);
+        $this->actingAsAccountUser($otherUser, ['events:read', 'events:update']);
 
         $otherBase = "{$this->base_api_tenant}accounts/{$otherAccount->slug}/events/{$event->_id}";
         $response = $this->patchJson($otherBase, [
@@ -9115,7 +9178,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ];
         $event->save();
 
-        Sanctum::actingAs($this->user, ['events:read', 'events:update']);
+        $this->actingAsAccountUser($this->user, ['events:read', 'events:update']);
 
         $response = $this->patchJson("{$this->accountEventsBase}/{$event->_id}", [
             'title' => 'Updated By Owner Override',
@@ -9144,7 +9207,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ];
         $event->save();
 
-        Sanctum::actingAs($this->user, ['events:read', 'events:update']);
+        $this->actingAsAccountUser($this->user, ['events:read', 'events:update']);
 
         $response = $this->patchJson("{$this->accountEventsBase}/{$event->_id}", [
             'title' => 'Updated By Owner Without Matching Party',
@@ -9178,7 +9241,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ];
         $event->save();
 
-        Sanctum::actingAs($otherUser, ['events:read', 'events:update']);
+        $this->actingAsAccountUser($otherUser, ['events:read', 'events:update']);
 
         $response = $this->patchJson(
             "{$this->base_api_tenant}accounts/{$otherAccount->slug}/events/{$event->_id}",
@@ -9186,6 +9249,7 @@ class EventCrudControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(404);
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $this->assertSame('Stored Event', (string) $event->fresh()->title);
     }
 
@@ -9426,7 +9490,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
     private function createCanonicalEventWithoutRelatedAccounts(array $overrides = []): Event
     {
-        Sanctum::actingAs($this->user, ['events:create', 'events:read', 'events:update']);
+        $this->actingAsAccountUser($this->user, ['events:create', 'events:read', 'events:update']);
 
         $payload = $this->makeEventPayload($overrides);
         unset(
@@ -9460,6 +9524,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response = $this->postJson($this->accountEventsBase, $payload);
         $response->assertStatus(201);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         return Event::query()->findOrFail((string) $response->json('data.event_id'));
     }
 
@@ -9526,6 +9591,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
     private function eventDocument(string $eventId, bool $withTrashed = false): Event
     {
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $query = $withTrashed
             ? Event::withTrashed()
             : Event::query();
@@ -10037,9 +10103,29 @@ class EventCrudControllerTest extends TestCaseTenant
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), $abilities);
     }
 
+    private function actingAsAccountUser(AccountUser $user, array $abilities): void
+    {
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        auth()->forgetGuards();
+        $accessibleAccountIds = $user->getAccessToIds();
+        $accountId = count($accessibleAccountIds) === 1
+            ? (string) $accessibleAccountIds[0]
+            : trim((string) ($user->account_id ?? ''));
+        if ($accountId !== '') {
+            Account::query()->find($accountId)?->makeCurrent();
+        }
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $user,
+            'event-crud-controller-test-token',
+            $abilities,
+            accountId: $accountId !== '' ? $accountId : null,
+        );
+        $this->withToken($token->plainTextToken);
+    }
+
     private function actingAsEventOwnerUser(): void
     {
-        Sanctum::actingAs($this->user, [
+        $this->actingAsAccountUser($this->user, [
             'events:read',
             'events:create',
             'events:update',
@@ -10056,7 +10142,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response = $this->patchJson("{$this->base_tenant_api_admin}settings/values/events", $payload);
 
-        Sanctum::actingAs($this->user, [
+        $this->actingAsAccountUser($this->user, [
             'events:read',
             'events:create',
             'events:update',

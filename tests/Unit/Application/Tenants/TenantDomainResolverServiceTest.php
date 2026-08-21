@@ -59,4 +59,32 @@ class TenantDomainResolverServiceTest extends TestCase
         $this->assertNotNull($resolved);
         $this->assertSame((string) $tenant->_id, (string) $resolved->_id);
     }
+
+    public function test_prefers_domains_collection_before_legacy_inline_domains_array(): void
+    {
+        $legacyTenant = Tenant::create([
+            'name' => 'Legacy Inline Tenant',
+            'subdomain' => 'legacy-inline',
+            'domains' => ['shared-domain.com'],
+        ]);
+
+        $canonicalTenant = Tenant::create([
+            'name' => 'Canonical Collection Tenant',
+            'subdomain' => 'canonical-collection',
+            'domains' => [],
+        ]);
+
+        $domain = new Domains([
+            'path' => 'Shared-Domain.COM',
+            'type' => Tenant::DOMAIN_TYPE_WEB,
+        ]);
+        $domain->tenant()->associate($canonicalTenant);
+        $domain->save();
+
+        $resolved = $this->service->findTenantByDomain('shared-domain.com');
+
+        $this->assertNotNull($resolved);
+        $this->assertSame((string) $canonicalTenant->_id, (string) $resolved->_id);
+        $this->assertNotSame((string) $legacyTenant->_id, (string) $resolved->_id);
+    }
 }

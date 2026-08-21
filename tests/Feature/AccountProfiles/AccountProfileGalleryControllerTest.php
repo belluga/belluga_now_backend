@@ -159,6 +159,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
         $this->assertSame('thumb', $thumbQuery['variant'] ?? null);
         $this->assertNotSame('', (string) ($thumbQuery['v'] ?? ''));
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $freshProfile = AccountProfile::query()->findOrFail($profile->getKey());
         $storedItem = $this->storedGalleryItem($freshProfile, 'externa');
         $this->assertNotNull($storedItem);
@@ -274,6 +275,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
         $clearResponse->assertOk();
         $clearResponse->assertJsonPath('data.gallery_groups', []);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $freshProfile = AccountProfile::query()->findOrFail($profile->getKey());
         $this->assertSame([], $freshProfile->gallery_groups ?? []);
 
@@ -365,6 +367,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
             ],
         )->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         // Phase 1: gallery is exposed while the type capability is enabled.
         $profile = $profile->fresh();
         $this->assertGalleryVariantStored($profile, 'entrada', null);
@@ -373,6 +376,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
         $mediaRoute = "api/v1/media/account-profiles/{$profile->getKey()}/gallery/entrada?variant=modal";
         $this->get($mediaRoute, $this->getHeaders())->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         // Phase 2: disabling the type capability hides public readback and media access
         // without deleting the stored gallery payload.
         TenantProfileType::query()->updateOrCreate(
@@ -400,6 +404,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
         $disabledMutation->assertStatus(422);
         $disabledMutation->assertJsonValidationErrors(['gallery_groups']);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $dormantProfile = AccountProfile::query()->findOrFail($profile->getKey());
         $dormantItem = $this->storedGalleryItem($dormantProfile, 'entrada');
         $this->assertNotNull($dormantItem);
@@ -416,6 +421,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
 
         $this->get($mediaRoute, $this->getHeaders())->assertNotFound();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         // Phase 3: re-enabling the capability restores public exposure of the dormant data.
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'plain'],
@@ -470,20 +476,24 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
             ],
         )->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $profile = $profile->fresh();
         $mediaRoute = "api/v1/media/account-profiles/{$profile->getKey()}/gallery/entrada?variant=modal";
 
         $this->get($mediaRoute, $this->getHeaders())->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $profile->visibility = 'friends_only';
         $profile->save();
         $this->get($mediaRoute, $this->getHeaders())->assertNotFound();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $profile->visibility = 'public';
         $profile->is_active = false;
         $profile->save();
         $this->get($mediaRoute, $this->getHeaders())->assertNotFound();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $profile->is_active = true;
         $profile->save();
         TenantProfileType::query()->updateOrCreate(
@@ -503,6 +513,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
         );
         $this->get($mediaRoute, $this->getHeaders())->assertNotFound();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'venue'],
             ['label' => 'Venue',
@@ -555,6 +566,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
             ],
         )->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $originalProfile = AccountProfile::query()->findOrFail($profile->getKey());
         $originalOne = $this->storedGalleryItem($originalProfile, 'one');
         $originalTwoMasterPath = $this->assertGalleryVariantStored($originalProfile, 'two', null);
@@ -606,6 +618,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
         Storage::disk('public')->assertMissing($originalOneCardPath);
         Storage::disk('public')->assertMissing($originalOneModalPath);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $reloadedProfile = AccountProfile::query()->findOrFail($profile->getKey());
         $updatedOne = $this->storedGalleryItem($reloadedProfile, 'one');
         $this->assertNotNull($updatedOne);

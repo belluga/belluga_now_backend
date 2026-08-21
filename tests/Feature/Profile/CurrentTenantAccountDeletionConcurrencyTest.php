@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Profile;
 
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Profiles\CurrentTenantAccountDeletionAccountGuard;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Models\Landlord\Tenant;
@@ -13,7 +14,6 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\PhoneOtpChallenge;
 use App\Models\Tenants\TenantSettings;
 use Illuminate\Support\Facades\DB;
-use Laravel\Sanctum\Sanctum;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
 use Tests\Helpers\TenantLabels;
@@ -62,10 +62,18 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
         ]);
         $deletedUserId = (string) $deletedUser->_id;
 
-        Sanctum::actingAs($deletedUser, ['*']);
-        $this->deleteJson("{$this->base_api_tenant}profile", [
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $deletedUser,
+            'current-tenant-account-deletion',
+            [],
+            tenantId: (string) $this->tenantModel->_id,
+        );
+        $this->withToken($token->plainTextToken)->deleteJson("{$this->base_api_tenant}profile", [
             'confirmation' => 'remove_account',
         ])->assertNoContent();
+        $this->app['auth']->forgetGuards();
+        $this->withoutHeader('Authorization');
+        $this->tenantModel->makeCurrent();
 
         $this->configurePhoneOtpReviewAccess($phone);
 
@@ -82,6 +90,7 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
         ])->assertOk();
 
         $this->assertNotSame($deletedUserId, (string) $verify->json('data.user_id'));
+        $this->tenantModel->makeCurrent();
         $this->assertNull(AccountUser::withTrashed()->find($deletedUserId));
         $this->assertSame(PhoneOtpChallenge::STATUS_VERIFIED, (string) PhoneOtpChallenge::query()
             ->findOrFail($challenge->json('data.challenge_id'))
@@ -104,6 +113,7 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
             'device_name' => 'delete-first-seed',
         ])->assertStatus(202);
 
+        $this->tenantModel->makeCurrent();
         $results = $this->runLeaderWithFollowers(
             $this->deleteProcess((string) $target->_id, [
                 'BELLUGA_TEST_CURRENT_ACCOUNT_DELETE_BEFORE_MUTATION_SLEEP_MS' => '2500',
@@ -146,6 +156,7 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
             'device_name' => 'verify-first-seed',
         ])->assertStatus(202);
 
+        $this->tenantModel->makeCurrent();
         $results = $this->runLeaderWithFollowers(
             $this->verifyProcess(
                 (string) $challenge->json('data.challenge_id'),
@@ -172,6 +183,7 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
         $this->assertTrue($verifyResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
         $this->assertTrue($deleteResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
         $this->assertSame((string) $target->_id, (string) ($verifyResult['user_id'] ?? ''), json_encode($results, JSON_PRETTY_PRINT));
+        $this->tenantModel->makeCurrent();
         $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
     }
 
@@ -191,6 +203,7 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
             'device_name' => 'lease-loss-seed',
         ])->assertStatus(202);
 
+        $this->tenantModel->makeCurrent();
         $results = $this->runLeaderWithFollowers(
             $this->verifyProcess(
                 (string) $challenge->json('data.challenge_id'),
@@ -217,6 +230,7 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
         $this->assertFalse($verifyResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
         $this->assertSame(ConcurrencyConflictException::class, $verifyResult['exception'] ?? null);
         $this->assertTrue($deleteResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
+        $this->tenantModel->makeCurrent();
         $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
     }
 
@@ -247,6 +261,7 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
             );
         }
 
+        $this->tenantModel->makeCurrent();
         $results = $this->runLeaderWithFollowers(
             $this->deleteProcess((string) $target->_id, [
                 'BELLUGA_TEST_CURRENT_ACCOUNT_DELETE_BEFORE_MUTATION_SLEEP_MS' => '2500',
@@ -268,6 +283,7 @@ class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
             );
         }
 
+        $this->tenantModel->makeCurrent();
         $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
     }
 

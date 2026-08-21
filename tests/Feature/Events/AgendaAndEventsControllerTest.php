@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Events;
 
 use App\Application\Accounts\AccountUserService;
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
@@ -27,7 +28,6 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event as EventBus;
-use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -51,6 +51,8 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
     private AccountUserService $userService;
 
     private AccountUser $user;
+
+    private string $userToken;
 
     protected function setUp(): void
     {
@@ -77,7 +79,15 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->userService = $this->app->make(AccountUserService::class);
         $this->user = $this->createAccountUser(['account-users:view']);
 
-        Sanctum::actingAs($this->user, ['account-users:view']);
+        $this->userToken = $this->app->make(TenantScopedAccessTokenService::class)
+            ->issueForAccountUser(
+                $this->user,
+                'agenda-and-events-controller-test',
+                ['account-users:view'],
+                accountId: (string) $this->account->_id,
+            )
+            ->plainTextToken;
+        $this->withToken($this->userToken);
 
         TenantSettings::query()->delete();
         TenantSettings::create([
@@ -169,6 +179,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertArrayNotHasKey('taxonomy_terms', $agendaVenue);
         $this->assertArrayNotHasKey('gallery_groups', $agendaVenue);
 
+        Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
         $detailPayload = app(EventQueryService::class)->formatEventDetail(
             $event->fresh(),
         );
@@ -515,7 +526,12 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
 
         $this->assertCount(2, $storedOccurrences);
 
-        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['events:update', 'events:read']);
+        $adminToken = LandlordUser::query()
+            ->firstOrFail()
+            ->createToken('agenda-and-events-controller-admin-test', ['events:update', 'events:read'])
+            ->plainTextToken;
+        auth()->forgetGuards();
+        $this->withToken($adminToken);
 
         $this->patchJson(
             "{$this->base_tenant_api_admin}events/{$event->_id}/occurrences/{$storedOccurrences[0]->_id}/profile_groups/headline/members",
@@ -527,7 +543,8 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ['add_ids' => [(string) $secondProfile->_id]],
         )->assertOk();
 
-        Sanctum::actingAs($this->user, ['account-users:view']);
+        auth()->forgetGuards();
+        $this->withToken($this->userToken);
 
         $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
 
@@ -885,6 +902,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $items = $response->json('items');
         $this->assertCount(1, $items);
         $this->assertSame('futebol', $items[0]['taxonomy_terms'][0]['value'] ?? null);
+        Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
         $event = Event::query()->findOrFail($items[0]['event_id'] ?? '');
         $this->assertSame(
             (string) data_get($event->occurrence_refs, '0.occurrence_id'),
@@ -2189,11 +2207,13 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertStringContainsString((string) $target->_id, $content);
         $this->assertStringContainsString($targetOccurrenceId, $content);
         $this->assertStringNotContainsString((string) $other->_id, $content);
+        Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
         $this->assertStringNotContainsString($this->firstOccurrenceId($other), $content);
     }
 
     public function test_agenda_requires_auth(): void
     {
+        $this->withoutToken();
         auth('sanctum')->forgetUser();
         auth()->forgetGuards();
 

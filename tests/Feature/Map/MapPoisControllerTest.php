@@ -6,6 +6,7 @@ namespace Tests\Feature\Map;
 
 use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountUserService;
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\StaticAssets\StaticAssetManagementService;
@@ -85,13 +86,20 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->userService = $this->app->make(AccountUserService::class);
         $this->user = $this->createAccountUser(['account-users:view']);
 
-        Sanctum::actingAs($this->user, ['account-users:view']);
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->user,
+            'map-pois-controller-test-token',
+            ['account-users:view'],
+            accountId: (string) $this->account->_id,
+        );
+        $this->withToken($token->plainTextToken);
     }
 
     public function test_map_pois_requires_auth(): void
     {
         auth('sanctum')->forgetUser();
         auth()->forgetGuards();
+        $this->withoutToken();
 
         $response = $this->getJson("{$this->base_api_tenant}map/pois");
         $response->assertStatus(401);

@@ -18,6 +18,7 @@ use App\Application\AccountProfiles\AccountProfileTransactionRunner;
 use App\Application\Accounts\AccountManagementService;
 use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountUserService;
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
@@ -187,6 +188,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $response->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $database = DB::connection('tenant')->getDatabase();
         $receipt = $database
             ->selectCollection('account_profile_command_receipts')
@@ -222,6 +224,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $second->assertOk();
         $this->assertSame($first->json('data.id'), $second->json('data.id'));
         $this->assertSame($first->json('data.display_name'), $second->json('data.display_name'));
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
             1,
             DB::connection('tenant')
@@ -393,6 +397,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'X-Request-Id' => $commandId,
         ])->post($url, $payload)->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $outbox = DB::connection('tenant')
             ->getDatabase()
             ->selectCollection('account_profile_outbox')
@@ -400,6 +405,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotNull($outbox);
         $this->assertSame('upsert', $outbox['operation'] ?? null);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->account->setAttribute('account_profile_deletion_gate', [
             'attempt_id' => 'u07a-gallery-gate',
             'attempt_generation' => 1,
@@ -414,6 +420,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'gallery_groups' => json_encode([], JSON_THROW_ON_ERROR),
         ])->assertConflict();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame('entry', (string) $profile->fresh()->gallery_groups[0]['items'][0]['item_id']);
     }
 
@@ -500,6 +507,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $outbox = DB::connection('tenant')
             ->getDatabase()
             ->selectCollection('account_profile_outbox')
@@ -552,6 +560,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $outbox = DB::connection('tenant')
             ->getDatabase()
             ->selectCollection('account_profile_outbox')
@@ -597,6 +606,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             [],
             [...$this->getHeaders(), 'X-Request-Id' => $deleteCommandId],
         )->assertOk();
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $deleteReceipt = DB::connection('tenant')
             ->getDatabase()
             ->selectCollection('account_profile_command_receipts')
@@ -612,6 +623,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $receipt = DB::connection('tenant')
             ->getDatabase()
             ->selectCollection('account_profile_command_receipts')
@@ -963,6 +975,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $database = DB::connection('tenant')->getDatabase();
         $outbox = $database
             ->selectCollection('account_profile_outbox')
@@ -1056,6 +1069,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $response->assertCreated();
         $profileId = (string) $response->json('data.account_profile.id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $database = DB::connection('tenant')->getDatabase();
         $outbox = $database
             ->selectCollection('account_profile_outbox')
@@ -1099,6 +1113,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $second->assertCreated();
         $this->assertSame($first->json('data.account.id'), $second->json('data.account.id'));
         $this->assertSame($first->json('data.account_profile.id'), $second->json('data.account_profile.id'));
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
             1,
             DB::connection('tenant')
@@ -1134,6 +1149,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $first->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $receipt = DB::connection('tenant')
             ->getDatabase()
             ->selectCollection('account_profile_command_receipts')
@@ -1155,6 +1171,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ['display_name' => 'Noop Receipt Newer State'],
             [...$this->getHeaders(), 'X-Request-Id' => 'u07a-profile-newer-state-'.uniqid('', true)],
         )->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $replay = $this->patchJson(
             $url,
@@ -1163,6 +1180,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $replay->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame('Noop Receipt Newer State', (string) $profile->fresh()->display_name);
         $replay->assertJsonPath('data.display_name', 'Noop Receipt Newer State');
     }
@@ -2487,6 +2505,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $sourceResponse->assertOk();
         $sourceBubbleChannelId = $sourceResponse->json('data.contact_bubble_channel_id');
         $this->assertIsString($sourceBubbleChannelId);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $mirrorAccount = Account::create([
             'name' => 'Mirror Account',
@@ -2520,6 +2539,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $mirrorResponse->assertJsonPath('data.effective_contact_channels.1.type', 'whatsapp');
         $mirrorResponse->assertJsonPath('data.effective_contact_bubble_channel.id', $sourceBubbleChannelId);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->createAccountUser([]);
 
         $publicResponse = $this->getJson(
@@ -2573,6 +2593,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $sourceResponse->assertOk();
         $sourceBubbleChannelId = $sourceResponse->json('data.contact_bubble_channel_id');
         $this->assertIsString($sourceBubbleChannelId);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $mirrorAccount = Account::create([
             'name' => 'Mirror Account Without Bubble Override',
@@ -2600,6 +2621,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $mirrorResponse->assertJsonPath('data.contact_bubble_channel_id', null);
         $mirrorResponse->assertJsonPath('data.effective_contact_bubble_channel.id', $sourceBubbleChannelId);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->createAccountUser([]);
 
         $publicResponse = $this->getJson(
@@ -2638,6 +2660,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $sourceWrite->assertOk();
         $sourceBubbleChannelId = $sourceWrite->json('data.contact_bubble_channel_id');
         $this->assertIsString($sourceBubbleChannelId);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $mirrorAccount = Account::create([
             'name' => 'Deactivated Source Mirror Account',
@@ -2661,6 +2684,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
         $mirrorWrite->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $source->is_active = false;
         $source->save();
 
@@ -2716,6 +2740,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $initialWrite->assertOk();
         $initialChannelId = $initialWrite->json('data.contact_bubble_channel_id');
         $this->assertIsString($initialChannelId);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $staleUnrelatedSnapshots = [];
         for ($index = 0; $index < $burstLevel; $index++) {
@@ -2733,6 +2758,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
         $clearWrite->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $service = $this->app->make(AccountProfileManagementService::class);
         foreach ($staleUnrelatedSnapshots as $index => $staleSnapshot) {
             $service->update(
@@ -2772,6 +2798,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $restoredWrite->assertOk();
         $competingChannelId = $restoredWrite->json('data.contact_bubble_channel_id');
         $this->assertIsString($competingChannelId);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $staleContactSnapshots = [];
         for ($index = 0; $index < $burstLevel; $index++) {
@@ -2835,6 +2862,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
         $write->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $profileType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $profileType->capabilities = array_merge(
             is_array($profileType->capabilities ?? null) ? $profileType->capabilities : [],
@@ -3020,6 +3048,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(200);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $occurrences = $this->app->make(AccountProfileAgendaOccurrencesService::class)->forProfile($profile);
 
         $this->assertCount(2, $occurrences);
@@ -4235,6 +4264,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $profileId = (string) $response->json('data.account_profile.id');
         $this->assertNotSame('', $profileId);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $projection = MapPoi::query()
             ->where('ref_type', 'account_profile')
@@ -4271,6 +4301,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotEmpty($coverUrl);
 
         $profileId = (string) $response->json('data.account_profile.id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $profile = AccountProfile::query()->findOrFail($profileId);
         $account = Account::query()->findOrFail((string) $profile->account_id);
         $profile->profile_type = 'venue';
@@ -4337,6 +4368,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotEmpty($avatarUrl);
         $this->assertNotEmpty($coverUrl);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $profile = AccountProfile::query()->findOrFail($profileId);
         $account = Account::query()->findOrFail((string) $profile->account_id);
         $account->publication = [
@@ -4575,6 +4607,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $createResponse->assertStatus(201);
         $profileId = (string) $createResponse->json('data.account_profile.id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $projection = MapPoi::query()
             ->where('ref_type', 'account_profile')
@@ -4603,6 +4636,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $coverUrl = $updateResponse->json('data.cover_url');
         $this->assertNotEmpty($avatarUrl);
         $this->assertNotEmpty($coverUrl);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $profile = AccountProfile::query()->findOrFail($profileId);
 
         $outboxEvent = DB::connection('tenant')
@@ -4660,6 +4694,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $first->assertOk();
         $second->assertStatus(422)->assertJsonValidationErrors('X-Request-Id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
             1,
             DB::connection('tenant')
@@ -4685,6 +4720,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $createResponse->assertStatus(201);
         $profileId = (string) $createResponse->json('data.account_profile.id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $profile = AccountProfile::query()->findOrFail($profileId);
         $originalAvatarUrl = (string) $profile->avatar_url;
         $originalAvatarPath = $this->assertMediaStored($profileId, 'avatar');
@@ -4755,6 +4791,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $coverUrl = $createResponse->json('data.account_profile.cover_url');
         $this->assertNotEmpty($avatarUrl);
         $this->assertNotEmpty($coverUrl);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $profile = AccountProfile::query()->findOrFail($profileId);
 
         $projection = MapPoi::query()
@@ -4780,6 +4817,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $removeResponse->assertStatus(200);
         $removeResponse->assertJsonPath('data.avatar_url', null);
         $removeResponse->assertJsonPath('data.cover_url', null);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $projection = MapPoi::query()
             ->where('ref_type', 'account_profile')
@@ -4848,6 +4886,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $createResponse->assertStatus(201);
         $accountId = (string) $createResponse->json('data.account.id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         Account::query()
             ->findOrFail($accountId)
             ->update([
@@ -5324,6 +5363,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $sourceWrite->assertOk();
         $removedSourceChannelId = $sourceWrite->json('data.contact_bubble_channel_id');
         $this->assertIsString($removedSourceChannelId);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $mirrorAccount = Account::create([
             'name' => 'One Hop Mirror Account',
@@ -5390,6 +5430,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $replacementMirror->assertOk();
         $replacementMirror->assertJsonPath('data.effective_contact_channels.0.id', $replacementSourceChannelId);
         $replacementMirror->assertJsonPath('data.effective_contact_bubble_channel', null);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $nestedAccount = Account::create([
             'name' => 'Nested Mirror Account',
@@ -5412,6 +5453,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
         $nestedWrite->assertStatus(422);
         $nestedWrite->assertJsonValidationErrors(['contact_source_account_profile_id']);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $legacyNestedAccount = Account::create([
             'name' => 'Legacy Nested Mirror Account',
@@ -5704,6 +5746,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $readback->assertStatus(200);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $readback->assertJsonPath('data.aggregate_revision', (int) ($parent->fresh()->aggregate_revision ?? 0));
         $readback->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
         $readback->assertJsonPath('data.nested_profile_groups.1.id', 'patrocinadores');
@@ -5822,6 +5865,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $delta->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertGreaterThan($revisionBeforeDelta, (int) ($parent->fresh()->aggregate_revision ?? 0));
         $this->assertSame(1, (int) $contactSource->fresh()->lifecycle_fence_revision);
         $this->assertSame(1, (int) $nestedMember->fresh()->lifecycle_fence_revision);
@@ -5883,6 +5927,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $contactResponse->assertStatus(422);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame($parentBefore, $parent->fresh()->only(array_keys($parentBefore)));
 
         $database = DB::connection('tenant')->getDatabase();
@@ -5906,6 +5951,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             max(1, (int) ($parent->fresh()?->aggregate_revision ?? 1)),
         );
         $groupCreate->assertCreated();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $parentBefore = $parent->fresh()->only(array_keys($parentBefore));
 
         $nestedCommandId = 'u07a-cross-tenant-nested-'.uniqid('', true);
@@ -5918,6 +5964,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $nestedResponse->assertStatus(422);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame($parentBefore, $parent->fresh()->only(array_keys($parentBefore)));
 
         $database = DB::connection('tenant')->getDatabase();
@@ -5989,6 +6036,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders(),
         );
         $memberResponse->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $cascadeCommandId = 'u07a-nested-cascade-delete-'.uniqid('', true);
         app(AccountManagementService::class)->delete(
@@ -6012,6 +6060,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $membersPage->assertOk();
         $membersPage->assertJsonCount(1, 'data');
         $membersPage->assertJsonPath('data.0.id', (string) $surviving->_id);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertNotNull(AccountProfile::onlyTrashed()->find((string) $target->_id));
         $cleanupReceipt = DB::connection('tenant')->getDatabase()
             ->selectCollection('account_profile_command_receipts')
@@ -6065,6 +6114,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders(),
         );
         $memberResponse->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         app(AccountProfileManagementService::class)->update(
             $target,
             ['is_active' => false],
@@ -6089,6 +6139,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
         $membersPage->assertOk();
         $membersPage->assertJsonCount(0, 'data');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertNotNull(AccountProfile::onlyTrashed()->find((string) $target->_id));
         $cleanupReceipt = DB::connection('tenant')->getDatabase()
             ->selectCollection('account_profile_command_receipts')
@@ -6163,6 +6214,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 ->firstWhere('label', 'Linked profiles')['id'] ?? ''
         );
         $this->assertNotSame('', $linkedGroupId);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $collection = DB::connection('tenant')->getDatabase()
             ->selectCollection('accounts_nested');
@@ -6460,6 +6512,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $created = $this->createNestedGroupHead($parent, 'Budget Members');
         $created->assertCreated();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $groupId = 'budget-members';
         $tenantId = (string) Tenant::current()->getKey();
         $parentId = (string) $parent->getKey();
@@ -6509,6 +6562,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX + 1,
         );
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
             InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX + 1,
             DB::connection('tenant')
@@ -6743,6 +6797,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         )->assertOk()->assertJsonPath('data.0.id', (string) $member->_id);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->patchAccountPublication(
             (string) ($this->account->fresh()->slug ?? ''),
             AccountPublicationStateService::DRAFT,
@@ -6797,6 +6852,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         )->assertOk()->assertJsonPath('data.0.id', (string) $member->_id);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $parent->slug = 'renamed-stale-slug-nested-parent';
         $parent->save();
 
@@ -6863,6 +6919,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $staleCursor = (string) ($firstPage->json('next_cursor') ?? '');
         $this->assertNotSame('', $staleCursor);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $memberAccount = Account::query()->findOrFail((string) $draftedMember->account_id);
         $this->patchAccountPublication(
             (string) ($memberAccount->fresh()->slug ?? ''),
@@ -6883,6 +6940,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         )->assertStatus(409)
             ->assertJsonPath('message', 'A concurrency conflict occurred. Please try again.');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
             1,
             $this->nestedPublicMembersProjectionCollection()->countDocuments([
@@ -6922,6 +6980,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         )->assertOk()->assertJsonCount(2, 'data')
             ->assertJsonPath('data.0.id', (string) $draftedMember->_id)
             ->assertJsonPath('data.1.id', (string) $survivingMember->_id);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
             1,
             $this->nestedPublicMembersProjectionCollection()->countDocuments([
@@ -6985,6 +7044,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $connection->flushQueryLog();
         $connection->enableQueryLog();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $memberAccount = Account::query()->findOrFail((string) $member->account_id);
         $this->patchAccountPublication(
             (string) ($memberAccount->fresh()->slug ?? ''),
@@ -7014,6 +7074,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.id', (string) $unrelatedMember->_id);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
             0,
             $this->nestedPublicMembersProjectionCollection()->countDocuments([
@@ -7107,6 +7168,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         )->assertStatus(404)
             ->assertJsonPath('message', 'Resource you are looking for was not found.');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->patchAccountPublication(
             (string) ($memberAccount->fresh()->slug ?? ''),
             AccountPublicationStateService::PUBLISHED,
@@ -7175,11 +7237,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ->assertJsonPath('data.0.id', (string) $firstMember->_id)
             ->assertJsonPath('data.1.id', (string) $secondMember->_id);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $firstMemberAccount = Account::query()->findOrFail((string) $firstMember->account_id);
         $this->patchAccountPublication(
             (string) ($firstMemberAccount->fresh()->slug ?? ''),
             AccountPublicationStateService::DRAFT,
         );
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $secondMemberAccount = Account::query()->findOrFail((string) $secondMember->account_id);
         $this->patchAccountPublication(
             (string) ($secondMemberAccount->fresh()->slug ?? ''),
@@ -7200,6 +7264,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         )->assertStatus(409)
             ->assertJsonPath('message', 'A concurrency conflict occurred. Please try again.');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
             1,
             $this->nestedPublicMembersProjectionCollection()->countDocuments([
@@ -7248,6 +7313,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         )->assertOk()->assertJsonPath('data.0.id', (string) $member->_id);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $parent->visibility = 'private';
         $parent->save();
 
@@ -7452,6 +7518,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
      */
     private function createNestedProfileFixture(string $name, string $slug, array $overrides = []): AccountProfile
     {
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $account = Account::create([
             'name' => "{$name} Account",
             'document' => 'DOC-'.strtoupper(str_replace('-', '_', $slug)).'-'.uniqid('', true),
@@ -7551,7 +7618,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
             (string) $this->accountRoleTemplate->_id
         );
 
-        Sanctum::actingAs($user, $permissions);
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $user,
+            'account-profiles-controller-test-token',
+            $permissions,
+            accountId: (string) $this->account->_id,
+        );
+        $this->withToken($token->plainTextToken);
 
         return $user;
     }

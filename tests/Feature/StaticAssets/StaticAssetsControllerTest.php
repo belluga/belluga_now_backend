@@ -123,6 +123,7 @@ class StaticAssetsControllerTest extends TestCaseTenant
         $publicBySlug->assertJsonPath('data.slug', $slug);
         $publicBySlug->assertJsonPath('data.taxonomy_terms.0.label', 'Italian');
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $poi = MapPoi::query()
             ->where('ref_type', 'static')
             ->where('ref_id', (string) $assetId)
@@ -170,6 +171,7 @@ class StaticAssetsControllerTest extends TestCaseTenant
         $controlResponse->assertStatus(201);
         $controlAssetId = (string) $controlResponse->json('data.id');
 
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $this->assertTrue(
             MapPoi::query()
                 ->where('ref_type', 'static')
@@ -184,6 +186,7 @@ class StaticAssetsControllerTest extends TestCaseTenant
         );
 
         $deleteResponse->assertStatus(200);
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $this->assertFalse(
             MapPoi::query()
                 ->where('ref_type', 'static')
