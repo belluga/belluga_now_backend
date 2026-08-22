@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integration\DeepLinks;
 
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
 use Belluga\DeepLinks\Contracts\AppLinksSettingsSourceContract;
 use Belluga\Settings\Models\Landlord\LandlordSettings;
@@ -16,9 +17,14 @@ class AppLinksSettingsSourceAdapter implements AppLinksSettingsSourceContract
      */
     public function currentAppLinksSettings(): array
     {
-        $tenantSettings = TenantSettings::current();
-        if ($tenantSettings !== null) {
-            return $this->normalizeArray($tenantSettings->getAttribute('app_links'));
+        $currentTenant = Tenant::current();
+        if ($currentTenant !== null) {
+            $tenantSettings = TenantSettings::current();
+            if ($tenantSettings !== null) {
+                return $this->normalizeArray($tenantSettings->getAttribute('app_links'));
+            }
+
+            return [];
         }
 
         $landlordSettings = LandlordSettings::current();
