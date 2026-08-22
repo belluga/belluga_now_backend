@@ -12,14 +12,17 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Application\Tenants\TenantRequestLifecycleTrace;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
+use App\Models\Tenants\TenantSettings;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
+use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Mockery\MockInterface;
 use PHPUnit\Framework\Attributes\Group;
+use Tests\Helpers\TenantLabels;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
@@ -184,6 +187,129 @@ class TenantRequestLifecycleTraceTest extends TestCase
             'Public shell fallback should issue at most one collection-backed landlord read after controller entry.',
         );
 
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_landlord_well_known_fallback_runs_after_clean_tenant_runtime_reset(): void
+    {
+        LandlordSettings::query()->delete();
+        LandlordSettings::query()->create([
+            '_id' => LandlordSettings::ROOT_ID,
+            'app_links' => [
+                'android' => [
+                    'package_name' => 'com.belluga.lifecycle',
+                    'sha256_cert_fingerprints' => [
+                        '00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF',
+                    ],
+                ],
+            ],
+        ]);
+
+        $tenant = $this->primaryTenant();
+        $tenant->makeCurrent();
+
+        TenantSettings::query()->delete();
+        TenantSettings::query()->create([
+            'app_links' => [
+                'android' => [
+                    'package_name' => 'com.belluga.tenant-lifecycle',
+                    'sha256_cert_fingerprints' => [
+                        'FF:EE:DD:CC:BB:AA:99:88:77:66:55:44:33:22:11:00:FF:EE:DD:CC:BB:AA:99:88:77:66:55:44:33:22:11:00',
+                    ],
+                ],
+            ],
+        ]);
+
+        $tenantResponse = $this->withHeaders($this->traceHeaders())
+            ->get($this->webUrlForHost($this->tenantHost($tenant), '/.well-known/assetlinks.json'));
+
+        $tenantResponse->assertOk();
+        $tenantResponse->assertJsonPath('0.target.package_name', 'com.belluga.tenant-lifecycle');
+
+        $tenantConnectionName = $this->tenantConnectionName();
+        $originalTenantDsn = config("database.connections.{$tenantConnectionName}.dsn");
+        $tenantDsnWithoutDatabase = preg_replace(
+            '#/[^/?]*(?:\\?.*)?$#',
+            '/',
+            (string) $originalTenantDsn,
+        );
+        $this->assertIsString($tenantDsnWithoutDatabase);
+
+        config([
+            "database.connections.{$tenantConnectionName}.database" => null,
+            "database.connections.{$tenantConnectionName}.dsn" => $tenantDsnWithoutDatabase,
+        ]);
+        DB::purge($tenantConnectionName);
+
+        try {
+            $response = $this->withHeaders($this->traceHeaders())
+                ->get($this->webUrlForHost($this->host, '/.well-known/assetlinks.json'));
+        } finally {
+            config([
+                "database.connections.{$tenantConnectionName}.dsn" => $originalTenantDsn,
+            ]);
+            DB::purge($tenantConnectionName);
+        }
+
+        $response->assertOk();
+        $response->assertJsonPath('0.target.package_name', 'com.belluga.lifecycle');
+
+        $trace = $this->responseTrace($response);
+        $stages = array_column($trace['events'], 'stage');
+        $this->assertContains('tenant.not_found', $stages);
+        $this->assertNotContains('mongo.first.'.$tenantConnectionName, $stages);
+        $this->assertCount(
+            0,
+            array_filter(
+                $trace['events'],
+                fn (array $event): bool => ($event['stage'] ?? null) === 'mongo.command.'.$tenantConnectionName
+                    && is_string($event['collection'] ?? null)
+                    && trim((string) $event['collection']) !== '',
+            ),
+            'A landlord well-known request must not query the tenant connection.',
+        );
+        $this->assertSame(
+            $this->defaultConnectionAtRest,
+            $this->firstEventValue($trace['events'], 'tenant.not_found', 'default_connection'),
+        );
+        $this->assertNull($this->firstEventValue($trace['events'], 'tenant.not_found', 'tenant_current'));
+        $this->assertTenantRuntimeReset();
+    }
+
+    public function test_current_tenant_without_app_links_does_not_use_landlord_well_known_settings(): void
+    {
+        LandlordSettings::query()->delete();
+        LandlordSettings::query()->create([
+            '_id' => LandlordSettings::ROOT_ID,
+            'app_links' => [
+                'android' => [
+                    'package_name' => 'com.belluga.landlord-fallback',
+                    'sha256_cert_fingerprints' => [
+                        '11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00',
+                    ],
+                ],
+            ],
+        ]);
+
+        $tenant = $this->primaryTenant();
+        $tenant->makeCurrent();
+        TenantSettings::query()->updateOrCreate(
+            ['_id' => TenantSettings::ROOT_ID],
+            ['app_links' => []],
+        );
+
+        $response = $this->withHeaders($this->traceHeaders())
+            ->get($this->webUrlForHost($this->tenantHost($tenant), '/.well-known/assetlinks.json'));
+
+        $response->assertOk();
+        $response->assertExactJson([]);
+        $trace = $this->responseTrace($response);
+        $stages = array_column($trace['events'], 'stage');
+        $this->assertContains('tenant.matched', $stages);
+        $this->assertSame(
+            $this->traceRecorder()->tenantFingerprint($tenant),
+            $this->firstEventValue($trace['events'], 'tenant.matched', 'tenant_target'),
+        );
         $this->assertTenantRuntimeReset();
     }
 
@@ -889,9 +1015,10 @@ class TenantRequestLifecycleTraceTest extends TestCase
 
     private function primaryTenant(): Tenant
     {
-        return Tenant::query()
-            ->orderBy('created_at')
-            ->firstOrFail();
+        return $this->resolveCanonicalTenant(new TenantLabels(
+            'lifecycle.tenant.primary',
+            'Tenant Iota',
+        ));
     }
 
     private function secondaryTenant(): Tenant
