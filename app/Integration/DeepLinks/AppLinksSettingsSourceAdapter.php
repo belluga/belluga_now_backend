@@ -23,6 +23,8 @@ class AppLinksSettingsSourceAdapter implements AppLinksSettingsSourceContract
             if ($tenantSettings !== null) {
                 return $this->normalizeArray($tenantSettings->getAttribute('app_links'));
             }
+
+            return [];
         }
 
         $landlordSettings = LandlordSettings::current();

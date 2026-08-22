@@ -7,7 +7,7 @@ ENV_ROOT="$(cd "${REPO_ROOT}/.." && pwd)"
 
 RUN_ID="${RUN_ID:-security-confidence-$(date +%Y%m%d-%H%M%S)}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-${ENV_ROOT}/foundation_documentation/artifacts/tmp/${RUN_ID}}"
-BELLUGA_BASE_URL="${BELLUGA_BASE_URL:-https://belluga.site}"
+: "${BELLUGA_BASE_URL:?Set BELLUGA_BASE_URL to the public origin under test}"
 
 mkdir -p "${ARTIFACTS_DIR}"
 

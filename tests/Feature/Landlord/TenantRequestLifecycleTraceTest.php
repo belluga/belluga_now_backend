@@ -276,7 +276,7 @@ class TenantRequestLifecycleTraceTest extends TestCase
         $this->assertTenantRuntimeReset();
     }
 
-    public function test_current_tenant_without_settings_preserves_landlord_well_known_fallback(): void
+    public function test_current_tenant_without_app_links_does_not_use_landlord_well_known_settings(): void
     {
         LandlordSettings::query()->delete();
         LandlordSettings::query()->create([
@@ -293,16 +293,16 @@ class TenantRequestLifecycleTraceTest extends TestCase
 
         $tenant = $this->primaryTenant();
         $tenant->makeCurrent();
-        TenantSettings::query()->delete();
+        TenantSettings::query()->updateOrCreate(
+            ['_id' => TenantSettings::ROOT_ID],
+            ['app_links' => []],
+        );
 
         $response = $this->withHeaders($this->traceHeaders())
             ->get($this->webUrlForHost($this->tenantHost($tenant), '/.well-known/assetlinks.json'));
 
         $response->assertOk();
-        $response->assertJsonPath(
-            '0.target.sha256_cert_fingerprints.0',
-            '11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00',
-        );
+        $response->assertExactJson([]);
         $trace = $this->responseTrace($response);
         $stages = array_column($trace['events'], 'stage');
         $this->assertContains('tenant.matched', $stages);
