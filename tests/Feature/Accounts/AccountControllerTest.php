@@ -7,6 +7,8 @@ namespace Tests\Feature\Accounts;
 use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountManagementService;
 use App\Application\Accounts\AccountUserService;
+use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
+use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
@@ -16,7 +18,10 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\MapPois\Models\Tenants\MapPoi;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
+use Mockery\MockInterface;
+use RuntimeException;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
@@ -184,6 +189,7 @@ class AccountControllerTest extends TestCase
 
         $createResponse->assertCreated();
         $accountSlug = $createResponse->json('data.account.slug');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $account = Account::query()->where('slug', $accountSlug)->firstOrFail();
         $role = $account->roleTemplates()->firstOrFail();
 
@@ -314,6 +320,7 @@ class AccountControllerTest extends TestCase
         $userOwnedCreateResponse->assertCreated();
 
         $userOwnedSlug = $userOwnedCreateResponse->json('data.account.slug');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $userOwnedAccount = Account::query()->where('slug', $userOwnedSlug)->firstOrFail();
         $userOwnedRole = $userOwnedAccount->roleTemplates()->firstOrFail();
 
@@ -480,6 +487,7 @@ class AccountControllerTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('data.ownership_state', 'unmanaged');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $updated = Account::query()->where('slug', $accountSlug)->firstOrFail();
         $this->assertSame('unmanaged', $updated->ownership_state);
         $this->assertNull($updated->organization_id);
@@ -487,14 +495,8 @@ class AccountControllerTest extends TestCase
 
     public function test_update_accepts_publication_transition_to_published(): void
     {
-        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
-            'name' => fake()->unique()->company(),
-            'ownership_state' => 'tenant_owned',
-            'profile_type' => 'personal',
-            'document' => 'DOC-PUBLICATION-DRAFT-'.uniqid('', true),
-        ]);
-        $createResponse->assertCreated();
-        $accountSlug = $createResponse->json('data.account.slug');
+        [$account] = $this->createDraftPersonalAccountAggregate();
+        $accountSlug = (string) $account->slug;
 
         $response = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
             'publication' => [
@@ -508,6 +510,7 @@ class AccountControllerTest extends TestCase
             AccountPublicationStateService::PUBLISHED,
         );
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $updated = Account::query()->where('slug', $accountSlug)->firstOrFail();
         $this->assertSame(
             AccountPublicationStateService::PUBLISHED,
@@ -517,13 +520,8 @@ class AccountControllerTest extends TestCase
 
     public function test_update_accepts_publication_transition_back_to_draft(): void
     {
-        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
-            'name' => fake()->unique()->company(),
-            'ownership_state' => 'tenant_owned',
-            'profile_type' => 'personal',
-        ]);
-        $createResponse->assertCreated();
-        $accountSlug = $createResponse->json('data.account.slug');
+        [$account] = $this->createDraftPersonalAccountAggregate();
+        $accountSlug = (string) $account->slug;
 
         $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
             'publication' => [
@@ -543,6 +541,7 @@ class AccountControllerTest extends TestCase
             AccountPublicationStateService::DRAFT,
         );
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $updated = Account::query()->where('slug', $accountSlug)->firstOrFail();
         $this->assertSame(
             AccountPublicationStateService::DRAFT,
@@ -553,13 +552,8 @@ class AccountControllerTest extends TestCase
 
     public function test_update_rejects_publish_scheduled_account_publication_status(): void
     {
-        $createResponse = $this->postJson($this->tenantAccountOnboardingsAdminUrl, [
-            'name' => fake()->unique()->company(),
-            'ownership_state' => 'tenant_owned',
-            'profile_type' => 'personal',
-        ]);
-        $createResponse->assertCreated();
-        $accountSlug = $createResponse->json('data.account.slug');
+        [$account] = $this->createDraftPersonalAccountAggregate();
+        $accountSlug = (string) $account->slug;
 
         $response = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
             'publication' => [
@@ -570,6 +564,181 @@ class AccountControllerTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['publication.status']);
+    }
+
+    public function test_update_rejects_publication_payload_without_status(): void
+    {
+        [$account] = $this->createDraftPersonalAccountAggregate();
+        $accountSlug = (string) $account->slug;
+
+        $response = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
+            'publication' => [],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['publication.status']);
+
+        $partialResponse = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
+            'publication' => [
+                'publish_at' => '2026-08-16T12:00:00Z',
+            ],
+        ]);
+
+        $partialResponse->assertStatus(422);
+        $partialResponse->assertJsonValidationErrors(['publication.status']);
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $updated = Account::query()->where('slug', $accountSlug)->firstOrFail();
+        $this->assertSame(
+            AccountPublicationStateService::DRAFT,
+            data_get($updated->getAttribute('publication'), 'status'),
+        );
+        $this->assertNull(data_get($updated->getAttribute('publication'), 'publish_at'));
+
+        $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+            ],
+        ])->assertOk();
+
+        $publishedResponse = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
+            'publication' => [],
+        ]);
+        $publishedResponse->assertStatus(422);
+        $publishedResponse->assertJsonValidationErrors(['publication.status']);
+
+        $publishedPartialResponse = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
+            'publication' => [
+                'publish_at' => '2026-08-16T12:00:00Z',
+            ],
+        ]);
+        $publishedPartialResponse->assertStatus(422);
+        $publishedPartialResponse->assertJsonValidationErrors(['publication.status']);
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $publishedAccount = Account::query()->where('slug', $accountSlug)->firstOrFail();
+        $this->assertSame(
+            AccountPublicationStateService::PUBLISHED,
+            data_get($publishedAccount->getAttribute('publication'), 'status'),
+        );
+        $this->assertNull(data_get($publishedAccount->getAttribute('publication'), 'publish_at'));
+    }
+
+    public function test_update_rolls_back_publication_when_nested_public_projection_rebuild_fails(): void
+    {
+        [$account, $parentProfile] = $this->createDraftPersonalAccountAggregate();
+        $accountSlug = (string) $account->slug;
+
+        $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+            ],
+        ])->assertOk();
+
+        $projectionCollection = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection(AccountProfileNestedPublicMembersProjectionService::COLLECTION);
+        $baselineUpdatedAt = new \MongoDB\BSON\UTCDateTime((int) now()->getTimestampMs());
+        $baselineMemberId = (string) new \MongoDB\BSON\ObjectId();
+        $projectionCollection->insertMany([
+            [
+                '_id' => 'head:'.(string) $parentProfile->_id.':parceiros',
+                'tenant_id' => (string) Tenant::current()?->getKey(),
+                'parent_profile_id' => (string) $parentProfile->_id,
+                'parent_slug' => (string) $parentProfile->slug,
+                'parent_profile_type' => (string) $parentProfile->profile_type,
+                'group_id' => 'parceiros',
+                'group_label' => 'Parceiros',
+                'group_order' => 0,
+                'parent_aggregate_revision' => (int) ($parentProfile->aggregate_revision ?? 0),
+                'projection_revision' => 'baseline-revision',
+                'doc_type' => 'group_head',
+                'doc_type_rank' => 0,
+                'updated_at' => $baselineUpdatedAt,
+            ],
+            [
+                '_id' => 'edge:'.(string) $parentProfile->_id.':parceiros:'.$baselineMemberId,
+                'tenant_id' => (string) Tenant::current()?->getKey(),
+                'parent_profile_id' => (string) $parentProfile->_id,
+                'parent_slug' => (string) $parentProfile->slug,
+                'parent_profile_type' => (string) $parentProfile->profile_type,
+                'group_id' => 'parceiros',
+                'member_profile_id' => $baselineMemberId,
+                'member_profile_type' => 'artist',
+                'raw_position' => 0,
+                'parent_aggregate_revision' => (int) ($parentProfile->aggregate_revision ?? 0),
+                'projection_revision' => 'baseline-revision',
+                'doc_type' => 'member_edge',
+                'doc_type_rank' => 1,
+                'profile_type' => 'artist',
+                'display_name' => 'Baseline Projection Member',
+                'slug' => 'baseline-projection-member',
+                'avatar_url' => null,
+                'cover_url' => null,
+                'taxonomy_terms' => [],
+                'updated_at' => $baselineUpdatedAt,
+            ],
+        ]);
+        $projectionFilter = ['parent_profile_id' => (string) $parentProfile->_id];
+        $beforeDocs = iterator_to_array($projectionCollection->find(
+            $projectionFilter,
+            ['sort' => ['_id' => 1]],
+        ));
+
+        $this->assertNotEmpty($beforeDocs);
+        $beforeProjectionIds = array_map(
+            static fn (object|array $document): string => trim((string) data_get($document, '_id')),
+            $beforeDocs,
+        );
+        $beforeProjectionRevisions = array_values(array_unique(array_filter(array_map(
+            static fn (object|array $document): string => trim((string) data_get($document, 'projection_revision')),
+            $beforeDocs,
+        ))));
+
+        $this->partialMock(AccountProfileQueryService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('isPublicNestedParent')
+                ->once()
+                ->andThrow(new RuntimeException('forced nested public projection rebuild failure'));
+        });
+        $this->app->forgetInstance(AccountManagementService::class);
+        $this->app->forgetInstance(AccountProfileNestedPublicMembersProjectionService::class);
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        try {
+            $this->app->make(AccountManagementService::class)->update($account->fresh(), [
+                'publication' => [
+                    'status' => AccountPublicationStateService::DRAFT,
+                ],
+            ]);
+            $this->fail('Expected the publication update boundary to raise after save.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame(
+                'forced nested public projection rebuild failure',
+                $exception->getMessage(),
+            );
+        }
+
+        $reloadedAccount = Account::query()->where('slug', $accountSlug)->firstOrFail();
+        $this->assertSame(
+            AccountPublicationStateService::PUBLISHED,
+            data_get($reloadedAccount->getAttribute('publication'), 'status'),
+        );
+
+        $afterDocs = iterator_to_array($projectionCollection->find(
+            $projectionFilter,
+            ['sort' => ['_id' => 1]],
+        ));
+        $afterProjectionIds = array_map(
+            static fn (object|array $document): string => trim((string) data_get($document, '_id')),
+            $afterDocs,
+        );
+        $afterProjectionRevisions = array_values(array_unique(array_filter(array_map(
+            static fn (object|array $document): string => trim((string) data_get($document, 'projection_revision')),
+            $afterDocs,
+        ))));
+
+        $this->assertSame($beforeProjectionIds, $afterProjectionIds);
+        $this->assertSame($beforeProjectionRevisions, $afterProjectionRevisions);
     }
 
     public function test_delete_rejects_non_unmanaged_account(): void
@@ -602,6 +771,7 @@ class AccountControllerTest extends TestCase
         $response = $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}");
 
         $response->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertNotNull(
             Account::onlyTrashed()->where('slug', $accountSlug)->first()
         );
@@ -627,6 +797,7 @@ class AccountControllerTest extends TestCase
 
         $accountSlug = (string) $createResponse->json('data.account.slug');
         $profileId = (string) $createResponse->json('data.account_profile.id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $controlAccount = Account::create([
             'name' => 'Control Account',
             'document' => 'CTRL'.uniqid(),
@@ -663,6 +834,7 @@ class AccountControllerTest extends TestCase
         $response = $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}");
 
         $response->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertFalse(
             MapPoi::query()
                 ->where('ref_type', 'account_profile')
@@ -694,6 +866,7 @@ class AccountControllerTest extends TestCase
 
         $accountSlug = (string) $createResponse->json('data.account.slug');
         $profileId = (string) $createResponse->json('data.account_profile.id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $trashedProfile = AccountProfile::query()->findOrFail($profileId);
         $trashedProfile->delete();
 
@@ -733,6 +906,7 @@ class AccountControllerTest extends TestCase
         $response = $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}");
 
         $response->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertFalse(
             MapPoi::query()
                 ->where('ref_type', 'account_profile')
@@ -764,6 +938,7 @@ class AccountControllerTest extends TestCase
 
         $accountSlug = (string) $createResponse->json('data.account.slug');
         $profileId = (string) $createResponse->json('data.account_profile.id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $controlAccount = Account::create([
             'name' => 'Force Delete Control Account',
             'document' => 'CTRL'.uniqid(),
@@ -793,6 +968,7 @@ class AccountControllerTest extends TestCase
         $this->deleteJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}")
             ->assertOk();
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         MapPoi::query()->create([
             'ref_type' => 'account_profile',
             'ref_id' => $profileId,
@@ -813,6 +989,7 @@ class AccountControllerTest extends TestCase
         $response = $this->postJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}/force_delete");
 
         $response->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertFalse(
             MapPoi::query()
                 ->where('ref_type', 'account_profile')
@@ -905,5 +1082,30 @@ class AccountControllerTest extends TestCase
         );
 
         $service->initialize($payload);
+    }
+
+    /**
+     * @return array{Account, AccountProfile}
+     */
+    private function createDraftPersonalAccountAggregate(): array
+    {
+        $name = fake()->unique()->company();
+        $account = Account::query()->create([
+            'name' => $name,
+            'document' => 'DOC-PUBLICATION-'.uniqid('', true),
+            'ownership_state' => 'tenant_owned',
+            'publication' => [
+                'status' => AccountPublicationStateService::DRAFT,
+                'publish_at' => null,
+            ],
+        ]);
+
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'personal',
+            'display_name' => $name,
+        ]);
+
+        return [$account->fresh(), $profile->fresh()];
     }
 }

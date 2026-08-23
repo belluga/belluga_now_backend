@@ -18,6 +18,9 @@ final class AccountProfilePublicCatalogSnapshotReader
     /** @var array<int, string>|null */
     private ?array $publicPoiTypeKeys = null;
 
+    /** @var array<int, string>|null */
+    private ?array $publicDetailTypeKeys = null;
+
     private ?AccountProfilePublicCatalogEligibilityPolicy $publicPoiEligibilityPolicy = null;
 
     private int $cacheRevision = -1;
@@ -137,6 +140,7 @@ final class AccountProfilePublicCatalogSnapshotReader
 
         $this->catalogSnapshot = null;
         $this->publicPoiTypeKeys = null;
+        $this->publicDetailTypeKeys = null;
         $this->publicPoiEligibilityPolicy = null;
         $this->cacheRevision = $currentRevision;
     }
@@ -146,6 +150,10 @@ final class AccountProfilePublicCatalogSnapshotReader
      */
     private function publicDetailTypeKeys(): array
     {
+        if ($this->publicDetailTypeKeys !== null) {
+            return $this->publicDetailTypeKeys;
+        }
+
         $keys = [];
         foreach (TenantProfileType::query()->publiclyNavigable()->get(['type']) as $profileType) {
             $type = trim((string) $profileType->getAttribute('type'));
@@ -154,10 +162,10 @@ final class AccountProfilePublicCatalogSnapshotReader
             }
         }
 
-        $detailTypeKeys = array_values($keys);
-        sort($detailTypeKeys, SORT_STRING);
+        $this->publicDetailTypeKeys = array_values($keys);
+        sort($this->publicDetailTypeKeys, SORT_STRING);
 
-        return $detailTypeKeys;
+        return $this->publicDetailTypeKeys;
     }
 
     /**

@@ -266,6 +266,7 @@ class PushMessageFlowTest extends TestCase
         $create = $this->postJson($this->baseUrl, $payload);
         $create->assertCreated();
 
+        $this->resolvePrimaryPushTenant()->makeCurrent();
         $message = PushMessage::query()->where('internal_name', $payload['internal_name'])->first();
         $this->assertNotNull($message);
         $this->assertSame((string) $this->account->_id, (string) $message->partner_id);
@@ -345,6 +346,7 @@ class PushMessageFlowTest extends TestCase
         $create = $this->postJson($this->baseUrl, $payload);
         $create->assertCreated();
 
+        $this->resolvePrimaryPushTenant()->makeCurrent();
         $message = PushMessage::query()->where('internal_name', $payload['internal_name'])->firstOrFail();
         $message->delivery_deadline_at = now()->subDay()->toIso8601String();
         $message->save();
@@ -432,7 +434,7 @@ class PushMessageFlowTest extends TestCase
         $duplicate = $this->postJson($this->baseUrl.'/'.$messageId.'/actions', $actionPayload);
         $duplicate->assertOk();
 
-        $message = PushMessage::query()->find($messageId);
+        $message = $this->findPushMessage($messageId);
         $this->assertNotNull($message);
         $metrics = $message->metrics ?? [];
         $this->assertEquals(1, $metrics['clicked_count'] ?? 0);
@@ -463,7 +465,7 @@ class PushMessageFlowTest extends TestCase
 
         $action->assertOk();
 
-        $message = PushMessage::query()->find($messageId);
+        $message = $this->findPushMessage($messageId);
         $this->assertNotNull($message);
         $metrics = $message->metrics ?? [];
         $this->assertEquals(1, $metrics['opened_count'] ?? 0);
@@ -494,7 +496,7 @@ class PushMessageFlowTest extends TestCase
 
         $action->assertOk();
 
-        $message = PushMessage::query()->find($messageId);
+        $message = $this->findPushMessage($messageId);
         $this->assertNotNull($message);
         $metrics = $message->metrics ?? [];
         $this->assertEquals(1, $metrics['dismissed_count'] ?? 0);
@@ -525,7 +527,7 @@ class PushMessageFlowTest extends TestCase
 
         $action->assertOk();
 
-        $message = PushMessage::query()->find($messageId);
+        $message = $this->findPushMessage($messageId);
         $this->assertNotNull($message);
         $metrics = $message->metrics ?? [];
         $this->assertEquals(1, $metrics['step_view_counts'][1] ?? 0);
@@ -555,7 +557,7 @@ class PushMessageFlowTest extends TestCase
 
         $action->assertOk();
 
-        $message = PushMessage::query()->find($messageId);
+        $message = $this->findPushMessage($messageId);
         $this->assertNotNull($message);
         $metrics = $message->metrics ?? [];
         $this->assertEquals(1, $metrics['delivered_count'] ?? 0);
@@ -822,11 +824,18 @@ class PushMessageFlowTest extends TestCase
             ->postJson('api/v1/push/messages', $payload);
         $create->assertCreated();
 
-        $messageId = $this->resolveMessageId($payload['internal_name']);
+        $messageId = $this->resolveMessageId($payload['internal_name'], $secondaryTenant);
 
         $primaryTenant->makeCurrent();
         $this->withServerVariables(['HTTP_HOST' => $this->tenantHost]);
-        Sanctum::actingAs($this->operator, ['tenant-push-messages:read']);
+        $primaryToken = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->operator,
+            'tenant-push-primary-read',
+            ['tenant-push-messages:read'],
+            tenantId: (string) $primaryTenant->_id,
+            accountId: (string) $this->account->_id
+        );
+        $this->withToken($primaryToken->plainTextToken);
 
         $data = $this->getJson('api/v1/push/messages/'.$messageId.'/data');
         $data->assertOk();
@@ -847,7 +856,7 @@ class PushMessageFlowTest extends TestCase
     {
         $primaryTenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
 
-        [$secondaryTenant, $secondaryOperator, $secondaryHost] = $this->seedSecondaryTenantContext();
+        [$secondaryTenant, $secondaryOperator, $secondaryHost, $secondaryAccount] = $this->seedSecondaryTenantContext();
 
         $payload = $this->buildPayload([
             'audience' => [
@@ -856,19 +865,30 @@ class PushMessageFlowTest extends TestCase
             ],
         ]);
         $this->withServerVariables(['HTTP_HOST' => $secondaryHost]);
-        Sanctum::actingAs($secondaryOperator, [
-            'tenant-push-messages:create',
-            'tenant-push-messages:read',
-        ]);
+        $secondaryToken = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $secondaryOperator,
+            'tenant-push-secondary-create',
+            ['tenant-push-messages:create'],
+            tenantId: (string) $secondaryTenant->_id,
+            accountId: (string) $secondaryAccount->_id
+        );
+        $this->withToken($secondaryToken->plainTextToken);
 
         $create = $this->postJson('api/v1/push/messages', $payload);
         $create->assertCreated();
 
-        $messageId = $this->resolveMessageId($payload['internal_name']);
+        $messageId = $this->resolveMessageId($payload['internal_name'], $secondaryTenant);
 
         $primaryTenant->makeCurrent();
         $this->withServerVariables(['HTTP_HOST' => $this->tenantHost]);
-        Sanctum::actingAs($this->operator, ['tenant-push-messages:read']);
+        $primaryToken = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->operator,
+            'tenant-push-primary-read',
+            ['tenant-push-messages:read'],
+            tenantId: (string) $primaryTenant->_id,
+            accountId: (string) $this->account->_id
+        );
+        $this->withToken($primaryToken->plainTextToken);
 
         $show = $this->getJson('api/v1/push/messages/'.$messageId);
         $show->assertStatus(404);
@@ -880,10 +900,17 @@ class PushMessageFlowTest extends TestCase
     {
         $primaryTenant = Tenant::query()->where('subdomain', 'tenant-zeta')->firstOrFail();
 
-        [$secondaryTenant, $secondaryOperator, $secondaryHost] = $this->seedSecondaryTenantContext();
+        [$secondaryTenant, $secondaryOperator, $secondaryHost, $secondaryAccount] = $this->seedSecondaryTenantContext();
 
         $this->withServerVariables(['HTTP_HOST' => $secondaryHost]);
-        Sanctum::actingAs($secondaryOperator, ['tenant-push-credentials:update']);
+        $secondaryToken = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $secondaryOperator,
+            'tenant-push-secondary-credentials-update',
+            ['tenant-push-credentials:update'],
+            tenantId: (string) $secondaryTenant->_id,
+            accountId: (string) $secondaryAccount->_id
+        );
+        $this->withToken($secondaryToken->plainTextToken);
 
         PushCredential::query()->delete();
         $create = $this->putJson('api/v1/settings/push/credentials', [
@@ -895,7 +922,14 @@ class PushMessageFlowTest extends TestCase
 
         $primaryTenant->makeCurrent();
         $this->withServerVariables(['HTTP_HOST' => $this->tenantHost]);
-        Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
+        $primaryToken = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->operator,
+            'tenant-push-primary-credentials-update',
+            ['tenant-push-credentials:update'],
+            tenantId: (string) $primaryTenant->_id,
+            accountId: (string) $this->account->_id
+        );
+        $this->withToken($primaryToken->plainTextToken);
 
         $baseApiTenant = sprintf('http://%s.%s/api/v1/', $primaryTenant->subdomain, $this->host);
         $update = $this->putJson($baseApiTenant.'settings/push/credentials', [
@@ -994,6 +1028,7 @@ class PushMessageFlowTest extends TestCase
         $response = $this->postJson($this->baseUrl, $payload);
         $response->assertCreated();
 
+        $this->resolvePrimaryPushTenant()->makeCurrent();
         $message = PushMessage::query()->where('internal_name', $payload['internal_name'])->firstOrFail();
         $this->assertSame('event_confirmed', (string) data_get($message->audience, 'type'));
         $this->assertSame((string) $event->_id, (string) data_get($message->audience, 'event_id'));
@@ -2756,13 +2791,22 @@ class PushMessageFlowTest extends TestCase
 
     public function test_tenant_push_message_crud_works(): void
     {
-        Sanctum::actingAs($this->operator, [
+        $tenant = $this->resolvePrimaryPushTenant();
+        $tenant->makeCurrent();
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->operator,
+            'tenant-push-message-crud',
+            [
             'tenant-push-messages:read',
             'tenant-push-messages:create',
             'tenant-push-messages:update',
             'tenant-push-messages:delete',
             'tenant-push-messages:send',
-        ]);
+            ],
+            tenantId: (string) $tenant->_id,
+            accountId: (string) $this->account->_id
+        );
+        $this->withToken($token->plainTextToken);
 
         $payload = $this->buildPayload();
         $create = $this->postJson('api/v1/push/messages', $payload);
@@ -2783,10 +2827,19 @@ class PushMessageFlowTest extends TestCase
 
     public function test_tenant_push_message_update_accepts_all_users_audience_contract(): void
     {
-        Sanctum::actingAs($this->operator, [
+        $tenant = $this->resolvePrimaryPushTenant();
+        $tenant->makeCurrent();
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->operator,
+            'tenant-push-message-audience-update',
+            [
             'tenant-push-messages:create',
             'tenant-push-messages:update',
-        ]);
+            ],
+            tenantId: (string) $tenant->_id,
+            accountId: (string) $this->account->_id
+        );
+        $this->withToken($token->plainTextToken);
 
         $payload = $this->buildPayload([
             'audience' => [
@@ -2812,10 +2865,10 @@ class PushMessageFlowTest extends TestCase
 
     public function test_tenant_message_data_forbidden_when_not_eligible(): void
     {
-        Sanctum::actingAs($this->operator, [
+        $this->actingAsTenantOperator([
             'tenant-push-messages:create',
             'tenant-push-messages:read',
-        ]);
+        ], 'tenant-push-data-forbidden');
         $otherUser = $this->userService->create($this->account, [
             'name' => 'Tenant Data Other User',
             'email' => 'tenant-push-data-other-'.Str::uuid()->toString().'@example.org',
@@ -2841,10 +2894,10 @@ class PushMessageFlowTest extends TestCase
 
     public function test_tenant_message_actions_forbidden_when_not_eligible(): void
     {
-        Sanctum::actingAs($this->operator, [
+        $this->actingAsTenantOperator([
             'tenant-push-messages:create',
             'tenant-push-messages:read',
-        ]);
+        ], 'tenant-push-actions-forbidden');
         $otherUser = $this->userService->create($this->account, [
             'name' => 'Tenant Action Other User',
             'email' => 'tenant-push-action-other-'.Str::uuid()->toString().'@example.org',
@@ -2972,7 +3025,7 @@ class PushMessageFlowTest extends TestCase
 
     public function test_tenant_credentials_endpoints_require_permission(): void
     {
-        Sanctum::actingAs($this->operator, ['tenant-push-credentials:read']);
+        $this->actingAsTenantOperator(['tenant-push-credentials:read'], 'tenant-push-credentials-read-only');
 
         $response = $this->putJson('api/v1/settings/push/credentials', [
             'project_id' => 'project-id',
@@ -2985,7 +3038,7 @@ class PushMessageFlowTest extends TestCase
 
     public function test_tenant_credential_upsert_creates_and_updates_single_record(): void
     {
-        Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
+        $this->actingAsTenantOperator(['tenant-push-credentials:update'], 'tenant-push-credentials-upsert');
 
         PushCredential::query()->delete();
         $create = $this->putJson('api/v1/settings/push/credentials', [
@@ -2998,6 +3051,7 @@ class PushMessageFlowTest extends TestCase
         $create->assertJsonMissing(['private_key']);
         $credentialId = $create->json('data.id');
 
+        $this->resolvePrimaryPushTenant()->makeCurrent();
         $stored = DB::connection('tenant')
             ->getDatabase()
             ->selectCollection('push_credentials')
@@ -3013,12 +3067,13 @@ class PushMessageFlowTest extends TestCase
 
         $update->assertOk();
         $update->assertJsonPath('data.id', $credentialId);
+        $this->resolvePrimaryPushTenant()->makeCurrent();
         $this->assertSame(1, PushCredential::query()->count());
     }
 
     public function test_tenant_credential_upsert_recovers_from_corrupted_private_key_ciphertext(): void
     {
-        Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
+        $this->actingAsTenantOperator(['tenant-push-credentials:update'], 'tenant-push-credentials-recovery');
 
         PushCredential::query()->delete();
 
@@ -3044,6 +3099,7 @@ class PushMessageFlowTest extends TestCase
 
         $update->assertOk();
         $update->assertJsonPath('data.id', (string) $id);
+        $this->resolvePrimaryPushTenant()->makeCurrent();
         $this->assertSame(1, PushCredential::query()->count());
 
         $credential = PushCredential::query()->find($id);
@@ -3055,7 +3111,7 @@ class PushMessageFlowTest extends TestCase
 
     public function test_tenant_credentials_index_returns_without_private_key(): void
     {
-        Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
+        $this->actingAsTenantOperator(['tenant-push-credentials:update'], 'tenant-push-credentials-seed');
 
         PushCredential::query()->delete();
         $credential = PushCredential::create([
@@ -3064,7 +3120,7 @@ class PushMessageFlowTest extends TestCase
             'private_key' => 'secret',
         ]);
 
-        Sanctum::actingAs($this->operator, ['tenant-push-credentials:read']);
+        $this->actingAsTenantOperator(['tenant-push-credentials:read'], 'tenant-push-credentials-index');
 
         $response = $this->getJson('api/v1/settings/push/credentials');
         $response->assertOk();
@@ -3075,7 +3131,7 @@ class PushMessageFlowTest extends TestCase
 
     public function test_tenant_credentials_index_returns_conflict_when_multiple(): void
     {
-        Sanctum::actingAs($this->operator, ['tenant-push-credentials:read']);
+        $this->actingAsTenantOperator(['tenant-push-credentials:read'], 'tenant-push-credentials-index-conflict');
 
         PushCredential::query()->delete();
         PushCredential::create([
@@ -3095,7 +3151,7 @@ class PushMessageFlowTest extends TestCase
 
     public function test_tenant_credentials_upsert_returns_conflict_when_multiple(): void
     {
-        Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
+        $this->actingAsTenantOperator(['tenant-push-credentials:update'], 'tenant-push-credentials-upsert-conflict');
 
         PushCredential::query()->delete();
         PushCredential::create([
@@ -3149,7 +3205,7 @@ class PushMessageFlowTest extends TestCase
 
     public function test_tenant_credential_validation_returns422(): void
     {
-        Sanctum::actingAs($this->operator, ['tenant-push-credentials:update']);
+        $this->actingAsTenantOperator(['tenant-push-credentials:update'], 'tenant-push-credentials-validation');
 
         $response = $this->putJson('api/v1/settings/push/credentials', [
             'project_id' => 'project-id',
@@ -4513,6 +4569,7 @@ class PushMessageFlowTest extends TestCase
             ],
         ], $sendCalls);
 
+        $this->resolvePrimaryPushTenant()->makeCurrent();
         $log = PushDeliveryLog::query()->firstOrFail();
         $this->assertSame('individual_direct', (string) $log->delivery_topology);
         $this->assertSame('token', (string) $log->target_type);
@@ -5924,6 +5981,7 @@ class PushMessageFlowTest extends TestCase
         $send->assertStatus(422);
         $send->assertJsonPath('reason', 'delivery_failed');
 
+        $this->resolvePrimaryPushTenant()->makeCurrent();
         $device = PushDevice::query()
             ->where('account_user_id', (string) $this->operator->_id)
             ->where('device_id', 'device-1')
@@ -5945,10 +6003,10 @@ class PushMessageFlowTest extends TestCase
 
     public function test_tenant_transactional_send_returns_delivery_failed_when_provider_accepts_none(): void
     {
-        Sanctum::actingAs($this->operator, [
+        $this->actingAsTenantOperator([
             'tenant-push-messages:create',
             'tenant-push-messages:send',
-        ]);
+        ], 'tenant-push-transactional-send');
 
         $this->app->bind(FcmClientContract::class, static function () {
             return new class implements FcmClientContract
@@ -5997,6 +6055,7 @@ class PushMessageFlowTest extends TestCase
         $send->assertStatus(422);
         $send->assertJsonPath('reason', 'delivery_failed');
 
+        $this->resolvePrimaryPushTenant()->makeCurrent();
         $message = PushMessage::query()->findOrFail($messageId);
         $this->assertSame(0, $message->metrics['accepted_count'] ?? null);
         $this->assertSame(0, $message->metrics['sent_count'] ?? null);
@@ -6060,10 +6119,7 @@ class PushMessageFlowTest extends TestCase
 
         $messageId = $this->resolveMessageId($payload['internal_name']);
 
-        $this->withServerVariables([
-            'HTTP_HOST' => $this->tenantHost,
-        ]);
-        Sanctum::actingAs($this->operator, ['tenant-push-messages:send']);
+        $this->actingAsTenantOperator(['tenant-push-messages:send'], 'tenant-push-scope-mismatch');
 
         $send = $this->postJson('api/v1/push/messages/'.$messageId.'/send', [
             'dry_run' => true,
@@ -6091,8 +6147,30 @@ class PushMessageFlowTest extends TestCase
     /**
      * @param  array<int, string>  $abilities
      */
+    private function actingAsTenantOperator(array $abilities, string $name): void
+    {
+        $tenant = $this->resolvePrimaryPushTenant();
+        $tenant->makeCurrent();
+        $this->withServerVariables([
+            'HTTP_HOST' => $this->tenantHost,
+        ]);
+        $this->app['auth']->forgetGuards();
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $this->operator,
+            $name,
+            $abilities,
+            tenantId: (string) $tenant->_id,
+            accountId: (string) $this->account->_id
+        );
+        $this->withToken($token->plainTextToken);
+    }
+
+    /**
+     * @param  array<int, string>  $abilities
+     */
     private function createAccountPushMessageWithBearerToken(array $abilities = ['push-messages:create']): string
     {
+        $tenant = Tenant::current();
         $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
             $this->operator,
             'account-push-create',
@@ -6114,7 +6192,7 @@ class PushMessageFlowTest extends TestCase
         $create->assertCreated();
         $this->app['auth']->forgetGuards();
 
-        return $this->resolveMessageId($payload['internal_name']);
+        return $this->resolveMessageId($payload['internal_name'], $tenant);
     }
 
     private function assertAccountPushMessageDataAndActionsAcceptBearerToken(string $messageId, string $plainTextToken): void
@@ -6211,11 +6289,19 @@ class PushMessageFlowTest extends TestCase
         return array_replace_recursive($payload, $overrides);
     }
 
-    private function resolveMessageId(string $internalName): string
+    private function resolveMessageId(string $internalName, ?Tenant $tenant = null): string
     {
+        ($tenant ?? $this->resolvePrimaryPushTenant())->makeCurrent();
         $message = PushMessage::query()->where('internal_name', $internalName)->firstOrFail();
 
         return (string) $message->_id;
+    }
+
+    private function findPushMessage(string $messageId): ?PushMessage
+    {
+        $this->resolvePrimaryPushTenant()->makeCurrent();
+
+        return PushMessage::query()->find($messageId);
     }
 
     private function seedPushSettings(): void
@@ -6381,6 +6467,7 @@ class PushMessageFlowTest extends TestCase
             return count($connection->getQueryLog());
         } finally {
             $connection->disableQueryLog();
+            $connection->flushQueryLog();
         }
     }
 

@@ -12,6 +12,6 @@ class MigrateTenantAction extends BaseMigrateTenantAction
 {
     protected function getSwitchTenantTask(): SwitchTenantTask
     {
-        return new SwitchMongoTenantDatabaseTask;
+        return app(SwitchMongoTenantDatabaseTask::class);
     }
 }

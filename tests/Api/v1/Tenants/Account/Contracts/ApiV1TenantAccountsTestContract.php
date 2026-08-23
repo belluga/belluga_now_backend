@@ -29,7 +29,9 @@ class ApiV1TenantAccountsTestContract extends TestCaseTenant
     protected function setUp(): void
     {
         parent::setUp();
+        $this->ensureCanonicalTenantExists($this->tenant);
         $this->hydrateFromDatabase();
+        $this->resolveCanonicalTenant($this->tenant)->makeCurrent();
     }
 
     public function testAccountCreatePrimary(): void

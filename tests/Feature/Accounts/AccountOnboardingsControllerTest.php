@@ -100,6 +100,7 @@ class AccountOnboardingsControllerTest extends TestCase
         $accountId = (string) $response->json('data.account.id');
         $roleId = (string) $response->json('data.role.id');
         $profileId = (string) $response->json('data.account_profile.id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $persistedAccount = Account::query()->where('name', $name)->first();
         $this->assertNotNull($persistedAccount);
@@ -156,6 +157,7 @@ class AccountOnboardingsControllerTest extends TestCase
         ]);
 
         $response->assertCreated();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
             ['personal'],
             TenantProfileType::query()->orderBy('type')->pluck('type')->all(),
@@ -190,6 +192,7 @@ class AccountOnboardingsControllerTest extends TestCase
 
         $response->assertStatus(422);
         $this->assertNotEmpty($response->json('errors.profile_type'));
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(0, Account::query()->where('name', $name)->count());
         $this->assertSame(0, AccountProfile::query()->where('display_name', $name)->count());
     }
@@ -208,6 +211,7 @@ class AccountOnboardingsControllerTest extends TestCase
 
         $response->assertStatus(422);
         $this->assertNotEmpty($response->json('errors.name'));
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame($accountsBefore, Account::query()->count());
         $this->assertSame($profilesBefore, AccountProfile::query()->count());
     }
@@ -226,6 +230,7 @@ class AccountOnboardingsControllerTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['name']);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame($accountsBefore, Account::query()->count());
         $this->assertSame($profilesBefore, AccountProfile::query()->count());
     }
@@ -244,6 +249,7 @@ class AccountOnboardingsControllerTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['name']);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame($accountsBefore, Account::query()->count());
         $this->assertSame($profilesBefore, AccountProfile::query()->count());
     }
@@ -299,6 +305,7 @@ class AccountOnboardingsControllerTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['nested_profile_groups']);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame($accountsBefore, Account::query()->count());
         $this->assertSame($profilesBefore, AccountProfile::query()->count());
     }
@@ -339,6 +346,7 @@ class AccountOnboardingsControllerTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['nested_profile_groups']);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame($accountsBefore, Account::query()->count());
         $this->assertSame($profilesBefore, AccountProfile::query()->count());
     }
@@ -361,6 +369,7 @@ class AccountOnboardingsControllerTest extends TestCase
         $response->assertCreated();
         $profileId = (string) $response->json('data.account_profile.id');
         $this->assertNotSame('', $profileId);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         $this->assertDatabaseHas('map_pois', [
             'ref_type' => 'account_profile',
@@ -373,6 +382,7 @@ class AccountOnboardingsControllerTest extends TestCase
         $lookupResponse->assertStatus(404);
         $lookupResponse->assertJsonPath('message', 'POI not found.');
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $projection = MapPoi::query()
             ->where('ref_type', 'account_profile')
             ->where('ref_id', $profileId)
@@ -414,6 +424,7 @@ class AccountOnboardingsControllerTest extends TestCase
 
         $response->assertStatus(422);
         $this->assertNotEmpty($response->json('errors.account'));
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(0, Account::query()->where('name', $name)->count());
         $this->assertSame(0, AccountProfile::query()->where('display_name', $name)->count());
         $this->assertSame($rolesBefore, AccountRoleTemplate::query()->count());
@@ -442,6 +453,7 @@ class AccountOnboardingsControllerTest extends TestCase
 
         $response->assertStatus(422);
         $this->assertNotEmpty($response->json('errors.account'));
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(0, Account::query()->where('name', $name)->count());
         $this->assertSame(0, AccountProfile::query()->where('display_name', $name)->count());
         $this->assertSame($rolesBefore, AccountRoleTemplate::query()->count());

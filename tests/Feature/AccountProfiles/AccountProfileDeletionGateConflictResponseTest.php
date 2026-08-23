@@ -96,6 +96,8 @@ class AccountProfileDeletionGateConflictResponseTest extends TestCaseTenant
 
         $response->assertStatus(409);
         $response->assertJsonPath('message', 'A concurrency conflict occurred. Please try again.');
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame('Deletion Gated Venue', (string) $profile->fresh()->display_name);
     }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use App\Exceptions\FoundationControlPlane\StaleNestedPublicMembersCursorException;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
 use Illuminate\Support\Carbon;
@@ -39,7 +40,7 @@ final class AccountProfileNestedPublicMembersProjectionService
         private readonly AccountProfileTransactionRunner $transactionRunner,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
         private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
-        private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
+        private readonly AccountProfileQueryService $profileQueryService,
     ) {}
 
     public function rebuildForProfile(AccountProfile $profile): void
@@ -55,6 +56,43 @@ final class AccountProfileNestedPublicMembersProjectionService
     ): void {
         $this->rebuildParentProjection($context, $profile);
         $this->refreshMemberEdges($context, $profile);
+    }
+
+    /**
+     * @param  array<int, string>  $memberProfileIds
+     * @param  array<int, string>  $skipProfileIds
+     */
+    public function rebuildParentsAffectedByMemberProfilesWithinContext(
+        AccountProfileTransactionContext $context,
+        array $memberProfileIds,
+        array $skipProfileIds = [],
+    ): void {
+        $skipProfileIds = array_flip($this->normalizedProfileIds($skipProfileIds));
+        $parentProfileIds = $this->nestedGroupMemberStore->parentProfileIdsForMemberIdsWithinContext(
+            $context,
+            $memberProfileIds,
+        );
+        if ($parentProfileIds === []) {
+            return;
+        }
+
+        foreach (
+            AccountProfile::withTrashed()
+                ->whereIn('_id', $parentProfileIds)
+                ->orderBy('_id')
+                ->get() as $parentProfile
+        ) {
+            if (! $parentProfile instanceof AccountProfile) {
+                continue;
+            }
+
+            $parentProfileId = trim((string) $parentProfile->getKey());
+            if ($parentProfileId === '' || isset($skipProfileIds[$parentProfileId])) {
+                continue;
+            }
+
+            $this->rebuildForProfileWithinContext($context, $parentProfile);
+        }
     }
 
     /**
@@ -77,9 +115,17 @@ final class AccountProfileNestedPublicMembersProjectionService
             throw new NotFoundHttpException;
         }
 
+        $parentProfile = $this->findProfileById((string) ($head['parent_profile_id'] ?? ''));
+        if (! $parentProfile instanceof AccountProfile
+            || ! $this->profileQueryService->isPublicNestedParent($parentProfile)
+            || trim((string) ($parentProfile->slug ?? '')) !== $parentSlug) {
+            throw new NotFoundHttpException;
+        }
+
         $perPage = $defaultPerPage;
         $lastEmittedRawPosition = -1;
         $aggregateRevision = (int) ($head['parent_aggregate_revision'] ?? 0);
+        $projectionRevision = trim((string) ($head['projection_revision'] ?? ''));
 
         if ($cursor !== null) {
             $payload = $this->decodeCursor($cursor);
@@ -100,7 +146,11 @@ final class AccountProfileNestedPublicMembersProjectionService
             }
 
             if ((int) ($payload['aggregate_revision'] ?? -1) !== $aggregateRevision) {
-                throw new ConcurrencyConflictException('Account Profile nested profile groups revision changed.');
+                throw new StaleNestedPublicMembersCursorException('Account Profile nested profile groups revision changed.');
+            }
+            if ($projectionRevision !== ''
+                && trim((string) ($payload['projection_revision'] ?? '')) !== $projectionRevision) {
+                throw new StaleNestedPublicMembersCursorException('Account Profile nested profile groups revision changed.');
             }
 
             $perPage = $cursorPerPage;
@@ -135,6 +185,10 @@ final class AccountProfileNestedPublicMembersProjectionService
         }
 
         $pageRows = array_slice($memberRows, 0, $perPage);
+        if ($pageRows === [] && $cursor === null) {
+            throw new NotFoundHttpException;
+        }
+
         $nextCursor = null;
         if (count($memberRows) > $perPage && $pageRows !== []) {
             $nextCursor = Crypt::encryptString(json_encode([
@@ -144,6 +198,7 @@ final class AccountProfileNestedPublicMembersProjectionService
                 'parent_slug' => $parentSlug,
                 'group_id' => $groupId,
                 'aggregate_revision' => $aggregateRevision,
+                'projection_revision' => $projectionRevision,
                 'per_page' => $perPage,
                 'last_emitted_raw_position' => (int) ($pageRows[array_key_last($pageRows)]['raw_position'] ?? -1),
                 'expires_at' => now()->addMinutes(15)->toIso8601String(),
@@ -243,8 +298,7 @@ final class AccountProfileNestedPublicMembersProjectionService
             $context->rawOptions(),
         );
 
-        $policy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
-        if (! $policy->isPublicNestedParent($profile)) {
+        if (! $this->profileQueryService->isPublicNestedParent($profile)) {
             return;
         }
 
@@ -277,10 +331,9 @@ final class AccountProfileNestedPublicMembersProjectionService
 
         $eligibleMembers = $memberIds === []
             ? collect()
-            : $policy->applyCatalogConstraint(AccountProfile::query()->whereIn('_id', array_values($memberIds)))
-                ->get()
-                ->keyBy(static fn (AccountProfile $member): string => (string) $member->getKey());
+            : collect($this->profileQueryService->findExistingPublicCatalogProfilesByIds(array_values($memberIds)));
 
+        $projectionRevision = (string) new ObjectId();
         $now = new UTCDateTime((int) now()->getTimestampMs());
         $rows = [];
         foreach ($groups as $group) {
@@ -294,6 +347,7 @@ final class AccountProfileNestedPublicMembersProjectionService
                 'group_label' => $group['label'],
                 'group_order' => (int) ($group['order'] ?? 0),
                 'parent_aggregate_revision' => $aggregateRevision,
+                'projection_revision' => $projectionRevision,
                 'doc_type' => self::DOC_TYPE_HEAD,
                 'doc_type_rank' => self::HEAD_RANK,
                 'updated_at' => $now,
@@ -316,6 +370,7 @@ final class AccountProfileNestedPublicMembersProjectionService
                     'member_profile_type' => (string) ($member->profile_type ?? ''),
                     'raw_position' => (int) $rawPosition,
                     'parent_aggregate_revision' => $aggregateRevision,
+                    'projection_revision' => $projectionRevision,
                     'doc_type' => self::DOC_TYPE_EDGE,
                     'doc_type_rank' => self::EDGE_RANK,
                     'profile_type' => (string) ($member->profile_type ?? ''),
@@ -342,8 +397,7 @@ final class AccountProfileNestedPublicMembersProjectionService
             return;
         }
 
-        $policy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
-        if (! $policy->isPubliclyExposed($profile)) {
+        if (! $this->profileQueryService->isPubliclyExposed($profile)) {
             $context->collection(self::COLLECTION)->deleteMany(
                 [
                     'tenant_id' => $tenantId,
@@ -414,6 +468,23 @@ final class AccountProfileNestedPublicMembersProjectionService
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @return array<int, string>
+     */
+    private function normalizedProfileIds(array $profileIds): array
+    {
+        $normalized = [];
+        foreach ($profileIds as $profileId) {
+            $candidate = trim((string) $profileId);
+            if ($candidate !== '' && ! isset($normalized[$candidate])) {
+                $normalized[$candidate] = $candidate;
+            }
+        }
+
+        return array_values($normalized);
     }
 
     /** @return array<string, mixed> */

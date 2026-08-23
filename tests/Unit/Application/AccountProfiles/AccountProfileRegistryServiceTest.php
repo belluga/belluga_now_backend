@@ -141,9 +141,13 @@ class AccountProfileRegistryServiceTest extends TestCase
         $this->assertTrue($this->service->hasEvents('artist'));
         $this->assertFalse($this->service->isPoiEnabled('artist'));
 
+        $queryLog = $connection->getQueryLog();
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
+
         $this->assertCount(
             1,
-            $connection->getQueryLog(),
+            $queryLog,
             'Repeated capability helpers must reuse the memoized type definition within the request.'
         );
     }

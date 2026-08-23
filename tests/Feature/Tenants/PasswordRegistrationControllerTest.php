@@ -38,13 +38,13 @@ class PasswordRegistrationControllerTest extends TestCase
         if (! self::$bootstrapped) {
             $this->refreshLandlordAndTenantDatabases();
             $this->initializeSystem();
-            Tenant::query()->firstOrFail()->update([
+            $this->makePasswordTenantCurrent()->update([
                 'app_domains' => ['tenant-nu.test'],
             ]);
             self::$bootstrapped = true;
         }
 
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makePasswordTenantCurrent();
     }
 
     public function test_registers_new_identity(): void
@@ -67,7 +67,7 @@ class PasswordRegistrationControllerTest extends TestCase
         $response->assertJsonPath('data.identity_state', 'registered');
 
         $userId = $response->json('data.user_id');
-        Tenant::query()->firstOrFail()->makeCurrent();
+        $this->makePasswordTenantCurrent();
         $user = \App\Models\Tenants\AccountUser::query()->findOrFail(new ObjectId($userId));
         $this->assertSame('registered', $user->identity_state);
         $this->assertTrue(Hash::check('Secret!234', (string) $user->password));
@@ -274,6 +274,7 @@ class PasswordRegistrationControllerTest extends TestCase
                 'email' => $email,
             ])->assertOk();
 
+        $this->makePasswordTenantCurrent();
         $user = \App\Models\Tenants\AccountUser::query()
             ->where('emails', 'all', [strtolower($email)])
             ->firstOrFail();
@@ -369,6 +370,7 @@ class PasswordRegistrationControllerTest extends TestCase
                 'email' => $email,
             ])->assertOk();
 
+        $this->makePasswordTenantCurrent();
         $user = \App\Models\Tenants\AccountUser::query()
             ->where('emails', 'all', [strtolower($email)])
             ->firstOrFail();
@@ -479,6 +481,7 @@ class PasswordRegistrationControllerTest extends TestCase
                 'email' => $email,
             ])->assertOk();
 
+        $this->makePasswordTenantCurrent();
         $user = \App\Models\Tenants\AccountUser::query()
             ->where('emails', 'all', [strtolower($email)])
             ->firstOrFail();
@@ -607,6 +610,7 @@ class PasswordRegistrationControllerTest extends TestCase
             ]);
         $first->assertStatus(403);
         $first->assertHeader('X-Api-Security-Domain', 'tenant_public_password_login');
+        $this->makePasswordTenantCurrent();
 
         $second = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.92'])
             ->withHeaders($headers)
@@ -711,6 +715,16 @@ class PasswordRegistrationControllerTest extends TestCase
                     && ! array_key_exists('user_id', $envelope['metadata'] ?? []);
             }
         );
+    }
+
+    private function makePasswordTenantCurrent(): Tenant
+    {
+        $tenant = Tenant::query()
+            ->where('subdomain', 'tenant-nu')
+            ->firstOrFail();
+        $tenant->makeCurrent();
+
+        return $tenant;
     }
 
     private function initializeSystem(): void

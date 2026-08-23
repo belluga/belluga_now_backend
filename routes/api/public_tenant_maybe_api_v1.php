@@ -20,10 +20,13 @@ use App\Http\Api\v1\Controllers\TenantTelemetrySettingsController;
 use App\Http\Middleware\CheckTenantAccess;
 use App\Http\Middleware\EnsureTenantPublicAuthMethod;
 use Belluga\Events\Http\Api\v1\Controllers\EventMediaController;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
+use Spatie\Multitenancy\Http\Middleware\NeedsTenant;
 
-Route::middleware('tenant')->group(function () {
-    Route::get('/environment', [EnvironmentController::class, 'showEnvironmentData']);
+Route::middleware(NeedsTenant::class)->group(function () {
+    Route::get('/environment', [EnvironmentController::class, 'showEnvironmentData'])
+        ->withoutMiddleware(StartSession::class);
     Route::get(
         '/media/branding-public-web/{branding_subject_id}/default_image',
         [BrandingPublicWebMediaController::class, 'defaultImage']

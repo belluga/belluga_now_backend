@@ -2151,7 +2151,10 @@ class InvitesFlowTest extends TestCaseTenant
         $response->assertOk();
         $response->assertJsonCount(3, 'data.items');
 
-        $queries = collect(DB::connection('tenant')->getQueryLog());
+        $connection = DB::connection('tenant');
+        $queries = collect($connection->getQueryLog());
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
         $profileQueries = $queries->filter(
             static fn (array $queryLog): bool => str_contains(json_encode($queryLog), 'account_profiles')
         );

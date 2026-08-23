@@ -98,7 +98,7 @@ class ApiV1WellKnownAssociationTest extends TestCaseTenant
         $apple->assertJsonPath('applinks.details', []);
     }
 
-    public function test_tenant_settings_take_precedence_over_landlord_fallback(): void
+    public function test_tenant_settings_are_scoped_to_the_current_tenant(): void
     {
         $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
         $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.tenant.priority');

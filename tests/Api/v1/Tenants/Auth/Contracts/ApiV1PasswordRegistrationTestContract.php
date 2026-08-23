@@ -377,6 +377,7 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
         $response->assertStatus(201);
 
         $canonicalId = $response->json('data.user_id');
+        $this->tenantModel->makeCurrent();
 
         $this->assertFalse(
             InviteEdge::query()
@@ -495,6 +496,7 @@ abstract class ApiV1PasswordRegistrationTestContract extends TestCaseTenant
         $response->assertStatus(201);
 
         $canonicalId = $response->json('data.user_id');
+        $this->tenantModel->makeCurrent();
 
         $this->assertFalse(
             InviteFeedProjection::query()

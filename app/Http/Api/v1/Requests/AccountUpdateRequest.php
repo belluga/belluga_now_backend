@@ -7,6 +7,7 @@ namespace App\Http\Api\v1\Requests;
 use App\Application\Accounts\AccountPublicationStateService;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Validator;
 
 class AccountUpdateRequest extends FormRequest
 {
@@ -43,6 +44,25 @@ class AccountUpdateRequest extends FormRequest
                 .AccountPublicationStateService::DRAFT.','
                 .AccountPublicationStateService::PUBLISHED,
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            if (! $this->exists('publication')) {
+                return;
+            }
+
+            $publication = $this->input('publication');
+            if (! is_array($publication) || array_key_exists('status', $publication)) {
+                return;
+            }
+
+            $validator->errors()->add(
+                'publication.status',
+                'O status da publicação é obrigatório quando publication é enviado.',
+            );
+        });
     }
 
     /**

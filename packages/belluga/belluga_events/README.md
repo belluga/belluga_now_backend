@@ -360,6 +360,7 @@ Geometry compatibility:
    - `EventAttendanceReadContract`
    - `EventCapabilitySettingsContract`
    - `EventContentSanitizerContract`
+   - `EventRequestLifecycleTraceContract`
    - `EventPartyMapperRegistryContract`
    - `EventTenantContextContract`
    - `EventRadiusSettingsContract`
@@ -367,6 +368,10 @@ Geometry compatibility:
 3. Mount the host route files that expose the public, admin, and account event endpoints.
 4. Keep tenant migrations pointed at `packages/belluga/belluga_events/database/migrations`.
 5. Let the package queue failure hook emit DLQ alerts through `EventDlqAlertService`.
+
+Agenda diagnostic trace stages are emitted through `EventRequestLifecycleTraceContract`.
+The host owns its implementation and may keep tracing disabled outside local/testing
+requests; the package does not resolve host services or use the application container.
 
 ---
 

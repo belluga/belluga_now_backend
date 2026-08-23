@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Auth\Sanctum\RefreshingRequestGuard;
+use App\Auth\Sanctum\TracingGuard;
 use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Media\ExternalImageDnsResolverContract;
@@ -11,6 +13,7 @@ use App\Application\Media\SystemExternalImageDnsResolver;
 use App\Application\Telemetry\Contracts\TelemetryEmitterContract;
 use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Tenants\TenantDomainResolverService;
+use App\Application\Tenants\TenantRequestLifecycleTrace;
 use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 use App\Http\Api\v1\Requests\ResetPasswordRequestContract;
@@ -20,6 +23,7 @@ use App\Http\Api\v1\Requests\UpdateProfileRequestContract;
 use App\Http\Api\v1\Requests\UpdateProfileRequestLandlord;
 use App\Http\Api\v1\Requests\UpdateProfileRequestTenant;
 use App\Models\Landlord\PersonalAccessToken;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
 
@@ -30,9 +34,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->singleton(TenantDomainResolverService::class, function ($app) {
-            return new TenantDomainResolverService;
-        });
+        $this->app->singleton(TenantDomainResolverService::class);
+        $this->app->singleton(TenantRequestLifecycleTrace::class);
         $this->app->scoped(AccountProfilePublicCatalogSnapshotReader::class);
         $this->app->bind(AccountProfileTypeSetProvider::class);
 
@@ -87,5 +90,24 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
+
+        $this->app->booted(function (): void {
+            Auth::resolved(function ($auth): void {
+                $auth->extend('sanctum', function ($app, $name, array $config) use ($auth) {
+                    return tap(new RefreshingRequestGuard(
+                        new TracingGuard(
+                            $auth,
+                            $app->make(TenantRequestLifecycleTrace::class),
+                            config('sanctum.expiration'),
+                            $config['provider'] ?? null,
+                        ),
+                        $app['request'],
+                        $auth->createUserProvider($config['provider'] ?? null)
+                    ), function ($guard) use ($app): void {
+                        $app->refresh('request', $guard, 'setRequest');
+                    });
+                });
+            });
+        });
     }
 }

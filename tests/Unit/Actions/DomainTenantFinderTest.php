@@ -7,6 +7,7 @@ namespace Tests\Unit\Actions;
 use App\Actions\DomainTenantFinder;
 use App\Application\Tenants\TenantAppDomainResolverService;
 use App\Application\Tenants\TenantDomainResolverService;
+use App\Application\Tenants\TenantRequestLifecycleTrace;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\Request;
 use Mockery\MockInterface;
@@ -33,6 +34,39 @@ class DomainTenantFinderTest extends TestCase
 
         /** @var DomainTenantFinder $finder */
         $finder = $this->app->make(DomainTenantFinder::class);
+
+        $request = Request::create('https://tenant.example.test/api/v1/environment', 'GET');
+        $this->app->instance('request', $request);
+
+        $result = $finder->findForRequest($request);
+
+        $this->assertSame($tenant, $result);
+    }
+
+    public function test_explicit_web_domain_bypasses_subdomain_branch(): void
+    {
+        $tenant = Tenant::make([
+            'name' => 'Mock Tenant',
+            'subdomain' => 'mock-tenant',
+        ]);
+
+        $domainResolver = $this->mock(TenantDomainResolverService::class, function (MockInterface $mock) use ($tenant): void {
+            $mock->shouldReceive('findTenantByDomain')
+                ->once()
+                ->with('tenant.example.test')
+                ->andReturn($tenant);
+        });
+
+        $appDomainResolver = $this->mock(TenantAppDomainResolverService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('findTenantByIdentifier')->never();
+        });
+
+        $finder = \Mockery::mock(
+            DomainTenantFinder::class,
+            [$domainResolver, $appDomainResolver, $this->app->make(TenantRequestLifecycleTrace::class)]
+        )->makePartial()->shouldAllowMockingProtectedMethods();
+
+        $finder->shouldReceive('findTenantBySubdomain')->never();
 
         $request = Request::create('https://tenant.example.test/api/v1/environment', 'GET');
         $this->app->instance('request', $request);

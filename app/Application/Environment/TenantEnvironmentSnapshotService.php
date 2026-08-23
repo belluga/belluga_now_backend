@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Environment;
 
+use App\Application\Tenants\TenantRequestLifecycleTrace;
 use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
@@ -14,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 
 class TenantEnvironmentSnapshotService
 {
-    public const SCHEMA_VERSION = 2;
+    public const SCHEMA_VERSION = 3;
 
     /**
      * @var array<string, bool>
@@ -33,15 +34,20 @@ class TenantEnvironmentSnapshotService
         ?string $requestRoot,
         ?string $requestHost,
     ): array {
-        $snapshot = TenantEnvironmentSnapshot::current();
+        app(TenantRequestLifecycleTrace::class)->record('environment.snapshot.lookup.start');
+        $snapshotDocument = $this->currentSnapshotDocument();
+        app(TenantRequestLifecycleTrace::class)->record('environment.snapshot.lookup.loaded', [
+            'snapshot_present' => is_array($snapshotDocument),
+            'snapshot_schema_version' => $this->snapshotSchemaVersion($snapshotDocument),
+        ]);
 
-        if ($this->needsRepair($snapshot)) {
-            $reason = $snapshot === null ? 'missing_snapshot' : 'version_drift';
+        if ($this->needsRepairDocument($snapshotDocument)) {
+            $reason = $snapshotDocument === null ? 'missing_snapshot' : 'version_drift';
             Log::warning('tenant_environment_snapshot_repair_requested', [
                 'tenant_id' => (string) $tenant->getKey(),
                 'tenant_slug' => (string) $tenant->slug,
                 'reason' => $reason,
-                'schema_version' => $snapshot?->schema_version,
+                'schema_version' => $this->snapshotSchemaVersion($snapshotDocument),
                 'expected_schema_version' => self::SCHEMA_VERSION,
             ]);
 
@@ -50,18 +56,25 @@ class TenantEnvironmentSnapshotService
                     'trigger' => 'read_path',
                     'request_host' => $requestHost,
                 ]);
+
+                return $this->hydrateSnapshot($tenant, $snapshot, $requestRoot, $requestHost);
             } catch (\Throwable $exception) {
-                if ($snapshot instanceof TenantEnvironmentSnapshot && $this->hasUsableSnapshot($snapshot)) {
+                if ($this->hasUsableSnapshotDocument($snapshotDocument)) {
                     Log::warning('tenant_environment_snapshot_repair_failed_serving_last_valid', [
                         'tenant_id' => (string) $tenant->getKey(),
                         'tenant_slug' => (string) $tenant->slug,
                         'reason' => $reason,
                         'error' => $exception->getMessage(),
-                        'snapshot_version' => (string) ($snapshot->snapshot_version ?? ''),
-                        'built_at' => $snapshot->built_at?->toIso8601String(),
+                        'snapshot_version' => (string) ($snapshotDocument['snapshot_version'] ?? ''),
+                        'built_at' => $this->snapshotBuiltAtIso($snapshotDocument),
                     ]);
 
-                    return $this->hydrateSnapshot($tenant, $snapshot, $requestRoot, $requestHost);
+                    return $this->hydrateSnapshotPayload(
+                        tenant: $tenant,
+                        snapshotPayload: $this->snapshotPayload($snapshotDocument),
+                        requestRoot: $requestRoot,
+                        requestHost: $requestHost,
+                    );
                 }
 
                 Log::error('tenant_environment_snapshot_repair_failed_falling_back_live', [
@@ -75,7 +88,12 @@ class TenantEnvironmentSnapshotService
             }
         }
 
-        return $this->hydrateSnapshot($tenant, $snapshot, $requestRoot, $requestHost);
+        return $this->hydrateSnapshotPayload(
+            tenant: $tenant,
+            snapshotPayload: $this->snapshotPayload($snapshotDocument),
+            requestRoot: $requestRoot,
+            requestHost: $requestHost,
+        );
     }
 
     public function dispatchRefreshForCurrentTenant(string $reason, array $context = []): void
@@ -182,22 +200,41 @@ class TenantEnvironmentSnapshotService
         ];
     }
 
-    private function needsRepair(?TenantEnvironmentSnapshot $snapshot): bool
+    private function needsRepairDocument(?array $snapshotDocument): bool
     {
-        if (! $snapshot instanceof TenantEnvironmentSnapshot) {
+        if ($snapshotDocument === null) {
             return true;
         }
 
-        if ((int) ($snapshot->schema_version ?? 0) !== self::SCHEMA_VERSION) {
+        if ($this->snapshotSchemaVersion($snapshotDocument) !== self::SCHEMA_VERSION) {
             return true;
         }
 
-        return ! $this->hasUsableSnapshot($snapshot);
+        return ! $this->hasUsableSnapshotDocument($snapshotDocument);
     }
 
-    private function hasUsableSnapshot(TenantEnvironmentSnapshot $snapshot): bool
+    private function hasUsableSnapshotDocument(?array $snapshotDocument): bool
     {
-        return is_array($snapshot->snapshot) && $snapshot->snapshot !== [];
+        return $this->hasUsableSnapshotPayload($this->snapshotPayload($snapshotDocument));
+    }
+
+    private function hasUsableSnapshotPayload(mixed $rawSnapshot): bool
+    {
+        if (is_array($rawSnapshot)) {
+            return $rawSnapshot !== [];
+        }
+
+        if ($rawSnapshot instanceof \Countable) {
+            return count($rawSnapshot) > 0;
+        }
+
+        if ($rawSnapshot instanceof \Traversable) {
+            foreach ($rawSnapshot as $_) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -275,12 +312,110 @@ class TenantEnvironmentSnapshotService
         ?string $requestRoot,
         ?string $requestHost,
     ): array {
-        return $this->payloadFactory->hydrateTenantPayload(
+        return $this->hydrateSnapshotPayload(
             tenant: $tenant,
-            snapshot: $snapshot?->snapshot ?? [],
+            snapshotPayload: $snapshot instanceof TenantEnvironmentSnapshot
+                ? $this->rawSnapshotPayload($snapshot)
+                : [],
             requestRoot: $requestRoot,
             requestHost: $requestHost,
         );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function hydrateSnapshotPayload(
+        Tenant $tenant,
+        mixed $snapshotPayload,
+        ?string $requestRoot,
+        ?string $requestHost,
+    ): array {
+        app(TenantRequestLifecycleTrace::class)->record('environment.snapshot.hydrate.start');
+
+        $payload = $this->payloadFactory->hydrateTenantPayload(
+            tenant: $tenant,
+            snapshot: $snapshotPayload,
+            requestRoot: $requestRoot,
+            requestHost: $requestHost,
+        );
+
+        app(TenantRequestLifecycleTrace::class)->record('environment.snapshot.hydrate.complete');
+
+        return $payload;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function currentSnapshotDocument(): ?array
+    {
+        $document = TenantEnvironmentSnapshot::query()->getQuery()->raw(
+            fn ($collection) => $collection->findOne(['_id' => TenantEnvironmentSnapshot::ROOT_ID])
+        );
+
+        return $this->normalizeSnapshotDocument($document);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function normalizeSnapshotDocument(mixed $document): ?array
+    {
+        $document = $this->normalizeMongoValue($document);
+
+        return is_array($document) ? $document : null;
+    }
+
+    private function snapshotSchemaVersion(?array $snapshotDocument): int
+    {
+        return (int) ($snapshotDocument['schema_version'] ?? 0);
+    }
+
+    private function snapshotPayload(?array $snapshotDocument): mixed
+    {
+        return $snapshotDocument['snapshot'] ?? [];
+    }
+
+    private function snapshotBuiltAtIso(?array $snapshotDocument): ?string
+    {
+        $builtAt = $snapshotDocument['built_at'] ?? null;
+
+        if ($builtAt instanceof \MongoDB\BSON\UTCDateTime) {
+            return Carbon::instance($builtAt->toDateTime())->toIso8601String();
+        }
+
+        if ($builtAt instanceof \DateTimeInterface) {
+            return Carbon::instance(\DateTimeImmutable::createFromInterface($builtAt))->toIso8601String();
+        }
+
+        return null;
+    }
+
+    private function normalizeMongoValue(mixed $value): mixed
+    {
+        if ($value instanceof \MongoDB\Model\BSONDocument || $value instanceof \MongoDB\Model\BSONArray) {
+            $value = $value->getArrayCopy();
+        }
+
+        if ($value instanceof \Traversable) {
+            $value = iterator_to_array($value);
+        }
+
+        if (is_array($value)) {
+            $normalized = [];
+            foreach ($value as $key => $item) {
+                $normalized[$key] = $this->normalizeMongoValue($item);
+            }
+
+            return $normalized;
+        }
+
+        if (is_object($value) && ! $value instanceof \DateTimeInterface && ! $value instanceof \MongoDB\BSON\UTCDateTime) {
+            return $this->normalizeMongoValue((array) $value);
+        }
+
+        return $value;
     }
 
     /**
@@ -298,5 +433,14 @@ class TenantEnvironmentSnapshotService
                 JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR
             ) ?: Carbon::now()->toIso8601String(),
         );
+    }
+
+    private function rawSnapshotPayload(TenantEnvironmentSnapshot $snapshot): mixed
+    {
+        if (method_exists($snapshot, 'getRawOriginal')) {
+            return $snapshot->getRawOriginal('snapshot');
+        }
+
+        return $snapshot->getAttributes()['snapshot'] ?? null;
     }
 }

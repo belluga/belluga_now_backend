@@ -83,6 +83,17 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertJsonPath('telemetry.location_freshness_minutes', 5);
     }
 
+    public function test_environment_api_on_tenant_subdomain_does_not_issue_a_session_cookie(): void
+    {
+        $tenant = $this->currentTenant();
+        $tenant->makeCurrent();
+
+        $response = $this->get("{$this->base_api_tenant}environment");
+
+        $response->assertOk();
+        $response->assertHeaderMissing('Set-Cookie');
+    }
+
     public function test_environment_api_snapshot_matches_live_payload_on_tenant_subdomain_request(): void
     {
         $tenant = $this->currentTenant();
@@ -141,6 +152,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertStatus(200);
         $this->assertSame($expected, $response->json());
 
+        $tenant->makeCurrent();
         $snapshot = TenantEnvironmentSnapshot::current();
         $this->assertNotNull($snapshot);
         $this->assertSame(TenantEnvironmentSnapshotService::SCHEMA_VERSION, (int) $snapshot->schema_version);
@@ -187,6 +199,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertStatus(200);
         $this->assertSame($baselinePayload, $response->json());
 
+        $tenant->makeCurrent();
         $failedSnapshot = TenantEnvironmentSnapshot::current();
         $this->assertNotNull($failedSnapshot?->last_rebuild_failed_at);
         $this->assertStringContainsString(

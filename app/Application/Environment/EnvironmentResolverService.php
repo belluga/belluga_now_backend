@@ -34,11 +34,7 @@ class EnvironmentResolverService
      */
     public function resolve(array $input): array
     {
-        $currentTenant = Tenant::current();
-        $tenant = $currentTenant?->fresh();
-        if ($tenant === null) {
-            $tenant = $this->resolveRequestedTenant($input);
-        }
+        $tenant = Tenant::current() ?? $this->resolveRequestedTenant($input);
         $requestHost = $input['request_host'] ?? null;
 
         if ($tenant) {

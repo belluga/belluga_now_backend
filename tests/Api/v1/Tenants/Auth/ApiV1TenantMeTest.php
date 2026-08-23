@@ -115,6 +115,7 @@ class ApiV1TenantMeTest extends TestCaseTenant
             ]
         )->assertStatus(200);
 
+        $this->makeCanonicalTenantCurrent($this->tenant);
         $profile = AccountProfile::query()
             ->where('created_by', (string) $user->_id)
             ->where('created_by_type', 'tenant')

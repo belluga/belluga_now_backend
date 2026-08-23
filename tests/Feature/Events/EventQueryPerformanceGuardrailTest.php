@@ -8,6 +8,7 @@ use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
+use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
@@ -190,6 +191,100 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         );
     }
 
+    public function test_public_physical_host_resolution_reuses_profile_type_reads(): void
+    {
+        $publicPoiType = TenantProfileType::query()->create([
+            'type' => 'resolver-budget-venue',
+            'label' => 'Resolver Budget Venue',
+            'labels' => [
+                'singular' => 'Resolver Budget Venue',
+                'plural' => 'Resolver Budget Venues',
+            ],
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
+                'is_publicly_navigable' => true,
+                'is_poi_enabled' => true,
+            ],
+        ]);
+
+        $profiles = [];
+        for ($index = 1; $index <= 3; $index++) {
+            $account = Account::query()->create([
+                'name' => "Public Resolver Budget Account {$index}",
+                'document' => "DOC-PUBLIC-RESOLVER-BUDGET-{$index}",
+            ]);
+
+            $profiles[] = AccountProfile::query()->create([
+                'account_id' => (string) $account->_id,
+                'profile_type' => (string) $publicPoiType->type,
+                'display_name' => "Public Resolver Budget Venue {$index}",
+                'slug' => "public-resolver-budget-venue-{$index}",
+                'taxonomy_terms' => [],
+                'location' => [
+                    'type' => 'Point',
+                    'coordinates' => [-40.1234 - ($index / 1000), -20.5678 - ($index / 1000)],
+                ],
+                'visibility' => 'public',
+                'is_active' => true,
+            ]);
+        }
+
+        $connection = DB::connection('tenant');
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
+
+        $resolved = app(AccountProfileResolverAdapter::class)
+            ->resolveExistingPublicPhysicalHostsByProfileIds(
+                array_map(static fn (AccountProfile $profile): string => (string) $profile->_id, $profiles)
+            );
+
+        $queries = collect($connection->getQueryLog());
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
+        $queryLogJson = json_encode($queries->all(), JSON_UNESCAPED_SLASHES);
+        $profileTypeQueries = $queries->filter(
+            static fn (array $query): bool => str_contains(
+                json_encode($query, JSON_UNESCAPED_SLASHES),
+                'account_profile_types'
+            )
+        );
+        $accountProfileQueries = $queries->filter(
+            static fn (array $query): bool => str_contains(
+                json_encode($query, JSON_UNESCAPED_SLASHES),
+                'account_profiles'
+            )
+        );
+
+        $profileId = (string) $profiles[0]->_id;
+        $this->assertCount(3, $resolved);
+        $this->assertArrayHasKey($profileId, $resolved);
+        $this->assertSame(
+            'Public Resolver Budget Venue 1',
+            data_get($resolved, "{$profileId}.venue.display_name")
+        );
+        $this->assertSame(
+            '/parceiro/public-resolver-budget-venue-1',
+            data_get($resolved, "{$profileId}.venue.public_detail_path")
+        );
+        $this->assertLessThanOrEqual(
+            3,
+            $queries->count(),
+            "Public physical host resolution must stay within the cold <=3 statement ceiling for three profiles. Queries: {$queryLogJson}"
+        );
+        $this->assertCount(
+            2,
+            $profileTypeQueries,
+            "Public physical host resolution must reuse a bounded pair of account_profile_types lookups. Queries: {$queryLogJson}"
+        );
+        $this->assertCount(
+            1,
+            $accountProfileQueries,
+            "Public physical host resolution must fetch account_profiles once after type filtering. Queries: {$queryLogJson}"
+        );
+    }
+
     public function test_account_scoped_management_occurrence_query_filters_owned_events_without_legacy_account_context_snapshots(): void
     {
         $account = Account::query()->create([
@@ -322,9 +417,20 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
 
-        $connection = DB::connection('tenant');
-        $connection->flushQueryLog();
-        $connection->enableQueryLog();
+        $tenantConnections = [];
+        $tenantConnection = DB::connection('tenant');
+        $tenantConnection->flushQueryLog();
+        $tenantConnection->enableQueryLog();
+        $tenantConnections[] = $tenantConnection;
+        app('events')->listen(\Illuminate\Database\Events\ConnectionEstablished::class, static function ($event) use (&$tenantConnections): void {
+            if ($event->connection->getName() !== 'tenant') {
+                return;
+            }
+
+            $event->connection->flushQueryLog();
+            $event->connection->enableQueryLog();
+            $tenantConnections[] = $event->connection;
+        });
 
         $response = $this->getJson(
             "{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=budget&page=1&page_size=2"
@@ -333,7 +439,8 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonCount(2, 'data');
 
-        $queries = collect($connection->getQueryLog());
+        $queries = collect($tenantConnections)
+            ->flatMap(static fn ($connection): array => $connection->getQueryLog());
         $queryLogJson = json_encode($queries->all(), JSON_UNESCAPED_SLASHES);
         $profileTypeQueries = $queries->filter(
             static fn (array $query): bool => str_contains(
@@ -443,6 +550,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $createResponse->assertStatus(201);
 
         $eventId = (string) $createResponse->json('data.event_id');
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $event = Event::query()->findOrFail($eventId);
         $occurrence = EventOccurrence::query()
             ->where('event_id', $eventId)
@@ -606,6 +714,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         );
         $detailQueries = collect($connection->getQueryLog());
         $connection->disableQueryLog();
+        $connection->flushQueryLog();
 
         $this->assertSame((string) $event->_id, $detailPayload['event_id'] ?? null);
         $this->assertSame(2, $detailPayload['counterpart_count'] ?? null);
@@ -631,6 +740,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $managementPayload = $service->formatManagementEvent($event->fresh());
         $managementQueries = collect($connection->getQueryLog());
         $connection->disableQueryLog();
+        $connection->flushQueryLog();
 
         $this->assertSame((string) $event->_id, $managementPayload['event_id'] ?? null);
         $managementAccountProfileQueries = $managementQueries->filter(
@@ -706,6 +816,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         ], null);
         $agendaQueries = collect($connection->getQueryLog());
         $connection->disableQueryLog();
+        $connection->flushQueryLog();
 
         $this->assertNotEmpty($agendaPayload['items'] ?? []);
         $agendaAccountProfileQueries = $agendaQueries->filter(
@@ -730,6 +841,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         );
         $managementQueries = collect($connection->getQueryLog());
         $connection->disableQueryLog();
+        $connection->flushQueryLog();
 
         $this->assertNotEmpty($managementPaginator->items());
         $managementAccountProfileQueries = $managementQueries->filter(
@@ -961,6 +1073,8 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             ]
         );
         $response->assertCreated();
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
 
         return Event::query()->where('title', $title)->firstOrFail()->fresh();
     }

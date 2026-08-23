@@ -7,6 +7,7 @@ namespace Tests\Unit\Events;
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\EventContentSanitizerAdapter;
+use App\Integration\Events\EventRequestLifecycleTraceAdapter;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
 use App\Integration\Events\EventTypeResolverAdapter;
 use App\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
@@ -22,6 +23,7 @@ use Belluga\Events\Contracts\EventCapabilitySettingsContract;
 use Belluga\Events\Contracts\EventContentSanitizerContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
+use Belluga\Events\Contracts\EventRequestLifecycleTraceContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
@@ -57,6 +59,10 @@ class EventsPackageBindingsTest extends TestCase
         $this->assertInstanceOf(
             EventContentSanitizerAdapter::class,
             $this->app->make(EventContentSanitizerContract::class)
+        );
+        $this->assertInstanceOf(
+            EventRequestLifecycleTraceAdapter::class,
+            $this->app->make(EventRequestLifecycleTraceContract::class)
         );
         $this->assertInstanceOf(
             InMemoryEventPartyMapperRegistry::class,
