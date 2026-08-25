@@ -330,6 +330,56 @@ class EventAggregateWriteService
         return $result;
     }
 
+    /** @return array{id:string,label:string,order:int,member_count:int,_changed:bool} */
+    public function renameOccurrenceGroup(
+        Event $event,
+        EventOccurrence $occurrence,
+        string $groupId,
+        string $label,
+        ?string $commandId = null,
+    ): array
+    {
+        return $this->transactions->run(function () use ($event, $occurrence, $groupId, $label, $commandId): array {
+            $eventId = trim((string) $event->getKey());
+            if ($eventId === '' || trim((string) ($occurrence->event_id ?? '')) !== $eventId) {
+                throw new NotFoundHttpException;
+            }
+            $groups = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata($occurrence, $eventId);
+            $group = $this->findOccurrenceGroupOrFail($groups, $groupId);
+            $label = trim($label);
+            if ($label === '') {
+                throw ValidationException::withMessages(['label' => ['Related-account group label is required.']]);
+            }
+            if ($label === (string) $group['label']) {
+                return $this->occurrenceGroupMutationResult($group, changed: false);
+            }
+            $nextGroups = array_map(static fn (array $candidate): array => [
+                'id' => trim((string) ($candidate['id'] ?? '')),
+                'label' => trim((string) ($candidate['id'] ?? '')) === (string) $group['id'] ? $label : trim((string) ($candidate['label'] ?? '')),
+                'order' => (int) ($candidate['order'] ?? 0),
+            ], $groups);
+            $metadataOnly = $this->profileGroupMemberStore->metadataOnly($nextGroups);
+            $occurrence->forceFill(['own_profile_groups' => $metadataOnly, 'profile_groups' => $metadataOnly]);
+            $occurrence->save();
+            $fresh = $occurrence->fresh() ?? $occurrence;
+            $this->occurrenceNestedAccountStore->syncOccurrenceGroupMetadata($eventId, $fresh, $metadataOnly);
+            $event->touch();
+            $updated = $this->findOccurrenceGroupOrFail(
+                $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata($fresh->fresh() ?? $fresh, $eventId),
+                (string) $group['id'],
+            );
+
+            return $this->occurrenceGroupMutationResult($updated, changed: true);
+        });
+    }
+
+    /** @param array<string,mixed> $group
+     * @return array{id:string,label:string,order:int,member_count:int,_changed:bool} */
+    private function occurrenceGroupMutationResult(array $group, bool $changed = false): array
+    {
+        return ['id' => (string) $group['id'], 'label' => (string) $group['label'], 'order' => (int) ($group['order'] ?? 0), 'member_count' => max(0, (int) ($group['member_count'] ?? 0)), '_changed' => $changed];
+    }
+
     public function repairOccurrences(Event $event): void
     {
         $eventId = (string) $event->_id;

@@ -15,6 +15,7 @@ use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Events\Http\Api\v1\Requests\EventAccountProfileCandidatesRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventIndexRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupStoreRequest;
+use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupLabelPatchRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupMembersPatchRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupMembersRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventStoreRequest;
@@ -269,6 +270,26 @@ class EventsController extends Controller
                 $occurrence,
                 $group_id,
             ),
+        ]);
+    }
+
+    public function patchOccurrenceProfileGroupLabel(
+        EventOccurrenceGroupLabelPatchRequest $request,
+        string $tenant_domain,
+        string $event_id,
+        string $occurrence_id,
+        string $group_id,
+    ): JsonResponse {
+        $event = $this->eventQueryService->findByIdOrSlug($event_id);
+        if (! $event) {
+            abort(404, 'Event not found.');
+        }
+        $occurrence = $this->findOccurrenceOrFail($event, $occurrence_id);
+
+        return response()->json([
+            'data' => ['group' => $this->eventManagementService->renameOccurrenceGroup(
+                $event, $occurrence, $group_id, $request->label(), $request->header('X-Request-Id'),
+            )],
         ]);
     }
 

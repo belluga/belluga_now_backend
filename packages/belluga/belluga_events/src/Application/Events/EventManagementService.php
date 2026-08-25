@@ -154,6 +154,24 @@ class EventManagementService
         return $result;
     }
 
+    /** @return array{id:string,label:string,order:int,member_count:int} */
+    public function renameOccurrenceGroup(
+        Event $event,
+        EventOccurrence $occurrence,
+        string $groupId,
+        string $label,
+        ?string $commandId = null,
+    ): array
+    {
+        $group = $this->eventAggregateWrites->renameOccurrenceGroup($event, $occurrence, $groupId, $label, $commandId);
+        if ($group['_changed']) {
+            $this->events->dispatch(new EventUpdated((string) $event->_id));
+        }
+        unset($group['_changed']);
+
+        return $group;
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      * @return array{

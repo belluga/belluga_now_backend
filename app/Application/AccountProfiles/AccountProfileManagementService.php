@@ -652,6 +652,54 @@ class AccountProfileManagementService
         ];
     }
 
+    /** @return array{id:string,label:string,order:int,member_count:int} */
+    public function renameNestedGroup(
+        AccountProfile $profile,
+        string $groupId,
+        string $label,
+        ?string $commandId = null,
+    ): array {
+        $groups = $this->nestedGroupMemberStore->metadataGroups($profile);
+        $group = $this->nestedGroupService->findGroupOrFail($groups, $groupId);
+        $label = trim($label);
+
+        if ($label === '') {
+            throw ValidationException::withMessages(['label' => ['Nested profile group label is required.']]);
+        }
+
+        if ($label === (string) $group['label']) {
+            return $this->nestedGroupMutationResult($group);
+        }
+
+        $nextGroups = array_map(static fn (array $candidate): array => [
+            'id' => trim((string) ($candidate['id'] ?? '')),
+            'label' => trim((string) ($candidate['id'] ?? '')) === (string) $group['id']
+                ? $label
+                : trim((string) ($candidate['label'] ?? '')),
+            'order' => (int) ($candidate['order'] ?? 0),
+        ], $groups);
+
+        $updated = $this->update($profile, ['nested_profile_groups' => $nextGroups], $commandId, useAggregateRevisionCas: false);
+        $updatedGroup = $this->nestedGroupService->findGroupOrFail(
+            $this->nestedGroupMemberStore->metadataGroups($updated),
+            (string) $group['id'],
+        );
+
+        return $this->nestedGroupMutationResult($updatedGroup);
+    }
+
+    /** @param array<string,mixed> $group
+     *  @return array{id:string,label:string,order:int,member_count:int} */
+    private function nestedGroupMutationResult(array $group): array
+    {
+        return [
+            'id' => (string) $group['id'],
+            'label' => (string) $group['label'],
+            'order' => (int) ($group['order'] ?? 0),
+            'member_count' => max(0, (int) ($group['member_count'] ?? 0)),
+        ];
+    }
+
     /**
      * @return array{nested_profile_groups:array<int, array<string, mixed>>,deleted_group_id:string}
      */
