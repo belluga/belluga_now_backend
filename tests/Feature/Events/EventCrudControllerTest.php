@@ -17,10 +17,12 @@ use App\Models\Tenants\EventType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\Events\Application\Events\EventAggregateWriteService;
 use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
+use Belluga\Events\Contracts\EventContentSanitizerContract;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
@@ -35,6 +37,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -175,10 +178,10 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_event_create_sanitizes_content_html_subset_and_preserves_emojis(): void
+    public function test_event_create_preserves_explicit_https_content_links_and_default_denies_unsafe_links(): void
     {
         $payload = $this->makeEventPayload([
-            'content' => '<p><strong>Evento 🎉</strong> <u>underline</u> <a href="https://example.com">link</a> <s>riscado</s></p>',
+            'content' => '<p><strong>Evento 🎉</strong> <u>underline</u> <a href="https://example.com/path?a=1&amp;b=2">safe</a> <a href="javascript:alert(1)">unsafe</a> <s>riscado</s></p>',
         ]);
 
         $response = $this->postJson($this->accountEventsBase, $payload);
@@ -189,12 +192,13 @@ class EventCrudControllerTest extends TestCaseTenant
         $stored = Event::query()->findOrFail($eventId);
         $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
 
-        $expected = '<p><strong>Evento 🎉</strong> underline link <s>riscado</s></p>';
+        $expected = '<p><strong>Evento 🎉</strong> underline <a href="https://example.com/path?a=1&amp;b=2">safe</a> unsafe <s>riscado</s></p>';
         $this->assertSame($expected, (string) $response->json('data.content'));
         $this->assertSame($expected, $stored->content);
         $this->assertSame($stored->content, $occurrence->content);
         $this->assertStringNotContainsString('<u>', $stored->content);
-        $this->assertStringNotContainsString('<a', $stored->content);
+        $this->assertSame(1, substr_count($stored->content, '<a href="https://'));
+        $this->assertStringNotContainsString('javascript:', $stored->content);
         $this->assertStringContainsString('<s>riscado</s>', $stored->content);
         $this->assertStringContainsString('🎉', $stored->content);
     }
@@ -241,6 +245,59 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertSame($expected, $stored->content);
         $this->assertSame($expected, $occurrence->content);
         $this->assertStringContainsString('🎉', $stored->content);
+    }
+
+    public function test_event_aggregate_canonicalizes_content_once_per_create_update_and_repair_and_syncs_exact_value(): void
+    {
+        $createRaw = '<p><a href="https://example.test/create">create</a></p>';
+        $createCanonical = '<p><a href="https://example.test/create">create</a></p>';
+        $updateRaw = '<p><a href="https://example.test/update">update</a></p>';
+        $updateCanonical = '<p><a href="https://example.test/update">update</a></p>';
+        $sanitizer = \Mockery::mock(EventContentSanitizerContract::class);
+        $sanitizer->shouldReceive('sanitize')
+            ->once()
+            ->with($createRaw, true)
+            ->ordered()
+            ->andReturn($createCanonical);
+        $sanitizer->shouldReceive('sanitize')
+            ->once()
+            ->with($updateRaw, true)
+            ->ordered()
+            ->andReturn($updateCanonical);
+        $sanitizer->shouldReceive('sanitize')
+            ->once()
+            ->with($updateCanonical, true)
+            ->ordered()
+            ->andReturn($updateCanonical);
+        $this->app->instance(EventContentSanitizerContract::class, $sanitizer);
+
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
+            'content' => $createRaw,
+        ]));
+        $created->assertCreated();
+        $eventId = (string) $created->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $this->assertSame(
+            $createCanonical,
+            (string) $this->occurrenceDocumentAtOrder($eventId, 0)->content,
+        );
+
+        $updated = $this->patchJson("{$this->accountEventsBase}/{$eventId}", [
+            'content' => $updateRaw,
+        ]);
+        $updated->assertOk();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $event = Event::query()->findOrFail($eventId);
+        $this->assertSame(
+            $updateCanonical,
+            (string) $this->occurrenceDocumentAtOrder($eventId, 0)->content,
+        );
+
+        app(EventAggregateWriteService::class)->repairOccurrences($event);
+        $this->assertSame(
+            $updateCanonical,
+            (string) $this->occurrenceDocumentAtOrder($eventId, 0)->content,
+        );
     }
 
     public function test_event_content_limit_is_100kb_after_sanitization(): void
@@ -3330,7 +3387,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 'date_time_start' => $occurrences[1]['date_time_start'],
                 'date_time_end' => $occurrences[1]['date_time_end'],
             ],
-        ]);
+        ], (string) ($event->content ?? ''));
     }
 
     public function test_event_update_rejects_mismatched_occurrence_identity_pair(): void
@@ -3427,7 +3484,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
     public function test_event_create_persists_mixed_timed_and_untimed_programming_items_in_stable_order_for_admin_and_public_readback(): void
     {
-        $openingTitle = '<strong>Abertura</strong><script>alert(1)</script>';
+        $openingTitle = '<strong>Abertura</strong><a href="https://example.test/programming">link negado</a><script>alert(1)</script>';
         $sequentialTitle = '<p>Intervalo <em>sequencial</em></p><script>alert(2)</script>';
         $closingTitle = 'Encerramento';
 
@@ -3457,7 +3514,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $created->assertJsonPath('data.occurrences.0.programming_items.2.time', '20:00');
         $created->assertJsonPath('data.occurrences.0.programming_items.0.end_time', '18:00');
         $created->assertJsonPath('data.occurrences.0.programming_items.1.end_time', null);
-        $created->assertJsonPath('data.occurrences.0.programming_items.0.title', '<p><strong>Abertura</strong></p>');
+        $created->assertJsonPath('data.occurrences.0.programming_items.0.title', '<p><strong>Abertura</strong>link negado</p>');
         $created->assertJsonPath('data.occurrences.0.programming_items.1.title', '<p>Intervalo <em>sequencial</em></p>');
         $created->assertJsonPath('data.occurrences.0.programming_items.2.title', $this->sanitizedProgrammingTitle($closingTitle));
 
@@ -3472,7 +3529,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 [
                     'sequence' => 0,
                     'time' => '17:00',
-                    'title' => '<p><strong>Abertura</strong></p>',
+                    'title' => '<p><strong>Abertura</strong>link negado</p>',
                 ],
                 [
                     'sequence' => 1,
@@ -3500,7 +3557,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $publicDetail->assertJsonPath('data.programming_items.0.time', '17:00');
         $publicDetail->assertJsonPath('data.programming_items.1.time', null);
         $publicDetail->assertJsonPath('data.programming_items.2.time', '20:00');
-        $publicDetail->assertJsonPath('data.programming_items.0.title', '<p><strong>Abertura</strong></p>');
+        $publicDetail->assertJsonPath('data.programming_items.0.title', '<p><strong>Abertura</strong>link negado</p>');
         $publicDetail->assertJsonPath('data.programming_items.1.title', '<p>Intervalo <em>sequencial</em></p>');
         $publicDetail->assertJsonPath('data.programming_items.2.title', $this->sanitizedProgrammingTitle($closingTitle));
         $publicDetail->assertJsonMissingPath('data.programming_items.0.title.<script>');
@@ -3515,7 +3572,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $adminDetail->assertJsonPath('data.occurrences.0.programming_items.0.time', '17:00');
         $adminDetail->assertJsonPath('data.occurrences.0.programming_items.1.time', null);
         $adminDetail->assertJsonPath('data.occurrences.0.programming_items.2.time', '20:00');
-        $adminDetail->assertJsonPath('data.occurrences.0.programming_items.0.title', '<p><strong>Abertura</strong></p>');
+        $adminDetail->assertJsonPath('data.occurrences.0.programming_items.0.title', '<p><strong>Abertura</strong>link negado</p>');
         $adminDetail->assertJsonPath('data.occurrences.0.programming_items.1.title', '<p>Intervalo <em>sequencial</em></p>');
         $adminDetail->assertJsonPath('data.occurrences.0.programming_items.2.title', $this->sanitizedProgrammingTitle($closingTitle));
     }
@@ -3576,7 +3633,11 @@ class EventCrudControllerTest extends TestCaseTenant
             $storedItems[1],
         ]);
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent($event->fresh(), $syncOccurrences);
+        app(EventOccurrenceSyncService::class)->syncFromEvent(
+            $event->fresh(),
+            $syncOccurrences,
+            (string) ($event->content ?? ''),
+        );
 
         $syncedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
         $syncedProgrammingItems = data_get($syncedOccurrence, 'programming_items', []);
@@ -8339,6 +8400,45 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['occurrences']);
     }
 
+    public function test_event_occurrence_repair_detects_stored_max_plus_one_and_skips_without_rewriting(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertCreated();
+        $eventId = (string) $created->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $event = Event::query()->findOrFail($eventId);
+        $template = $this->occurrenceDocumentAtOrder($eventId, 0)->getAttributes();
+        unset($template['_id'], $template['id']);
+        for ($index = 1; $index <= InputConstraints::EVENT_OCCURRENCES_MAX; $index++) {
+            EventOccurrence::query()->create(array_replace($template, [
+                '_id' => new ObjectId(),
+                'occurrence_slug' => sprintf('%s-overflow-%03d', $event->slug, $index),
+                'order' => $index,
+                'starts_at' => Carbon::now()->addDays($index),
+                'ends_at' => Carbon::now()->addDays($index)->addHour(),
+                'effective_ends_at' => Carbon::now()->addDays($index)->addHour(),
+            ]));
+        }
+        $this->assertSame(
+            InputConstraints::EVENT_OCCURRENCES_MAX + 1,
+            EventOccurrence::query()->where('event_id', $eventId)->count(),
+        );
+
+        Log::spy();
+        app(EventAggregateWriteService::class)->repairOccurrences($event);
+
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->with(
+                'events_occurrence_reconciliation_skipped_schedule_overflow',
+                \Mockery::on(static fn (array $context): bool => ($context['event_id'] ?? null) === $eventId),
+            );
+        $this->assertSame(
+            InputConstraints::EVENT_OCCURRENCES_MAX + 1,
+            EventOccurrence::query()->where('event_id', $eventId)->count(),
+        );
+    }
+
     public function test_event_create_rejects_legacy_tags_and_unbounded_categories_and_taxonomy_terms(): void
     {
         $oversizedCategories = array_map(
@@ -9483,7 +9583,11 @@ class EventCrudControllerTest extends TestCaseTenant
             'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
         ]];
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
+        app(EventOccurrenceSyncService::class)->syncFromEvent(
+            $event,
+            $occurrences,
+            (string) ($event->content ?? ''),
+        );
 
         return $event->fresh();
     }

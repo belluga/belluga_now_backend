@@ -8,5 +8,295 @@
     "name": "safe_subset_and_unsupported_container_unwrap",
     "input": "<h2>Título seguro</h2><p><strong>Forte</strong> <em>ênfase</em> <s>riscado</s> <a href=\"https://example.test\">link texto</a></p><blockquote>Citação</blockquote><ul><li>Item um</li><li>Item dois</li></ul><ol><li>Passo um</li></ol><div>Antes <iframe>texto interno</iframe> <u>under</u> after</div><script>remover script</script><style>.x{}</style>",
     "expected": "<h2>Título seguro</h2><p><strong>Forte</strong> <em>ênfase</em> <s>riscado</s> link texto</p><blockquote>Citação</blockquote><ul><li>Item um</li><li>Item dois</li></ul><ol><li>Passo um</li></ol>Antes texto interno under after"
+  },
+  {
+    "name": "default_deny_https_and_unsafe_anchor_attributes",
+    "input": "<p><a href=\"https://example.test/docs\">safe</a> <a href=\"javascript:alert(1)\">unsafe</a></p>",
+    "expected": "<p>safe unsafe</p>",
+    "explicit_https_expected": "<p><a href=\"https://example.test/docs\">safe</a> unsafe</p>"
+  },
+  {
+    "name": "explicit_https_single_quote_legacy_anchor",
+    "input": "<p><a href='HTTPS://example.test/legacy'>legacy</a></p>",
+    "expected": "<p>legacy</p>",
+    "explicit_https_expected": "<p><a href=\"https://example.test/legacy\">legacy</a></p>"
+  },
+  {
+    "name": "converter_extra_attribute_unwraps_without_orphan_close",
+    "input": "<p><a href=\"https://example.test/docs\" target=\"_blank\">converter</a></p>",
+    "expected": "<p>converter</p>",
+    "explicit_https_expected": "<p>converter</p>"
+  },
+  {
+    "name": "orphan_anchor_close_is_removed",
+    "input": "<p>orphan</a></p>",
+    "expected": "<p>orphan</p>",
+    "explicit_https_expected": "<p>orphan</p>"
+  },
+  {
+    "name": "explicit_https_closed_grammar_case_and_spacing",
+    "input": "<p><A\tHREF = 'HTTPS://example.test/Case'>case</A></p>",
+    "expected": "<p>case</p>",
+    "explicit_https_expected": "<p><a href=\"https://example.test/Case\">case</a></p>"
+  },
+  {
+    "name": "explicit_https_raw_query_and_fragment_ampersands",
+    "input": "<p><a href=\"https://example.test/path?a=1&b=2#x&y\">query</a></p>",
+    "expected": "<p>query</p>",
+    "explicit_https_expected": "<p><a href=\"https://example.test/path?a=1&amp;b=2#x&amp;y\">query</a></p>"
+  },
+  {
+    "name": "explicit_https_single_canonical_amp_decode",
+    "input": "<p><a href=\"https://example.test/path?a=1&amp;b=2\">query</a></p>",
+    "expected": "<p>query</p>",
+    "explicit_https_expected": "<p><a href=\"https://example.test/path?a=1&amp;b=2\">query</a></p>"
+  },
+  {
+    "name": "raw_amp_parameter_name_is_allowed",
+    "input": "<p><a href=\"https://example.test/path?a=1&amp=2\">query</a></p>",
+    "expected": "<p>query</p>",
+    "explicit_https_expected": "<p><a href=\"https://example.test/path?a=1&amp;amp=2\">query</a></p>"
+  },
+  {
+    "name": "double_encoded_entity_is_rejected",
+    "input": "<p><a href=\"https://example.test/?a=1&amp;amp;b=2\">double</a></p>",
+    "expected": "<p>double</p>",
+    "explicit_https_expected": "<p>double</p>"
+  },
+  {
+    "name": "noncanonical_entity_is_rejected",
+    "input": "<p><a href=\"https://example.test/?q=&quot;x&quot;\">entity</a></p>",
+    "expected": "<p>entity</p>",
+    "explicit_https_expected": "<p>entity</p>"
+  },
+  {
+    "name": "duplicate_href_is_rejected",
+    "input": "<p><a href=\"https://example.test/one\" href='https://example.test/two'>duplicate</a></p>",
+    "expected": "<p>duplicate</p>",
+    "explicit_https_expected": "<p>duplicate</p>"
+  },
+  {
+    "name": "malformed_quote_is_rejected",
+    "input": "<p><a href=\"https://example.test>quote</a></p>",
+    "expected": "<p>quote</p>",
+    "explicit_https_expected": "<p>quote</p>"
+  },
+  {
+    "name": "raw_double_quote_in_href_is_rejected",
+    "input": "<p><a href='https://example.test/\"quote'>quote</a></p>",
+    "expected": "<p>quote</p>",
+    "explicit_https_expected": "<p>quote</p>"
+  },
+  {
+    "name": "raw_less_than_in_href_is_rejected",
+    "input": "<p><a href='https://example.test/<path'>angle</a></p>",
+    "expected": "<p>angle</p>",
+    "explicit_https_expected": "<p>angle</p>"
+  },
+  {
+    "name": "raw_greater_than_in_href_is_rejected",
+    "input": "<p><a href='https://example.test/>path'>angle</a></p>",
+    "expected": "<p>angle</p>",
+    "explicit_https_expected": "<p>angle</p>"
+  },
+  {
+    "name": "malformed_anchor_close_is_unwrapped",
+    "input": "<p><a href=\"https://example.test/path\">close</a bogus></p>",
+    "expected": "<p>close</p>",
+    "explicit_https_expected": "<p>close</p>"
+  },
+  {
+    "name": "missing_close_is_rejected",
+    "input": "<p><a href=\"https://example.test\">missing</p>",
+    "expected": "<p>missing</p>",
+    "explicit_https_expected": "<p>missing</p>"
+  },
+  {
+    "name": "nested_unsafe_markup_rejects_anchor",
+    "input": "<p><a href=\"https://example.test\">safe<script>bad</script></a></p>",
+    "expected": "<p>safe</p>",
+    "explicit_https_expected": "<p>safe</p>"
+  },
+  {
+    "name": "nested_safe_markup_preserves_anchor",
+    "input": "<p><a href=\"https://example.test\"><strong>safe</strong></a></p>",
+    "expected": "<p><strong>safe</strong></p>",
+    "explicit_https_expected": "<p><a href=\"https://example.test\"><strong>safe</strong></a></p>"
+  },
+  {
+    "name": "userinfo_is_rejected",
+    "input": "<p><a href=\"https://user:pass@example.test/path\">userinfo</a></p>",
+    "expected": "<p>userinfo</p>",
+    "explicit_https_expected": "<p>userinfo</p>"
+  },
+  {
+    "name": "backslash_authority_is_rejected",
+    "input": "<p><a href=\"https://example.test\\@evil.test/path\">backslash</a></p>",
+    "expected": "<p>backslash</p>",
+    "explicit_https_expected": "<p>backslash</p>"
+  },
+  {
+    "name": "raw_control_is_rejected",
+    "input": "<p><a href=\"https://example.test/\u0001path\">control</a></p>",
+    "expected": "<p>control</p>",
+    "explicit_https_expected": "<p>control</p>"
+  },
+  {
+    "name": "encoded_control_is_rejected",
+    "input": "<p><a href=\"https://example.test/%0Apath\">control</a></p>",
+    "expected": "<p>control</p>",
+    "explicit_https_expected": "<p>control</p>"
+  },
+  {
+    "name": "malformed_percent_is_rejected",
+    "input": "<p><a href=\"https://example.test/%GG\">percent</a></p>",
+    "expected": "<p>percent</p>",
+    "explicit_https_expected": "<p>percent</p>"
+  },
+  {
+    "name": "invalid_port_is_rejected",
+    "input": "<p><a href=\"https://example.test:70000/path\">port</a></p>",
+    "expected": "<p>port</p>",
+    "explicit_https_expected": "<p>port</p>"
+  },
+  {
+    "name": "leading_zero_port_01_is_rejected",
+    "input": "<p><a href=\"https://example.test:01/path\">port</a></p>",
+    "expected": "<p>port</p>",
+    "explicit_https_expected": "<p>port</p>"
+  },
+  {
+    "name": "leading_zero_port_080_is_rejected",
+    "input": "<p><a href=\"https://example.test:080/path\">port</a></p>",
+    "expected": "<p>port</p>",
+    "explicit_https_expected": "<p>port</p>"
+  },
+  {
+    "name": "ambiguous_authority_is_rejected",
+    "input": "<p><a href=\"https:////example.test/path\">authority</a></p>",
+    "expected": "<p>authority</p>",
+    "explicit_https_expected": "<p>authority</p>"
+  },
+  {
+    "name": "quoted_tag_delimiter_extra_attribute_is_rejected",
+    "input": "<p><a href=\"https://example.test/path>segment\" title=\"extra\">delimiter</a></p>",
+    "expected": "<p>delimiter</p>",
+    "explicit_https_expected": "<p>delimiter</p>"
+  },
+  {
+    "name": "encoded_space_is_rejected",
+    "input": "<p><a href=\"https://example.test/path%20segment\">space</a></p>",
+    "expected": "<p>space</p>",
+    "explicit_https_expected": "<p>space</p>"
+  },
+  {
+    "name": "at_sign_in_path_and_query_is_allowed",
+    "input": "<p><a href=\"https://example.test/@owner?q=@guest\">at</a></p>",
+    "expected": "<p>at</p>",
+    "explicit_https_expected": "<p><a href=\"https://example.test/@owner?q=@guest\">at</a></p>"
+  },
+  {
+    "name": "bracketed_ipv6_authority_is_preserved_without_reserialization",
+    "input": "<p><a href=\"HTTPS://[2001:db8::1]:443/docs?a=1&amp;b=2\">ipv6</a></p>",
+    "expected": "<p>ipv6</p>",
+    "explicit_https_expected": "<p><a href=\"https://[2001:db8::1]:443/docs?a=1&amp;b=2\">ipv6</a></p>"
+  },
+  {
+    "name": "malformed_ipv6_missing_close_bracket_is_rejected",
+    "input": "<p><a href=\"https://[2001:db8::1/docs\">ipv6</a></p>",
+    "expected": "<p>ipv6</p>",
+    "explicit_https_expected": "<p>ipv6</p>"
+  },
+  {
+    "name": "malformed_ipv6_extra_close_bracket_is_rejected",
+    "input": "<p><a href=\"https://[2001:db8::1]]/docs\">ipv6</a></p>",
+    "expected": "<p>ipv6</p>",
+    "explicit_https_expected": "<p>ipv6</p>"
+  },
+  {
+    "name": "malformed_ipv6_hex_is_rejected",
+    "input": "<p><a href=\"https://[2001:db8::gg]/docs\">ipv6</a></p>",
+    "expected": "<p>ipv6</p>",
+    "explicit_https_expected": "<p>ipv6</p>"
+  },
+  {
+    "name": "raw_open_brace_in_href_is_rejected",
+    "input": "<p><a href=\"https://example.test/docs?q={raw\">brace</a></p>",
+    "expected": "<p>brace</p>",
+    "explicit_https_expected": "<p>brace</p>"
+  },
+  {
+    "name": "raw_close_brace_in_href_is_rejected",
+    "input": "<p><a href=\"https://example.test/docs?q=raw}\">brace</a></p>",
+    "expected": "<p>brace</p>",
+    "explicit_https_expected": "<p>brace</p>"
+  },
+  {
+    "name": "raw_apostrophe_in_href_is_rejected",
+    "input": "<p><a href=\"https://example.test/docs?q=it's\">apostrophe</a></p>",
+    "expected": "<p>apostrophe</p>",
+    "explicit_https_expected": "<p>apostrophe</p>"
+  },
+  {
+    "name": "percent_encoded_authority_letter_is_rejected",
+    "input": "<p><a href=\"https://%65xample.test/docs\">encoded host</a></p>",
+    "expected": "<p>encoded host</p>",
+    "explicit_https_expected": "<p>encoded host</p>"
+  },
+  {
+    "name": "percent_encoded_authority_dot_is_rejected",
+    "input": "<p><a href=\"https://example%2Etest/docs\">encoded host</a></p>",
+    "expected": "<p>encoded host</p>",
+    "explicit_https_expected": "<p>encoded host</p>"
+  },
+  {
+    "name": "percent_encoded_authority_at_is_rejected",
+    "input": "<p><a href=\"https://example.test%40evil.test/docs\">encoded authority</a></p>",
+    "expected": "<p>encoded authority</p>",
+    "explicit_https_expected": "<p>encoded authority</p>"
+  },
+  {
+    "name": "percent_encoded_authority_colon_is_rejected",
+    "input": "<p><a href=\"https://example.test%3A443/docs\">encoded authority</a></p>",
+    "expected": "<p>encoded authority</p>",
+    "explicit_https_expected": "<p>encoded authority</p>"
+  },
+  {
+    "name": "valid_href_equal_to_internal_sentinel_shape_is_preserved",
+    "input": "<p><a href=\"https://belluga-rich-text.invalid/__explicit_href_0__\">sentinel-shaped href</a></p>",
+    "expected": "<p>sentinel-shaped href</p>",
+    "explicit_https_expected": "<p><a href=\"https://belluga-rich-text.invalid/__explicit_href_0__\">sentinel-shaped href</a></p>"
+  },
+  {
+    "name": "valid_prefix_then_near_limit_unterminated_quoted_anchor_candidates",
+    "input_repeat": {
+      "prefix": "<p><a href=\"https://example.test/valid\">valid</a></p>",
+      "fragment": "<a href=\"",
+      "count": 10000,
+      "suffix": ""
+    },
+    "expected": "<p>valid</p>",
+    "explicit_https_expected": "<p><a href=\"https://example.test/valid\">valid</a></p>"
+  },
+  {
+    "name": "near_limit_unterminated_opening_anchor_sequence",
+    "input_repeat": {
+      "prefix": "<p>",
+      "fragment": "<a href=\"https://example.test/unclosed\">x",
+      "count": 2450,
+      "suffix": "</p>"
+    },
+    "expected_repeat": {
+      "prefix": "<p>",
+      "fragment": "x",
+      "count": 2450,
+      "suffix": "</p>"
+    },
+    "explicit_https_expected_repeat": {
+      "prefix": "<p>",
+      "fragment": "x",
+      "count": 2450,
+      "suffix": "</p>"
+    }
   }
 ]

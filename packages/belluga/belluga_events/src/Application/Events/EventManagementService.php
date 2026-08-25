@@ -19,8 +19,8 @@ use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\UTCDateTime;
 
@@ -198,14 +198,9 @@ class EventManagementService
         }
 
         if (array_key_exists('content', $payload)) {
-            $normalized['content'] = $this->contentSanitizer->sanitize(
-                $payload['content'] ?? null
-            );
-            if (strlen($normalized['content']) > InputConstraints::RICH_TEXT_MAX_BYTES) {
-                throw ValidationException::withMessages([
-                    'content' => ['The content may not be greater than 100 KB after sanitization.'],
-                ]);
-            }
+            // EventAggregateWriteService is the sole Event content write
+            // canonicalizer. This layer retains the raw validated field.
+            $normalized['content'] = $payload['content'] ?? null;
         }
 
         if (array_key_exists('type', $payload)) {
@@ -1140,7 +1135,10 @@ class EventManagementService
             return null;
         }
 
-        $sanitized = $this->contentSanitizer->sanitize((string) $value);
+        $sanitized = $this->contentSanitizer->sanitize(
+            (string) $value,
+            allowExplicitHttpsLinks: false,
+        );
         if (strlen($sanitized) > InputConstraints::RICH_TEXT_MAX_BYTES) {
             throw ValidationException::withMessages([
                 $field => ['The title may not be greater than 100 KB after sanitization.'],

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\AccountProfiles;
 
 use App\Application\AccountProfiles\AccountProfileAgendaOccurrencesService;
+use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileLifecycleService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMapPoiOutboxConsumer;
@@ -22,6 +23,7 @@ use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
@@ -32,6 +34,8 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
+use App\Support\RichText\RichTextReadCanonicalizer;
+use App\Support\RichText\SafeRichTextHtmlSanitizer;
 use App\Support\Validation\InputConstraints;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Models\Tenants\Event;
@@ -338,10 +342,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_profile_update_conflicts_while_its_account_is_deletion_gated(): void
     {
-        $this->markTestSkipped(
-            'Deferred to foundation_documentation/todos/active/v0.4.1/TODO-v0.4.1-account-profile-deletion-gate-conflict-response.md during the Tuesday, July 21, 2026 v0.4.0 promotion replay.'
-        );
-
         $profile = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
             'profile_type' => 'venue',
@@ -360,7 +360,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
             [...$this->getHeaders(), 'X-Request-Id' => 'u07a-gated-update-'.uniqid('', true)],
         )->assertConflict();
 
-        $this->assertSame('Deletion Gated Venue', (string) $profile->fresh()->display_name);
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $this->assertSame(
+            'Deletion Gated Venue',
+            (string) AccountProfile::query()->findOrFail((string) $profile->_id)->display_name,
+        );
     }
 
     public function test_gallery_update_persists_an_outbox_event_and_conflicts_while_deletion_gated(): void
@@ -1587,8 +1591,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $connection->enableQueryLog();
 
         $payload = $service->findExistingPublicCatalogProfilesByIds([
-            (string) new ObjectId(),
-            (string) new ObjectId(),
+            (string) new ObjectId,
+            (string) new ObjectId,
         ]);
 
         $this->assertSame([], $payload);
@@ -3438,7 +3442,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'date_time_start' => Carbon::instance($startsAt),
             'date_time_end' => $endsAt !== null ? Carbon::instance($endsAt) : null,
             'profile_groups' => $profileGroups,
-        ]]);
+        ]], (string) ($event->content ?? ''));
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
@@ -5643,10 +5647,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_account_profile_update_rejects_duplicate_slug(): void
     {
-        $this->markTestSkipped(
-            'Deferred to foundation_documentation/todos/active/v0.4.1/TODO-v0.4.1-account-profile-duplicate-slug-update-validation.md during the Tuesday, July 21, 2026 v0.4.0 promotion replay.'
-        );
-
         $primary = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
             'profile_type' => 'personal',
@@ -6991,7 +6991,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
-
     public function test_public_nested_group_members_rebuild_multiple_affected_parents_without_touching_unrelated_projections(): void
     {
         $member = $this->createNestedProfileFixture('Shared Nested Member', 'shared-nested-member');
@@ -7811,6 +7810,77 @@ class AccountProfilesControllerTest extends TestCaseTenant
             '"$toString":"$_id"',
             $canonical,
             sprintf('%s must not stringify foreign _id inside the lookup pipeline.', $surface)
+        );
+    }
+
+    public function test_account_profile_resolver_and_outbox_projections_apply_rich_text_policy(): void
+    {
+        $sanitizerCalls = [];
+        $this->app->scoped(
+            RichTextReadCanonicalizer::class,
+            static function () use (&$sanitizerCalls): RichTextReadCanonicalizer {
+                return new RichTextReadCanonicalizer(
+                    static function (string $value, bool $allowExplicitHttpsLinks) use (&$sanitizerCalls): string {
+                        $sanitizerCalls[] = [$value, $allowExplicitHttpsLinks];
+
+                        return SafeRichTextHtmlSanitizer::sanitize($value, $allowExplicitHttpsLinks);
+                    }
+                );
+            }
+        );
+        $this->app->forgetScopedInstances();
+
+        $safe = '<a HREF="HTTPS://example.test/safe">safe</a>';
+        $unsafe = '<a href="javascript:alert(1)">unsafe</a>';
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Rich Text Projection Venue',
+            'slug' => 'rich-text-projection-venue',
+            'visibility' => 'public',
+            'is_active' => true,
+            'bio' => "<p>{$safe}{$unsafe}</p>",
+            'content' => "<p>{$unsafe}{$safe}</p>",
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
+            'taxonomy_terms' => [],
+        ])->fresh();
+        $expectedBio = '<p><a href="https://example.test/safe">safe</a>unsafe</p>';
+        $expectedContent = '<p>unsafe<a href="https://example.test/safe">safe</a></p>';
+
+        $queryFormat = new \ReflectionMethod(AccountProfileQueryService::class, 'format');
+        $queryPayload = $queryFormat->invoke(
+            app(AccountProfileQueryService::class),
+            $profile,
+        );
+        $this->assertSame($expectedBio, $queryPayload['bio']);
+        $this->assertSame($expectedContent, $queryPayload['content']);
+
+        $formatted = app(AccountProfileFormatterService::class)->format($profile);
+        $this->assertSame($expectedBio, $formatted['bio']);
+        $this->assertSame($expectedContent, $formatted['content']);
+
+        $resolved = app(AccountProfileResolverAdapter::class)
+            ->resolvePhysicalHostByProfileId((string) $profile->_id);
+        $this->assertSame($expectedBio, data_get($resolved, 'venue.bio'));
+        $this->assertSame($expectedContent, data_get($resolved, 'venue.content'));
+
+        $outboxProjection = new \ReflectionMethod(AccountProfileOutboxPublisher::class, 'projection');
+        $projection = $outboxProjection->invoke(
+            app(AccountProfileOutboxPublisher::class),
+            $profile,
+        );
+        $this->assertSame($expectedBio, $projection['bio']);
+        $this->assertSame($expectedContent, $projection['content']);
+        $this->assertSame(
+            [
+                [$profile->bio, true],
+                [$profile->content, true],
+            ],
+            $sanitizerCalls,
+            'Query, formatter, resolver, and outbox must share one request-scoped canonicalization per field identity.'
         );
     }
 

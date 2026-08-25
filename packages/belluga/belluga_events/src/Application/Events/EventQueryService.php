@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
-use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventAccountResolverContract;
+use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
+use Belluga\Events\Contracts\EventContentReadCanonicalizerContract;
 use Belluga\Events\Contracts\EventDiscoveryFilterCatalogContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
-use Belluga\Events\Contracts\EventRequestLifecycleTraceContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
+use Belluga\Events\Contracts\EventRequestLifecycleTraceContract;
 use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
 use Belluga\Events\Models\Tenants\Event;
@@ -54,6 +55,7 @@ class EventQueryService
         private readonly EventOccurrenceNestedAccountStore $occurrenceNestedAccountStore,
         private readonly EventDiscoveryFilterCatalogContract $eventDiscoveryFilterCatalog,
         private readonly EventRequestLifecycleTraceContract $requestLifecycleTrace,
+        private readonly EventContentReadCanonicalizerContract $contentReadCanonicalizer,
         ?EventManagementOccurrenceQuery $managementOccurrenceQuery = null,
     ) {
         $this->managementOccurrenceQuery = $managementOccurrenceQuery
@@ -611,7 +613,11 @@ class EventQueryService
         return $this->withPublicCounterpartContract([
             'slug' => $this->scalarString($event->slug ?? null) ?? '',
             'title' => $this->scalarString($event->title ?? null) ?? '',
-            'content' => $this->scalarString($event->content ?? null) ?? '',
+            'content' => $this->contentReadCanonicalizer->canonicalize(
+                $event->content ?? null,
+                (string) $event->getKey(),
+                'content',
+            ),
             'location' => $location === [] ? null : $location,
             'place_ref' => $placeRef === [] ? null : $placeRef,
             'venue' => $venuePayload,
@@ -739,7 +745,11 @@ class EventQueryService
                 'icon_color' => $this->scalarString($type['icon_color'] ?? null),
             ],
             'title' => $this->scalarString($event->title ?? null) ?? '',
-            'content' => $this->scalarString($event->content ?? null) ?? '',
+            'content' => $this->contentReadCanonicalizer->canonicalize(
+                $event->content ?? null,
+                (string) $event->getKey(),
+                'content',
+            ),
             'location' => $location === [] ? null : $location,
             'place_ref' => $placeRef === [] ? null : $placeRef,
             'venue' => $venuePayload,
@@ -2166,7 +2176,11 @@ class EventQueryService
                 'icon_color' => $this->scalarString($type['icon_color'] ?? null),
             ],
             'title' => $this->scalarString($event->title ?? null) ?? '',
-            'content' => $this->scalarString($event->content ?? null) ?? '',
+            'content' => $this->contentReadCanonicalizer->canonicalize(
+                $event->content ?? null,
+                (string) $event->getKey(),
+                'content',
+            ),
             'location' => $location === [] ? null : $location,
             'place_ref' => $placeRef === [] ? null : $placeRef,
             'venue' => $venuePayload,
@@ -2318,8 +2332,7 @@ class EventQueryService
         array $payload,
         array $linkedAccountProfiles,
         ?int $counterpartCount = null,
-    ): array
-    {
+    ): array {
         $counterpartPreview = $this->normalizeManagementLinkedAccountProfiles(
             $linkedAccountProfiles,
         );
@@ -3829,6 +3842,7 @@ class EventQueryService
             $orderedIds,
             $this->profileIdsFromStoredProfileGroups(data_get($event, 'own_profile_groups'))
         );
+
         return array_keys($orderedIds);
     }
 
@@ -3852,6 +3866,7 @@ class EventQueryService
             $orderedIds,
             $this->profileIdsFromStoredProfileGroups(data_get($event, 'profile_groups'))
         );
+
         return array_keys($orderedIds);
     }
 
