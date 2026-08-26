@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
+use Belluga\Events\Application\Transactions\EventTransactionContext;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Models\Tenants\Event;
@@ -39,7 +40,6 @@ final class EventOccurrenceNestedAccountStore
     public function __construct(
         private readonly EventTenantContextContract $tenantContext,
         private readonly EventProfileResolverContract $eventProfileResolver,
-        private readonly EventProfileGroupMemberStore $legacyProfileGroupMemberStore,
     ) {}
 
     /**
@@ -147,7 +147,6 @@ final class EventOccurrenceNestedAccountStore
                 ],
                 [
                     '$set' => [
-                        'group_label' => (string) $group['label'],
                         'group_order' => (int) $group['order'],
                         'updated_at' => $now,
                     ],
@@ -278,54 +277,6 @@ final class EventOccurrenceNestedAccountStore
         return $eventIds;
     }
 
-    public function materializeLegacyIfNeeded(Event $event, bool $includeTrashedOccurrences = false): void
-    {
-        $eventId = trim((string) $event->getKey());
-        if ($eventId === '') {
-            return;
-        }
-
-        $existing = $this->collection()->countDocuments([
-            'tenant_id' => $this->tenantId(),
-            'event_id' => $eventId,
-            'parent_type' => self::PARENT_TYPE,
-        ]);
-        if ($existing > 0) {
-            return;
-        }
-
-        $occurrenceQuery = $includeTrashedOccurrences
-            ? EventOccurrence::withTrashed()
-            : EventOccurrence::query();
-        $occurrences = $occurrenceQuery
-            ->where('event_id', $eventId)
-            ->orderBy('starts_at')
-            ->get();
-
-        foreach ($occurrences as $occurrence) {
-            if (! $occurrence instanceof EventOccurrence) {
-                continue;
-            }
-
-            $occurrenceId = trim((string) $occurrence->getKey());
-            if ($occurrenceId === '') {
-                continue;
-            }
-
-            $ownGroups = $this->legacyProfileGroupMemberStore->inflateGroupsWithMembers(
-                $occurrence->own_profile_groups ?? [],
-                'occurrence',
-                $occurrenceId,
-            );
-
-            $this->syncOccurrenceGroups(
-                $eventId,
-                $occurrence,
-                $ownGroups,
-            );
-        }
-    }
-
     /**
      * @return array<int, array{id:string,label:string,order:int,member_count:int,members_path:string}>
      */
@@ -351,6 +302,11 @@ final class EventOccurrenceNestedAccountStore
         ));
 
         if ($headRows === []) {
+            $embeddedGroups = $this->normalizeArray($occurrence->own_profile_groups ?? []);
+            if ($embeddedGroups !== []) {
+                throw new NotFoundHttpException;
+            }
+
             return [];
         }
 
@@ -407,6 +363,58 @@ final class EventOccurrenceNestedAccountStore
         }
 
         return $groups;
+    }
+
+    /** @return array{id:string,label:string,_changed:bool} */
+    public function renameOccurrenceGroupLabel(
+        EventTransactionContext $context,
+        string $eventId,
+        string $occurrenceId,
+        string $groupId,
+        string $label,
+    ): array {
+        $eventId = trim($eventId);
+        $occurrenceId = trim($occurrenceId);
+        $groupId = trim($groupId);
+        $label = trim($label);
+        if ($eventId === '' || $occurrenceId === '' || $groupId === '') {
+            throw new NotFoundHttpException;
+        }
+
+        $headFilter = [
+            '_id' => $this->headId($occurrenceId, $groupId),
+            'tenant_id' => $this->tenantId(),
+            'event_id' => $eventId,
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $occurrenceId,
+            'group_key' => $groupId,
+            'doc_type' => self::DOC_TYPE_HEAD,
+        ];
+        $result = $context->collection(self::COLLECTION)->updateOne(
+            $headFilter,
+            [[
+                '$set' => [
+                    'group_label' => ['$literal' => $label],
+                    'updated_at' => [
+                        '$cond' => [
+                            ['$ne' => ['$group_label', ['$literal' => $label]]],
+                            '$$NOW',
+                            '$updated_at',
+                        ],
+                    ],
+                ],
+            ]],
+            $context->rawOptions(),
+        );
+        if ($result->getMatchedCount() !== 1) {
+            throw new NotFoundHttpException;
+        }
+
+        return [
+            'id' => $groupId,
+            'label' => $label,
+            '_changed' => $result->getModifiedCount() === 1,
+        ];
     }
 
     /**
@@ -533,7 +541,6 @@ final class EventOccurrenceNestedAccountStore
                     'parent_type' => self::PARENT_TYPE,
                     'parent_id' => $occurrenceId,
                     'group_key' => $groupKey,
-                    'group_label' => (string) ($group['group_label'] ?? ''),
                     'group_order' => (int) ($group['group_order'] ?? 0),
                     'doc_type' => self::DOC_TYPE_HEAD,
                     'updated_at' => $now,
@@ -552,7 +559,6 @@ final class EventOccurrenceNestedAccountStore
                     'parent_type' => self::PARENT_TYPE,
                     'parent_id' => $occurrenceId,
                     'group_key' => $groupKey,
-                    'group_label' => (string) ($group['group_label'] ?? ''),
                     'group_order' => (int) ($group['group_order'] ?? 0),
                     'item_order' => $itemOrder,
                     'doc_type' => self::DOC_TYPE_MEMBER,
@@ -722,23 +728,14 @@ final class EventOccurrenceNestedAccountStore
         foreach ($memberRows as $row) {
             $document = $this->documentToArray($row);
             $groupKey = trim((string) ($document['group_key'] ?? ''));
-            $groupLabel = trim((string) ($document['group_label'] ?? ''));
             $nestedProfile = $this->normalizeArray($document['nested_profile'] ?? []);
             $memberId = trim((string) ($nestedProfile['id'] ?? ''));
-            if ($groupKey === '' || $groupLabel === '' || $memberId === '') {
+            if ($groupKey === '' || $memberId === '') {
                 continue;
             }
 
             if (! isset($groupsByKey[$groupKey])) {
-                $groupsByKey[$groupKey] = [
-                    'id' => $groupKey,
-                    'label' => $groupLabel,
-                    'order' => isset($document['group_order'])
-                        ? (int) $document['group_order']
-                        : $groupOrderIndex,
-                    'account_profile_ids' => [],
-                ];
-                $groupOrderIndex++;
+                throw new RuntimeException('Event nested-group repair found a member row without a canonical head.');
             }
 
             if (! in_array($memberId, $groupsByKey[$groupKey]['account_profile_ids'], true)) {
@@ -1371,7 +1368,6 @@ final class EventOccurrenceNestedAccountStore
                     'parent_type' => self::PARENT_TYPE,
                     'parent_id' => $occurrenceId,
                     'group_key' => $group['id'],
-                    'group_label' => $group['label'],
                     'group_order' => $group['order'],
                     'item_order' => $itemOrder,
                     'doc_type' => self::DOC_TYPE_MEMBER,

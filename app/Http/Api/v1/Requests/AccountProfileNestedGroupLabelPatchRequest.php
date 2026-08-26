@@ -16,12 +16,15 @@ final class AccountProfileNestedGroupLabelPatchRequest extends FormRequest
 
     public function prepareForValidation(): void
     {
-        $this->merge(['label' => trim((string) $this->input('label'))]);
+        $label = $this->input('label');
+        if (is_string($label)) {
+            $this->merge(['label' => trim($label)]);
+        }
     }
 
     public function rules(): array
     {
-        return ['label' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX]];
+        return ['label' => ['bail', 'required', 'string', 'max:'.InputConstraints::NAME_MAX]];
     }
 
     public function label(): string

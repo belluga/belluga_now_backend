@@ -22,7 +22,11 @@ use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
+use Belluga\Events\Application\Transactions\EventTransactionContext;
+use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Contracts\EventContentSanitizerContract;
+use Belluga\Events\Contracts\EventTenantContextContract;
+use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
@@ -37,6 +41,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event as EventBus;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -46,6 +51,7 @@ use Mockery\MockInterface;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\UTCDateTime;
 use Tests\Helpers\TenantLabels;
+use Tests\Support\MongoCommandTrace;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
@@ -5105,7 +5111,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $eventId,
             (string) $occurrence->_id,
             'artists',
-            [],
+            ['event_id' => $eventId, 'deleted_at' => null, 'own_profile_groups._id' => 'artists', 'profile_groups._id' => 'artists'],
             [(string) $secondArtist->_id],
         );
 
@@ -5134,6 +5140,444 @@ class EventCrudControllerTest extends TestCaseTenant
             $fresh->getAttributes(),
             'Event aggregate after canonical occurrence group member patch replacement'
         );
+    }
+
+    public function test_missing_canonical_occurrence_group_heads_fail_closed_without_legacy_materialization(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertCreated();
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->createOccurrenceGroupHead($eventId, (string) $occurrence->_id, 'Artists')->assertCreated();
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->deleteMany([
+            'event_id' => $eventId,
+            'parent_type' => EventOccurrenceNestedAccountStore::PARENT_TYPE,
+            'parent_id' => (string) $occurrence->_id,
+        ]);
+
+        $readTrace = $this->captureMongoCommands(fn () => $this->getJson(
+            "{$this->accountEventsBase}/{$eventId}",
+        )->assertNotFound());
+        $this->assertSame(0, $readTrace->countForCollection('accounts_nested', 'count'));
+        $this->assertSame(0, $readTrace->countForCollection('accounts_nested', 'insert'));
+        $this->assertSame(0, $readTrace->countForCollection('accounts_nested', 'update'));
+
+        $writeTrace = $this->captureMongoCommands(fn () => $this->createOccurrenceGroupHead(
+            $eventId,
+            (string) $occurrence->_id,
+            'Partners',
+        )->assertNotFound());
+        $this->assertSame(0, $writeTrace->countForCollection('accounts_nested', 'aggregate'));
+        $this->assertSame(0, $writeTrace->countForCollection('accounts_nested', 'count'));
+        $this->assertSame(0, $writeTrace->countForCollection('accounts_nested', 'insert'));
+        $this->assertSame(0, $writeTrace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame([], $this->eventNestedAccountRows([
+            'event_id' => $eventId,
+            'parent_type' => EventOccurrenceNestedAccountStore::PARENT_TYPE,
+            'parent_id' => (string) $occurrence->_id,
+        ]));
+    }
+
+    public function test_occurrence_profile_group_label_patch_persists_and_repeats_without_extra_write_or_dispatch(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertCreated();
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->createOccurrenceGroupHead($eventId, (string) $occurrence->_id, 'Artists')->assertCreated();
+        $url = "{$this->tenantAdminEventsBase}/{$eventId}/occurrences/{$occurrence->_id}/profile_groups/artists";
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $head = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            '_id' => 'accounts-nested:head:event_occurrence:'.$occurrence->_id.':artists',
+        ]);
+        $this->assertNotNull($head);
+        $tenantId = trim((string) ($head['tenant_id'] ?? ''));
+        $this->assertNotSame('', $tenantId);
+        $membersPath = "{$this->tenantAdminEventsBase}/{$eventId}/occurrences/{$occurrence->_id}/profile_groups/artists/members";
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $occurrence->_id,
+            'artists',
+            [(string) $this->artist->_id],
+        )->assertOk()->assertJsonPath('data.member_count', 1);
+        $beforeRenameMembers = $this->managementGroupMemberRows($membersPath);
+
+        EventBus::fake([EventUpdated::class]);
+        $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+        $first = $this->patchJson($url, ['label' => '  Partners  ']);
+        $first->assertOk()->assertJsonPath('data.group.id', 'artists')->assertJsonPath('data.group.label', 'Partners');
+        EventBus::assertDispatched(EventUpdated::class, static fn (EventUpdated $event): bool => $event->eventId === $eventId);
+        $this->assertSame($beforeRenameMembers, $this->managementGroupMemberRows($membersPath));
+
+        EventBus::fake([EventUpdated::class]);
+        $snapshotOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $snapshotGroups = $snapshotOccurrence->own_profile_groups;
+        $snapshotUpdatedAt = (string) $snapshotOccurrence->updated_at;
+        $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+        $same = $this->patchJson($url, ['label' => 'Partners']);
+        $same->assertOk()->assertJsonPath('data.group.label', 'Partners');
+        EventBus::assertNotDispatched(EventUpdated::class);
+        $afterSame = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->assertSame($snapshotGroups, $afterSame->own_profile_groups);
+        $this->assertSame($snapshotUpdatedAt, (string) $afterSame->updated_at);
+        $this->assertSame($beforeRenameMembers, $this->managementGroupMemberRows($membersPath));
+        $this->actingAsEventOwnerUser();
+    }
+
+    public function test_occurrence_profile_group_label_patch_stays_within_indexed_mongo_command_budget(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertCreated();
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->createOccurrenceGroupHead($eventId, (string) $occurrence->_id, 'Artists')->assertCreated();
+        $url = "{$this->tenantAdminEventsBase}/{$eventId}/occurrences/{$occurrence->_id}/profile_groups/artists";
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $head = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            '_id' => 'accounts-nested:head:event_occurrence:'.$occurrence->_id.':artists',
+        ]);
+        $this->assertNotNull($head);
+        $tenantId = trim((string) ($head['tenant_id'] ?? ''));
+        $this->assertNotSame('', $tenantId);
+
+        $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+        $trace = $this->captureMongoCommands(fn () => $this->patchJson($url, ['label' => 'Artists renamed'])->assertOk());
+
+        $this->assertSame(1, $trace->countForCollection('events', 'find'));
+        $this->assertSame(1, $trace->countForCollection('event_occurrences', 'find'));
+        $this->assertSame(1, $trace->countCommand('commitTransaction'));
+        $this->assertSame(0, $trace->countCommand('abortTransaction'));
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'find'));
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'aggregate'));
+        $this->assertSame(1, $trace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(1, $trace->countForCollection('event_occurrences', 'update'));
+        $this->assertSame(1, $trace->countForCollection('events', 'update'));
+        $this->assertFalse($trace->hasFindForDocumentType('accounts_nested', 'member_row'));
+        $selector = [
+            '_id' => 'accounts-nested:head:event_occurrence:'.$occurrence->_id.':artists',
+            'tenant_id' => $tenantId,
+            'event_id' => $eventId,
+            'parent_type' => 'event_occurrence',
+            'parent_id' => (string) $occurrence->_id,
+            'group_key' => 'artists',
+        ];
+        $this->assertTrue($trace->hasFilterContaining('accounts_nested', 'update', [...$selector, 'doc_type' => 'group_head']));
+        $this->assertTrue($trace->hasExactlyOneNonUpsertSingleUpdateContaining(
+            'accounts_nested',
+            [...$selector, 'doc_type' => 'group_head'],
+        ));
+        $this->assertTrue($trace->hasExactlyOneNonUpsertSingleUpdateContaining(
+            'event_occurrences',
+            [],
+        ));
+        $this->assertTrue($trace->hasExactlyOneNonUpsertSingleUpdateContaining(
+            'events',
+            [],
+        ));
+        $this->assertTrue($trace->hasExactlyOneSingleUpdateWith(
+            'accounts_nested',
+            [...$selector, 'doc_type' => 'group_head'],
+            static fn (mixed $update): bool => is_array($update)
+                && ($update[0]['$set']['group_label'] ?? null) === ['$literal' => 'Artists renamed']
+                && ($update[0]['$set']['updated_at']['$cond'][0] ?? null) === ['$ne' => ['$group_label', ['$literal' => 'Artists renamed']]],
+        ));
+        $this->assertTrue($trace->hasNonEmptyTenantIdOnSingleUpdate('accounts_nested'));
+        $this->assertTrue($trace->hasExactlyOneSingleUpdateWith(
+            'event_occurrences',
+            [
+                '_id' => (string) $occurrence->_id,
+                'event_id' => $eventId,
+                'deleted_at' => null,
+                'own_profile_groups._id' => 'artists',
+                'profile_groups._id' => 'artists',
+            ],
+            static fn (mixed $update): bool => is_array($update)
+                && ($update['$set']['own_profile_groups.$[group].label'] ?? null) === 'Artists renamed'
+                && ($update['$set']['profile_groups.$[group].label'] ?? null) === 'Artists renamed',
+            [['group._id' => 'artists']],
+        ));
+        $this->assertTrue($trace->hasExactlyOneSingleUpdateWith(
+            'events',
+            ['_id' => $eventId],
+            static fn (mixed $update): bool => is_array($update)
+                && array_key_exists('updated_at', $update['$set'] ?? []),
+        ));
+
+        $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+        $noOpTrace = $this->captureMongoCommands(fn () => $this->patchJson($url, ['label' => 'Artists renamed'])->assertOk());
+        $this->assertSame(1, $noOpTrace->countForCollection('events', 'find'));
+        $this->assertSame(1, $noOpTrace->countForCollection('event_occurrences', 'find'));
+        $this->assertSame(1, $noOpTrace->countCommand('commitTransaction'));
+        $this->assertSame(0, $noOpTrace->countCommand('abortTransaction'));
+        $this->assertSame(0, $noOpTrace->countForCollection('accounts_nested', 'find'));
+        $this->assertSame(0, $noOpTrace->countForCollection('accounts_nested', 'aggregate'));
+        $this->assertSame(1, $noOpTrace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(0, $noOpTrace->countForCollection('event_occurrences', 'update'));
+        $this->assertSame(0, $noOpTrace->countForCollection('events', 'update'));
+        $this->assertFalse($noOpTrace->hasFindForDocumentType('accounts_nested', 'member_row'));
+        $this->assertTrue($noOpTrace->hasExactlyOneNonUpsertSingleUpdateContaining(
+            'accounts_nested',
+            [...$selector, 'doc_type' => 'group_head'],
+        ));
+        $this->assertTrue($noOpTrace->hasExactlyOneSingleUpdateWith(
+            'accounts_nested',
+            [...$selector, 'doc_type' => 'group_head'],
+            static fn (mixed $update): bool => is_array($update)
+                && ($update[0]['$set']['group_label'] ?? null) === ['$literal' => 'Artists renamed']
+                && ($update[0]['$set']['updated_at']['$cond'][0] ?? null) === ['$ne' => ['$group_label', ['$literal' => 'Artists renamed']]],
+        ));
+        $this->assertTrue($noOpTrace->hasNonEmptyTenantIdOnSingleUpdate('accounts_nested'));
+        $this->actingAsEventOwnerUser();
+    }
+
+    public function test_occurrence_profile_group_label_patch_accepts_an_event_root_touch_with_unchanged_timestamp(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertCreated();
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->createOccurrenceGroupHead($eventId, (string) $occurrence->_id, 'Artists')->assertCreated();
+        $url = "{$this->tenantAdminEventsBase}/{$eventId}/occurrences/{$occurrence->_id}/profile_groups/artists";
+        $frozenNow = Carbon::parse('2026-08-26T17:00:00.123Z');
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        DB::connection('tenant')->getDatabase()->selectCollection('events')->updateOne(
+            ['_id' => new ObjectId($eventId)],
+            ['$set' => ['updated_at' => new UTCDateTime((int) $frozenNow->getTimestampMs())]],
+        );
+
+        Carbon::setTestNow($frozenNow);
+        try {
+            $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+            $this->patchJson($url, ['label' => 'Artists renamed'])
+                ->assertOk()
+                ->assertJsonPath('data.group.label', 'Artists renamed');
+        } finally {
+            Carbon::setTestNow();
+        }
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $event = DB::connection('tenant')->getDatabase()->selectCollection('events')->findOne([
+            '_id' => new ObjectId($eventId),
+        ]);
+        $this->assertSame((string) new UTCDateTime((int) $frozenNow->getTimestampMs()), (string) $event['updated_at']);
+        $this->assertSame(
+            'Artists renamed',
+            $this->occurrenceDocumentAtOrder($eventId, 0)->own_profile_groups[0]['label'] ?? null,
+        );
+        $this->actingAsEventOwnerUser();
+    }
+
+    public function test_occurrence_profile_group_label_patch_persists_dollar_prefixed_labels_as_literal_strings(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertCreated();
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->createOccurrenceGroupHead($eventId, (string) $occurrence->_id, 'Artists')->assertCreated();
+        $url = "{$this->tenantAdminEventsBase}/{$eventId}/occurrences/{$occurrence->_id}/profile_groups/artists";
+
+        foreach (['$group_label', '$$NOW', '$$ROOT', '$missing'] as $label) {
+            $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+            $this->patchJson($url, ['label' => $label])
+                ->assertOk()
+                ->assertJsonPath('data.group.label', $label);
+            $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+            $head = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+                '_id' => 'accounts-nested:head:event_occurrence:'.$occurrence->_id.':artists',
+            ]);
+            $persisted = $this->occurrenceDocumentAtOrder($eventId, 0);
+            $this->assertSame($label, $head['group_label'] ?? null);
+            $this->assertSame($label, $persisted->own_profile_groups[0]['label'] ?? null);
+            $this->assertSame($label, $persisted->profile_groups[0]['label'] ?? null);
+        }
+        $this->actingAsEventOwnerUser();
+    }
+
+    public function test_occurrence_profile_group_label_patch_requires_authentication_and_update_ability_without_writes(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertCreated();
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->createOccurrenceGroupHead($eventId, (string) $occurrence->_id, 'Artists')->assertCreated();
+        $url = "{$this->tenantAdminEventsBase}/{$eventId}/occurrences/{$occurrence->_id}/profile_groups/artists";
+
+        auth()->forgetGuards();
+        $anonymousTrace = $this->captureMongoCommands(
+            fn () => $this->patchJson($url, ['label' => 'Anonymous'])->assertUnauthorized(),
+        );
+        $this->assertSame(0, $anonymousTrace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(0, $anonymousTrace->countForCollection('event_occurrences', 'update'));
+        $this->assertSame(0, $anonymousTrace->countForCollection('events', 'update'));
+        $this->assertSame(0, $anonymousTrace->countCommand('commitTransaction'));
+
+        $this->actingAsTenantEventAdmin(['events:read']);
+        $forbiddenTrace = $this->captureMongoCommands(
+            fn () => $this->patchJson($url, ['label' => 'Forbidden'])->assertForbidden(),
+        );
+        $this->assertSame(0, $forbiddenTrace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(0, $forbiddenTrace->countForCollection('event_occurrences', 'update'));
+        $this->assertSame(0, $forbiddenTrace->countForCollection('events', 'update'));
+        $this->assertSame(0, $forbiddenTrace->countCommand('commitTransaction'));
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $head = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            '_id' => 'accounts-nested:head:event_occurrence:'.$occurrence->_id.':artists',
+        ]);
+        $persisted = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->assertSame('Artists', $head['group_label'] ?? null);
+        $this->assertSame('Artists', $persisted->own_profile_groups[0]['label'] ?? null);
+        $this->assertSame('Artists', $persisted->profile_groups[0]['label'] ?? null);
+        $this->actingAsEventOwnerUser();
+    }
+
+    public function test_occurrence_profile_group_label_patch_full_request_budget_covers_missing_and_invalid_paths(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertCreated();
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->createOccurrenceGroupHead($eventId, (string) $occurrence->_id, 'Artists')->assertCreated();
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $head = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            '_id' => 'accounts-nested:head:event_occurrence:'.$occurrence->_id.':artists',
+        ]);
+        $this->assertNotNull($head);
+        $tenantId = trim((string) app(EventTenantContextContract::class)->resolveCurrentTenantId());
+        $this->assertNotSame('', $tenantId);
+
+        $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+        $missingTrace = $this->captureMongoCommands(fn () => $this->patchJson(
+            "{$this->tenantAdminEventsBase}/{$eventId}/occurrences/{$occurrence->_id}/profile_groups/missing",
+            ['label' => 'Missing'],
+        )->assertNotFound());
+        $this->assertSame(1, $missingTrace->countForCollection('events', 'find'));
+        $this->assertSame(1, $missingTrace->countForCollection('event_occurrences', 'find'));
+        $this->assertSame(1, $missingTrace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(0, $missingTrace->countForCollection('event_occurrences', 'update'));
+        $this->assertSame(0, $missingTrace->countForCollection('events', 'update'));
+        $this->assertSame(0, $missingTrace->countCommand('commitTransaction'));
+        $this->assertSame(1, $missingTrace->countCommand('abortTransaction'));
+        $this->assertSame([
+            'accounts_nested:update' => 1,
+            'event_occurrences:find' => 1,
+            'events:find' => 1,
+        ], $missingTrace->collectionCommandMatrix());
+        $this->assertTrue($missingTrace->hasExactlyOneSingleUpdateWith(
+            'accounts_nested',
+            [
+                '_id' => 'accounts-nested:head:event_occurrence:'.$occurrence->_id.':missing',
+                'tenant_id' => $tenantId,
+                'event_id' => $eventId,
+                'parent_type' => 'event_occurrence',
+                'parent_id' => (string) $occurrence->_id,
+                'group_key' => 'missing',
+                'doc_type' => 'group_head',
+            ],
+            static fn (mixed $update): bool => is_array($update)
+                && ($update[0]['$set']['group_label'] ?? null) === ['$literal' => 'Missing']
+                && ($update[0]['$set']['updated_at']['$cond'][0] ?? null) === ['$ne' => ['$group_label', ['$literal' => 'Missing']]],
+        ));
+        $this->assertTrue($missingTrace->hasNonEmptyTenantIdOnSingleUpdate('accounts_nested'));
+
+        $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+        $invalidTrace = $this->captureMongoCommands(fn () => $this->patchJson(
+            "{$this->tenantAdminEventsBase}/{$eventId}/occurrences/{$occurrence->_id}/profile_groups/artists",
+            ['label' => ''],
+        )->assertStatus(422));
+        $this->assertSame(0, $invalidTrace->countForCollection('events', 'find'));
+        $this->assertSame(0, $invalidTrace->countForCollection('event_occurrences', 'find'));
+        $this->assertSame(0, $invalidTrace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(0, $invalidTrace->countCommand('commitTransaction'));
+        $this->assertSame(0, $invalidTrace->countCommand('abortTransaction'));
+        $this->assertSame([], $invalidTrace->collectionCommandMatrix());
+        $this->actingAsEventOwnerUser();
+    }
+
+    public function test_occurrence_profile_group_label_raw_writes_roll_back_with_the_event_transaction(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertCreated();
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->createOccurrenceGroupHead($eventId, (string) $occurrence->_id, 'Artists')->assertCreated();
+
+        try {
+            app(EventTransactionRunner::class)->run(function (EventTransactionContext $context) use ($eventId, $occurrence): void {
+                app(EventOccurrenceNestedAccountStore::class)->renameOccurrenceGroupLabel(
+                    $context,
+                    $eventId,
+                    (string) $occurrence->_id,
+                    'artists',
+                    'Must roll back',
+                );
+                throw new \RuntimeException('forced rollback after raw nested-account writes');
+            });
+            $this->fail('The forced transaction abort did not escape the runner.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('forced rollback after raw nested-account writes', $exception->getMessage());
+        }
+
+        $groups = app(EventOccurrenceNestedAccountStore::class)->adminOccurrenceGroupMetadata(
+            $occurrence->fresh() ?? $occurrence,
+            $eventId,
+        );
+        $this->assertSame('Artists', $groups[0]['label'] ?? null);
+    }
+
+    public function test_occurrence_profile_group_label_patch_rejects_invalid_or_missing_targets_without_writes(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertCreated();
+        $eventId = (string) $created->json('data.event_id');
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->createOccurrenceGroupHead($eventId, (string) $occurrence->_id, 'Artists')->assertCreated();
+        $url = "{$this->tenantAdminEventsBase}/{$eventId}/occurrences/{$occurrence->_id}/profile_groups/artists";
+        $membersPath = "{$this->tenantAdminEventsBase}/{$eventId}/occurrences/{$occurrence->_id}/profile_groups/artists/members";
+        $this->patchOccurrenceGroupMembers(
+            $eventId,
+            (string) $occurrence->_id,
+            'artists',
+            [(string) $this->artist->_id],
+        )->assertOk()->assertJsonPath('data.member_count', 1);
+        $beforeFailuresMembers = $this->managementGroupMemberRows($membersPath);
+        $persistedOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $snapshotGroups = $persistedOccurrence->own_profile_groups;
+        $snapshotUpdatedAt = (string) $persistedOccurrence->updated_at;
+
+        $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+        $this->patchJson($url, ['label' => ''])
+            ->assertStatus(422)->assertJsonValidationErrors(['label']);
+        $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+        $this->patchJson($url, ['label' => str_repeat('a', InputConstraints::NAME_MAX + 1)])
+            ->assertStatus(422)->assertJsonValidationErrors(['label']);
+        foreach ([['array'], (object) ['object' => true], true, 123] as $invalidLabel) {
+            $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+            $this->patchJson($url, ['label' => $invalidLabel])
+                ->assertStatus(422)->assertJsonValidationErrors(['label']);
+        }
+        $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+        $this->patchJson("{$this->tenantAdminEventsBase}/{$eventId}/occurrences/{$occurrence->_id}/profile_groups/missing", ['label' => 'Missing'])
+            ->assertNotFound();
+        $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+        $this->patchJson("{$this->tenantAdminEventsBase}/000000000000000000000000/occurrences/{$occurrence->_id}/profile_groups/artists", ['label' => 'Missing'])
+            ->assertNotFound();
+        $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+        $this->patchJson("{$this->tenantAdminEventsBase}/{$eventId}/occurrences/000000000000000000000000/profile_groups/artists", ['label' => 'Missing'])
+            ->assertNotFound();
+        $this->actingAsEventOwnerUser();
+        $other = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $other->assertCreated();
+        $otherOccurrence = $this->occurrenceDocumentAtOrder((string) $other->json('data.event_id'), 0);
+        $this->actingAsTenantEventAdmin(['events:update', 'events:read']);
+        $this->patchJson("{$this->tenantAdminEventsBase}/{$eventId}/occurrences/{$otherOccurrence->_id}/profile_groups/artists", ['label' => 'Wrong parent'])
+            ->assertNotFound();
+        $afterFailures = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->assertSame($snapshotGroups, $afterFailures->own_profile_groups);
+        $this->assertSame($snapshotUpdatedAt, (string) $afterFailures->updated_at);
+        $this->assertSame($beforeFailuresMembers, $this->managementGroupMemberRows($membersPath));
+        $this->actingAsEventOwnerUser();
     }
 
     public function test_event_update_preserves_occurrence_group_members_patched_independently(): void
@@ -5957,11 +6401,11 @@ class EventCrudControllerTest extends TestCaseTenant
     public function test_event_map_poi_projection_ignores_stale_checkpoint_write(): void
     {
         $createResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
-            $createResponse->assertStatus(201);
+        $createResponse->assertStatus(201);
 
-            $eventId = (string) $createResponse->json('data.event_id');
-            $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
-            $event = Event::query()->find($eventId);
+        $eventId = (string) $createResponse->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $event = Event::query()->find($eventId);
         $this->assertNotNull($event);
 
         $projectionService = $this->app->make(MapPoiProjectionService::class);
@@ -8411,7 +8855,7 @@ class EventCrudControllerTest extends TestCaseTenant
         unset($template['_id'], $template['id']);
         for ($index = 1; $index <= InputConstraints::EVENT_OCCURRENCES_MAX; $index++) {
             EventOccurrence::query()->create(array_replace($template, [
-                '_id' => new ObjectId(),
+                '_id' => new ObjectId,
                 'occurrence_slug' => sprintf('%s-overflow-%03d', $event->slug, $index),
                 'order' => $index,
                 'starts_at' => Carbon::now()->addDays($index),
@@ -9629,6 +10073,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertStatus(201);
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+
         return Event::query()->findOrFail((string) $response->json('data.event_id'));
     }
 
@@ -9958,10 +10403,10 @@ class EventCrudControllerTest extends TestCaseTenant
                 $forbiddenKey,
                 $attributes,
                 "TEACH: {$subject} still contains forbidden key [{$forbiddenKey}].\n"
-                ."Event/Occurrence related accounts are owned exclusively by accounts_nested; "
-                ."linked_account_profiles, own_linked_account_profiles, artists, event_parties, "
-                ."own_event_parties, and account_context_ids must not exist in steady-state persistence "
-                ."or public transport."
+                .'Event/Occurrence related accounts are owned exclusively by accounts_nested; '
+                .'linked_account_profiles, own_linked_account_profiles, artists, event_parties, '
+                .'own_event_parties, and account_context_ids must not exist in steady-state persistence '
+                .'or public transport.'
             );
         }
     }
@@ -10030,6 +10475,23 @@ class EventCrudControllerTest extends TestCaseTenant
             'label' => $label,
             'order' => $order,
         ];
+    }
+
+    /** @param callable():void $operation */
+    private function captureMongoCommands(callable $operation): MongoCommandTrace
+    {
+        $client = DB::connection('tenant')->getClient();
+        $this->assertNotNull($client);
+        $trace = new MongoCommandTrace;
+        $client->addSubscriber($trace);
+
+        try {
+            $operation();
+        } finally {
+            $client->removeSubscriber($trace);
+        }
+
+        return $trace;
     }
 
     /**

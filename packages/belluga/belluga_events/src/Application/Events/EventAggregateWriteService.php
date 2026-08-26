@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
+use Belluga\Events\Application\Transactions\EventTransactionContext;
 use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Contracts\EventContentSanitizerContract;
 use Belluga\Events\Models\Tenants\Event;
@@ -13,6 +14,8 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use MongoDB\BSON\ObjectId;
+use MongoDB\BSON\UTCDateTime;
 use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -123,11 +126,6 @@ class EventAggregateWriteService
                 throw new NotFoundHttpException;
             }
 
-            $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
-                $event,
-                $event->trashed(),
-            );
-
             $existingIds = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMemberIds(
                 $occurrence,
                 $groupId,
@@ -198,11 +196,6 @@ class EventAggregateWriteService
                 ]);
             }
 
-            $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
-                $event,
-                $event->trashed(),
-            );
-
             $existingGroups = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata(
                 $occurrence,
                 $eventId,
@@ -267,11 +260,6 @@ class EventAggregateWriteService
                 throw new NotFoundHttpException;
             }
 
-            $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
-                $event,
-                $event->trashed(),
-            );
-
             $existingGroups = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata(
                 $occurrence,
                 $eventId,
@@ -330,54 +318,68 @@ class EventAggregateWriteService
         return $result;
     }
 
-    /** @return array{id:string,label:string,order:int,member_count:int,_changed:bool} */
+    /** @return array{id:string,label:string,_changed:bool} */
     public function renameOccurrenceGroup(
         Event $event,
         EventOccurrence $occurrence,
         string $groupId,
         string $label,
-        ?string $commandId = null,
-    ): array
-    {
-        return $this->transactions->run(function () use ($event, $occurrence, $groupId, $label, $commandId): array {
+    ): array {
+        return $this->transactions->run(function (EventTransactionContext $context) use ($event, $occurrence, $groupId, $label): array {
             $eventId = trim((string) $event->getKey());
             if ($eventId === '' || trim((string) ($occurrence->event_id ?? '')) !== $eventId) {
                 throw new NotFoundHttpException;
             }
-            $groups = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata($occurrence, $eventId);
-            $group = $this->findOccurrenceGroupOrFail($groups, $groupId);
             $label = trim($label);
             if ($label === '') {
                 throw ValidationException::withMessages(['label' => ['Related-account group label is required.']]);
             }
-            if ($label === (string) $group['label']) {
-                return $this->occurrenceGroupMutationResult($group, changed: false);
-            }
-            $nextGroups = array_map(static fn (array $candidate): array => [
-                'id' => trim((string) ($candidate['id'] ?? '')),
-                'label' => trim((string) ($candidate['id'] ?? '')) === (string) $group['id'] ? $label : trim((string) ($candidate['label'] ?? '')),
-                'order' => (int) ($candidate['order'] ?? 0),
-            ], $groups);
-            $metadataOnly = $this->profileGroupMemberStore->metadataOnly($nextGroups);
-            $occurrence->forceFill(['own_profile_groups' => $metadataOnly, 'profile_groups' => $metadataOnly]);
-            $occurrence->save();
-            $fresh = $occurrence->fresh() ?? $occurrence;
-            $this->occurrenceNestedAccountStore->syncOccurrenceGroupMetadata($eventId, $fresh, $metadataOnly);
-            $event->touch();
-            $updated = $this->findOccurrenceGroupOrFail(
-                $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata($fresh->fresh() ?? $fresh, $eventId),
-                (string) $group['id'],
+            $updated = $this->occurrenceNestedAccountStore->renameOccurrenceGroupLabel(
+                $context,
+                $eventId,
+                (string) $occurrence->getKey(),
+                $groupId,
+                $label,
             );
+            if (! $updated['_changed']) {
+                return $updated;
+            }
 
-            return $this->occurrenceGroupMutationResult($updated, changed: true);
+            try {
+                $occurrenceId = new ObjectId((string) $occurrence->getKey());
+                $eventObjectId = new ObjectId($eventId);
+            } catch (\Throwable) {
+                throw new NotFoundHttpException;
+            }
+            $occurrenceUpdate = $context->collection('event_occurrences')->updateOne(
+                [
+                    '_id' => $occurrenceId,
+                    'event_id' => $eventId,
+                    'deleted_at' => null,
+                    'own_profile_groups._id' => (string) $updated['id'],
+                    'profile_groups._id' => (string) $updated['id'],
+                ],
+                ['$set' => [
+                    'own_profile_groups.$[group].label' => $label,
+                    'profile_groups.$[group].label' => $label,
+                    'updated_at' => new UTCDateTime((int) now()->getTimestampMs()),
+                ]],
+                [...$context->rawOptions(), 'arrayFilters' => [['group._id' => (string) $updated['id']]]],
+            );
+            if ($occurrenceUpdate->getMatchedCount() !== 1 || $occurrenceUpdate->getModifiedCount() !== 1) {
+                throw new RuntimeException('Event occurrence nested group mirror changed during rename.');
+            }
+            $eventUpdate = $context->collection('events')->updateOne(
+                ['_id' => $eventObjectId],
+                ['$set' => ['updated_at' => new UTCDateTime((int) now()->getTimestampMs())]],
+                $context->rawOptions(),
+            );
+            if ($eventUpdate->getMatchedCount() !== 1) {
+                throw new RuntimeException('Event root changed during occurrence group rename.');
+            }
+
+            return $updated;
         });
-    }
-
-    /** @param array<string,mixed> $group
-     * @return array{id:string,label:string,order:int,member_count:int,_changed:bool} */
-    private function occurrenceGroupMutationResult(array $group, bool $changed = false): array
-    {
-        return ['id' => (string) $group['id'], 'label' => (string) $group['label'], 'order' => (int) ($group['order'] ?? 0), 'member_count' => max(0, (int) ($group['member_count'] ?? 0)), '_changed' => $changed];
     }
 
     public function repairOccurrences(Event $event): void

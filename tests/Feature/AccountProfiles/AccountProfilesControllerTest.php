@@ -10,6 +10,7 @@ use App\Application\AccountProfiles\AccountProfileLifecycleService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMapPoiOutboxConsumer;
 use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
+use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
 use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
 use App\Application\AccountProfiles\AccountProfileOutboxPublisher;
 use App\Application\AccountProfiles\AccountProfileQueryService;
@@ -54,6 +55,7 @@ use MongoDB\BSON\ObjectId;
 use MongoDB\Laravel\Connection;
 use RuntimeException;
 use Tests\Helpers\TenantLabels;
+use Tests\Support\MongoCommandTrace;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
@@ -5777,6 +5779,500 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $sponsorsPage->assertJsonPath('data.0.id', (string) $sponsor->_id);
     }
 
+    public function test_missing_canonical_nested_group_heads_fail_closed_without_legacy_materialization(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Missing canonical nested head',
+            'slug' => 'missing-canonical-nested-head',
+            'is_active' => true,
+            'visibility' => 'public',
+            'nested_profile_groups' => [[
+                'id' => 'legacy-artists',
+                'label' => 'Legacy artists',
+                'order' => 0,
+                'account_profile_ids' => [],
+            ]],
+        ])->fresh();
+
+        $trace = $this->captureMongoCommands(fn () => $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}",
+            ['display_name' => 'Must roll back'],
+            $this->getHeaders(),
+        )->assertNotFound());
+
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'aggregate'));
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'count'));
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'insert'));
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'update'));
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $this->assertSame('Missing canonical nested head', (string) $parent->fresh()->display_name);
+        $this->assertSame(0, DB::connection('tenant')->getDatabase()
+            ->selectCollection('accounts_nested')
+            ->countDocuments(['parent_id' => (string) $parent->_id]));
+    }
+
+    public function test_nested_profile_group_label_patch_persists_trimmed_label_allows_duplicates_and_repeats_without_extra_write(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Rename nested parent',
+            'slug' => 'rename-nested-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $this->createNestedGroupHead($parent, 'Partners')->assertCreated();
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/artists";
+        $first = $this->patchJson($url, ['label' => '  Partners  ']);
+        $first->assertOk()
+            ->assertJsonPath('data.group.id', 'artists')
+            ->assertJsonPath('data.group.label', 'Partners');
+        $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}",
+            $this->getHeaders(),
+        )->assertOk()->assertJsonPath('data.nested_profile_groups.0.label', 'Partners');
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $snapshotUpdatedAt = (string) $parent->fresh()->updated_at;
+        $same = $this->patchJson($url, ['label' => 'Partners']);
+        $same->assertOk()->assertJsonPath('data.group.label', 'Partners');
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $this->assertSame($snapshotUpdatedAt, (string) $parent->fresh()->updated_at);
+    }
+
+    public function test_nested_profile_group_label_patch_stays_within_indexed_mongo_command_budget(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Rename command budget parent',
+            'slug' => 'rename-command-budget-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/artists";
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $head = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            '_id' => 'accounts-nested:head:account_profile:'.$parent->_id.':artists',
+        ]);
+        $this->assertNotNull($head);
+        $tenantId = (string) ($head['tenant_id'] ?? '');
+        $this->assertNotSame('', $tenantId);
+
+        $trace = $this->captureMongoCommands(fn () => $this->patchJson($url, ['label' => 'Artists renamed'])->assertOk());
+
+        $this->assertSame(1, $trace->countForCollection('account_profiles', 'find'));
+        $this->assertSame(1, $trace->countForCollection('accounts', 'find'));
+        $this->assertSame(0, $trace->countForCollection('account_profile_deletion_attempts', 'find'));
+        $this->assertSame(1, $trace->countCommand('commitTransaction'));
+        $this->assertSame(0, $trace->countCommand('abortTransaction'));
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'find'));
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'aggregate'));
+        $this->assertSame(1, $trace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(1, $trace->countForCollection('account_profiles', 'update'));
+        $this->assertSame(0, $trace->countForCollection('account_profile_nested_public_member_projection', 'update'));
+        $this->assertFalse($trace->hasFindForDocumentType('accounts_nested', 'member_row'));
+        $selector = [
+            '_id' => 'accounts-nested:head:account_profile:'.$parent->_id.':artists',
+            'tenant_id' => $tenantId,
+            'parent_type' => 'account_profile',
+            'parent_id' => (string) $parent->_id,
+            'group_key' => 'artists',
+        ];
+        $this->assertTrue($trace->hasFilterContaining('accounts_nested', 'update', [...$selector, 'doc_type' => 'group_head']));
+        $this->assertTrue($trace->hasExactlyOneNonUpsertSingleUpdateContaining(
+            'accounts_nested',
+            [...$selector, 'doc_type' => 'group_head'],
+        ));
+        $this->assertTrue($trace->hasExactlyOneNonUpsertSingleUpdateContaining(
+            'account_profiles',
+            ['nested_profile_groups.id' => 'artists', 'deleted_at' => null, 'account_profile_deletion_attempt_id' => null],
+        ));
+        $this->assertTrue($trace->hasExactlyOneSingleUpdateWith(
+            'accounts_nested',
+            [...$selector, 'doc_type' => 'group_head'],
+            static function (mixed $update): bool {
+                return is_array($update)
+                    && ($update[0]['$set']['group_label'] ?? null) === ['$literal' => 'Artists renamed']
+                    && ($update[0]['$set']['updated_at']['$cond'][0] ?? null) === ['$ne' => ['$group_label', ['$literal' => 'Artists renamed']]];
+            },
+        ));
+        $this->assertTrue($trace->hasNonEmptyTenantIdOnSingleUpdate('accounts_nested'));
+        $this->assertTrue($trace->hasExactlyOneSingleUpdateWith(
+            'account_profiles',
+            [
+                '_id' => (string) $parent->_id,
+                'deleted_at' => null,
+                'account_profile_deletion_attempt_id' => null,
+                'nested_profile_groups.id' => 'artists',
+                '$or' => [['lifecycle_fence_revision' => 0], ['lifecycle_fence_revision' => ['$exists' => false]]],
+            ],
+            static fn (mixed $update): bool => is_array($update)
+                && ($update['$set']['nested_profile_groups.$[group].label'] ?? null) === 'Artists renamed'
+                && ($update['$inc']['aggregate_revision'] ?? null) === 1,
+            [['group.id' => 'artists']],
+        ));
+
+        $noOpTrace = $this->captureMongoCommands(fn () => $this->patchJson($url, ['label' => 'Artists renamed'])->assertOk());
+        $this->assertSame(1, $noOpTrace->countForCollection('account_profiles', 'find'));
+        $this->assertSame(0, $noOpTrace->countForCollection('accounts', 'find'));
+        $this->assertSame(0, $noOpTrace->countForCollection('account_profile_deletion_attempts', 'find'));
+        $this->assertSame(1, $noOpTrace->countCommand('commitTransaction'));
+        $this->assertSame(0, $noOpTrace->countCommand('abortTransaction'));
+        $this->assertSame(0, $noOpTrace->countForCollection('accounts_nested', 'find'));
+        $this->assertSame(0, $noOpTrace->countForCollection('accounts_nested', 'aggregate'));
+        $this->assertSame(1, $noOpTrace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(0, $noOpTrace->countForCollection('account_profiles', 'update'));
+        $this->assertSame(0, $noOpTrace->countForCollection('account_profile_nested_public_member_projection', 'update'));
+        $this->assertFalse($noOpTrace->hasFindForDocumentType('accounts_nested', 'member_row'));
+        $this->assertTrue($noOpTrace->hasExactlyOneNonUpsertSingleUpdateContaining(
+            'accounts_nested',
+            [...$selector, 'doc_type' => 'group_head'],
+        ));
+        $this->assertTrue($noOpTrace->hasExactlyOneSingleUpdateWith(
+            'accounts_nested',
+            [...$selector, 'doc_type' => 'group_head'],
+            static fn (mixed $update): bool => is_array($update)
+                && ($update[0]['$set']['group_label'] ?? null) === ['$literal' => 'Artists renamed']
+                && ($update[0]['$set']['updated_at']['$cond'][0] ?? null) === ['$ne' => ['$group_label', ['$literal' => 'Artists renamed']]],
+        ));
+        $this->assertTrue($noOpTrace->hasNonEmptyTenantIdOnSingleUpdate('accounts_nested'));
+    }
+
+    public function test_nested_profile_group_label_patch_persists_dollar_prefixed_labels_as_literal_strings(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Literal label parent',
+            'slug' => 'literal-label-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/artists";
+
+        foreach (['$group_label', '$$NOW', '$$ROOT', '$missing'] as $label) {
+            $this->patchJson($url, ['label' => $label])
+                ->assertOk()
+                ->assertJsonPath('data.group.label', $label);
+            $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+            $head = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+                '_id' => 'accounts-nested:head:account_profile:'.$parent->_id.':artists',
+            ]);
+            $this->assertSame($label, $head['group_label'] ?? null);
+            $this->assertSame($label, $parent->fresh()?->nested_profile_groups[0]['label'] ?? null);
+        }
+    }
+
+    public function test_nested_profile_group_label_patch_requires_authentication_and_update_ability_without_writes(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Rename authorization parent',
+            'slug' => 'rename-authorization-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/artists";
+
+        auth()->forgetGuards();
+        $anonymousTrace = $this->captureMongoCommands(
+            fn () => $this->patchJson($url, ['label' => 'Anonymous'])->assertUnauthorized(),
+        );
+        $this->assertSame([], $anonymousTrace->collectionCommandMatrix());
+
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
+        $forbiddenTrace = $this->captureMongoCommands(
+            fn () => $this->patchJson($url, ['label' => 'Forbidden'])->assertForbidden(),
+        );
+        $this->assertSame([], $forbiddenTrace->collectionCommandMatrix());
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $head = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            '_id' => 'accounts-nested:head:account_profile:'.$parent->_id.':artists',
+        ]);
+        $this->assertSame('Artists', $head['group_label'] ?? null);
+        $this->assertSame('Artists', $parent->fresh()?->nested_profile_groups[0]['label'] ?? null);
+    }
+
+    public function test_nested_profile_group_label_patch_rejects_invalid_labels_without_writes(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Rename validation parent',
+            'slug' => 'rename-validation-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+            'nested_profile_groups' => [['id' => 'artists', 'label' => 'Artists', 'order' => 0]],
+        ]);
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/artists";
+        $snapshotUpdatedAt = (string) $parent->fresh()->updated_at;
+
+        $this->patchJson($url, ['label' => ''])
+            ->assertStatus(422)->assertJsonValidationErrors(['label']);
+        $this->patchJson($url, ['label' => str_repeat('a', InputConstraints::NAME_MAX + 1)])
+            ->assertStatus(422)->assertJsonValidationErrors(['label']);
+        foreach ([['array'], (object) ['object' => true], true, 123] as $invalidLabel) {
+            $this->patchJson($url, ['label' => $invalidLabel])
+                ->assertStatus(422)->assertJsonValidationErrors(['label']);
+        }
+        $this->patchJson("{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/missing", ['label' => 'Missing'])
+            ->assertNotFound();
+        $this->patchJson("{$this->base_tenant_api_admin}account_profiles/000000000000000000000000/nested_profile_groups/artists", ['label' => 'Missing'])
+            ->assertNotFound();
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $this->assertSame($snapshotUpdatedAt, (string) $parent->fresh()->updated_at);
+    }
+
+    public function test_nested_profile_group_label_patch_full_request_budget_covers_personal_missing_and_invalid_paths(): void
+    {
+        $personalType = TenantProfileType::query()->where('type', 'personal')->firstOrFail();
+        $personalType->capabilities = [
+            ...(is_array($personalType->capabilities) ? $personalType->capabilities : []),
+            'has_nested_profile_groups' => true,
+        ];
+        $personalType->save();
+        $personal = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Personal command budget parent',
+            'created_by_type' => 'tenant',
+            'created_by' => 'personal-command-budget-user',
+            'is_active' => true,
+        ])->fresh();
+        $this->createNestedGroupHead($personal, 'Artists')->assertCreated();
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$personal->_id}/nested_profile_groups/artists";
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $head = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            '_id' => 'accounts-nested:head:account_profile:'.$personal->_id.':artists',
+        ]);
+        $this->assertNotNull($head);
+        $tenantId = (string) ($head['tenant_id'] ?? '');
+        $this->assertNotSame('', $tenantId);
+
+        $personalTrace = $this->captureMongoCommands(fn () => $this->patchJson($url, ['label' => 'Personal artists'])->assertOk());
+        $this->assertSame(1, $personalTrace->countForCollection('account_profiles', 'find'));
+        $this->assertSame(1, $personalTrace->countForCollection('account_profile_deletion_attempts', 'find'));
+        $this->assertSame(1, $personalTrace->countForCollection('accounts', 'find'));
+        $this->assertSame(1, $personalTrace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(1, $personalTrace->countForCollection('account_profiles', 'update'));
+        $this->assertSame(1, $personalTrace->countCommand('commitTransaction'));
+        $this->assertSame(0, $personalTrace->countCommand('abortTransaction'));
+        $this->assertSame([
+            'account_profile_deletion_attempts:find' => 1,
+            'account_profiles:find' => 1,
+            'account_profiles:update' => 1,
+            'accounts:find' => 1,
+            'accounts_nested:update' => 1,
+        ], $personalTrace->collectionCommandMatrix());
+
+        $missingTrace = $this->captureMongoCommands(
+            fn () => $this->patchJson(
+                "{$this->base_tenant_api_admin}account_profiles/{$personal->_id}/nested_profile_groups/missing",
+                ['label' => 'Missing'],
+            )->assertNotFound(),
+        );
+        $this->assertSame(1, $missingTrace->countForCollection('account_profiles', 'find'));
+        $this->assertSame(0, $missingTrace->countForCollection('account_profile_deletion_attempts', 'find'));
+        $this->assertSame(0, $missingTrace->countForCollection('accounts', 'find'));
+        $this->assertSame(1, $missingTrace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(0, $missingTrace->countForCollection('account_profiles', 'update'));
+        $this->assertSame(0, $missingTrace->countCommand('commitTransaction'));
+        $this->assertSame(1, $missingTrace->countCommand('abortTransaction'));
+        $this->assertSame([
+            'account_profiles:find' => 1,
+            'accounts_nested:update' => 1,
+        ], $missingTrace->collectionCommandMatrix());
+        $this->assertTrue($missingTrace->hasExactlyOneSingleUpdateWith(
+            'accounts_nested',
+            [
+                '_id' => 'accounts-nested:head:account_profile:'.$personal->_id.':missing',
+                'tenant_id' => $tenantId,
+                'parent_type' => 'account_profile',
+                'parent_id' => (string) $personal->_id,
+                'group_key' => 'missing',
+                'doc_type' => 'group_head',
+            ],
+            static fn (mixed $update): bool => is_array($update)
+                && ($update[0]['$set']['group_label'] ?? null) === ['$literal' => 'Missing']
+                && ($update[0]['$set']['updated_at']['$cond'][0] ?? null) === ['$ne' => ['$group_label', ['$literal' => 'Missing']]],
+        ));
+        $this->assertTrue($missingTrace->hasNonEmptyTenantIdOnSingleUpdate('accounts_nested'));
+
+        $invalidTrace = $this->captureMongoCommands(
+            fn () => $this->patchJson($url, ['label' => ''])->assertStatus(422),
+        );
+        $this->assertSame(0, $invalidTrace->countForCollection('account_profiles', 'find'));
+        $this->assertSame(0, $invalidTrace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(0, $invalidTrace->countCommand('commitTransaction'));
+        $this->assertSame(0, $invalidTrace->countCommand('abortTransaction'));
+        $this->assertSame([], $invalidTrace->collectionCommandMatrix());
+    }
+
+    public function test_nested_profile_group_label_rename_targets_stale_snapshot_group_without_losing_siblings_or_members(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Concurrent rename parent',
+            'slug' => 'concurrent-rename-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $artist = $this->createNestedProfileFixture('Concurrent artist', 'concurrent-artist');
+        $partner = $this->createNestedProfileFixture('Concurrent partner', 'concurrent-partner');
+
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $this->createNestedGroupHead($parent, 'Partners')->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/artists/members",
+            ['add_ids' => [(string) $artist->_id]],
+            $this->getHeaders(),
+        )->assertOk()->assertJsonPath('data.member_count', 1);
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/partners/members",
+            ['add_ids' => [(string) $partner->_id]],
+            $this->getHeaders(),
+        )->assertOk()->assertJsonPath('data.member_count', 1);
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $staleParent = $parent->fresh();
+        $service = app(AccountProfileManagementService::class);
+        $service->renameNestedGroup($parent->fresh(), 'partners', 'Partners renamed');
+        $service->renameNestedGroup($staleParent, 'artists', 'Artists renamed');
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $persisted = $parent->fresh();
+        $groups = collect($persisted?->nested_profile_groups)->keyBy('id');
+        $this->assertSame('Artists renamed', $groups['artists']['label']);
+        $this->assertSame('Partners renamed', $groups['partners']['label']);
+
+        $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/artists/members",
+            $this->getHeaders(),
+        )->assertOk()->assertJsonPath('data.0.id', (string) $artist->_id);
+        $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/partners/members",
+            $this->getHeaders(),
+        )->assertOk()->assertJsonPath('data.0.id', (string) $partner->_id);
+    }
+
+    public function test_nested_profile_group_label_rename_and_account_deletion_gate_serialize_in_both_orders(): void
+    {
+        $targetUser = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Nested rename deletion target',
+            'phones' => ['+5527999990891'],
+            'credentials' => [],
+        ]);
+        $renameFirst = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Rename before deletion gate',
+            'slug' => 'rename-before-deletion-gate',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $service = app(AccountProfileManagementService::class);
+        $service->createNestedGroup($renameFirst, 'Artists');
+        $renameFirst = $renameFirst->fresh();
+        $this->assertInstanceOf(AccountProfile::class, $renameFirst);
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $database = DB::connection('tenant')->getDatabase();
+        $headId = 'accounts-nested:head:account_profile:'.$renameFirst->_id.':artists';
+        $database->selectCollection('account_profiles')->updateOne(
+            ['_id' => new ObjectId((string) $renameFirst->_id)],
+            ['$set' => [
+                'profile_type' => 'personal',
+                'created_by' => (string) $targetUser->_id,
+                'created_by_type' => 'tenant',
+                'lifecycle_fence_revision' => 0,
+            ]],
+        );
+        $renameFirst = $renameFirst->fresh();
+        $this->assertInstanceOf(AccountProfile::class, $renameFirst);
+        $service->renameNestedGroup($renameFirst, 'artists', 'Artists renamed');
+
+        $attemptId = (string) $targetUser->_id;
+        $database->selectCollection('account_profile_deletion_attempts')->insertOne([
+            '_id' => $attemptId,
+            'attempt_generation' => 1,
+            'claim_token' => 'rename-first-claim',
+            'phase' => 'captured',
+        ]);
+        $this->account->setAttribute('account_profile_deletion_gate', [
+            'attempt_id' => $attemptId,
+            'attempt_generation' => 1,
+        ]);
+        $this->account->save();
+        $database->selectCollection('account_profiles')->updateOne(
+            ['_id' => new ObjectId((string) $renameFirst->_id)],
+            ['$set' => ['account_profile_deletion_attempt_id' => $attemptId], '$inc' => ['lifecycle_fence_revision' => 1]],
+        );
+        $this->assertSame('Artists renamed', $renameFirst->fresh()?->nested_profile_groups[0]['label'] ?? null);
+
+        try {
+            $service->renameNestedGroup($renameFirst->fresh(), 'artists', 'Must roll back');
+            $this->fail('Expected the active deletion attempt to reject the rename.');
+        } catch (ConcurrencyConflictException) {
+            // The persisted attempt/gate blocks the rename and the transaction rolls the head back.
+        }
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $head = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            '_id' => $headId,
+        ]);
+        $this->assertSame('Artists renamed', (string) ($head['group_label'] ?? ''));
+        $this->assertSame('Artists renamed', $renameFirst->fresh()?->nested_profile_groups[0]['label'] ?? null);
+        $this->assertSame($attemptId, (string) $renameFirst->fresh()?->account_profile_deletion_attempt_id);
+        $this->assertSame(
+            $attemptId,
+            (string) ($this->account->fresh()?->account_profile_deletion_gate['attempt_id'] ?? ''),
+        );
+    }
+
+    public function test_nested_profile_group_label_rename_rolls_back_head_when_lifecycle_fence_changes(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Lifecycle fence rename conflict',
+            'slug' => 'lifecycle-fence-rename-conflict',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $staleParent = $parent->fresh();
+        $this->assertInstanceOf(AccountProfile::class, $staleParent);
+        DB::connection('tenant')->getDatabase()->selectCollection('account_profiles')->updateOne(
+            ['_id' => new ObjectId((string) $parent->_id)],
+            ['$set' => ['lifecycle_fence_revision' => 1]],
+        );
+
+        try {
+            app(AccountProfileManagementService::class)->renameNestedGroup($staleParent, 'artists', 'Must roll back');
+            $this->fail('Expected the stale lifecycle fence to reject the rename.');
+        } catch (ConcurrencyConflictException) {
+            // The exact Profile update is the serialization point; the transaction rolls the head back.
+        }
+
+        $head = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            '_id' => 'accounts-nested:head:account_profile:'.$parent->_id.':artists',
+        ]);
+        $this->assertSame('Artists', (string) ($head['group_label'] ?? ''));
+        $this->assertSame('Artists', $parent->fresh()?->nested_profile_groups[0]['label'] ?? null);
+        $this->assertSame(1, (int) $parent->fresh()?->lifecycle_fence_revision);
+    }
+
     public function test_account_profile_update_rejects_embedded_nested_profile_group_members_on_base_update(): void
     {
         $parent = AccountProfile::create([
@@ -6678,6 +7174,204 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
+    public function test_public_account_profile_detail_fails_closed_for_duplicate_projection_logical_heads(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Duplicate projection head parent',
+            'slug' => 'duplicate-projection-head-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+
+        $projection = $this->nestedPublicMembersProjectionCollection();
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $tenantId = (string) Tenant::current()?->getKey();
+        $projection->insertMany([
+            [
+                '_id' => 'head:duplicate-a:'.(string) $parent->_id,
+                'tenant_id' => $tenantId,
+                'parent_profile_id' => (string) $parent->_id,
+                'parent_slug' => (string) $parent->slug,
+                'group_id' => 'artists', 'group_order' => 0,
+                'doc_type' => 'group_head', 'doc_type_rank' => 0,
+            ],
+            [
+                '_id' => 'head:duplicate-b:'.(string) $parent->_id,
+                'tenant_id' => $tenantId,
+                'parent_profile_id' => (string) $parent->_id,
+                'parent_slug' => (string) $parent->slug,
+                'group_id' => 'artists', 'group_order' => 0,
+                'doc_type' => 'group_head', 'doc_type_rank' => 0,
+            ],
+            [
+                '_id' => 'edge:duplicate:'.(string) $parent->_id,
+                'tenant_id' => $tenantId,
+                'parent_profile_id' => (string) $parent->_id,
+                'parent_slug' => (string) $parent->slug,
+                'group_id' => 'artists', 'raw_position' => 0,
+                'doc_type' => 'member_edge', 'doc_type_rank' => 1,
+            ],
+        ]);
+
+        $this->assertSame(
+            [],
+            app(AccountProfileNestedPublicMembersProjectionService::class)->publicMetadataGroups($parent->fresh() ?? $parent),
+        );
+    }
+
+    public function test_public_account_profile_detail_keeps_three_duplicate_parent_entries_ambiguous(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Triple duplicate parent metadata',
+            'slug' => 'triple-duplicate-parent-metadata',
+            'is_active' => true,
+            'visibility' => 'public',
+            'nested_profile_groups' => [
+                ['id' => 'artists', 'label' => 'Artists A', 'order' => 0],
+                ['id' => 'artists', 'label' => 'Artists B', 'order' => 1],
+                ['id' => 'artists', 'label' => 'Artists C', 'order' => 2],
+            ],
+        ])->fresh();
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $tenantId = (string) Tenant::current()?->getKey();
+        $this->nestedPublicMembersProjectionCollection()->insertMany([
+            [
+                '_id' => 'head:triple-duplicate:'.(string) $parent->_id,
+                'tenant_id' => $tenantId,
+                'parent_profile_id' => (string) $parent->_id,
+                'parent_slug' => (string) $parent->slug,
+                'group_id' => 'artists', 'group_order' => 0,
+                'doc_type' => 'group_head', 'doc_type_rank' => 0,
+            ],
+            [
+                '_id' => 'edge:triple-duplicate:'.(string) $parent->_id,
+                'tenant_id' => $tenantId,
+                'parent_profile_id' => (string) $parent->_id,
+                'parent_slug' => (string) $parent->slug,
+                'group_id' => 'artists', 'raw_position' => 0,
+                'doc_type' => 'member_edge', 'doc_type_rank' => 1,
+            ],
+        ]);
+
+        $this->assertSame(
+            [],
+            app(AccountProfileNestedPublicMembersProjectionService::class)->publicMetadataGroups($parent),
+        );
+    }
+
+    public function test_public_account_profile_nested_groups_reject_projection_rows_from_a_different_parent_id(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Immutable projection parent',
+            'slug' => 'immutable-projection-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+            'nested_profile_groups' => [
+                ['id' => 'artists', 'label' => 'Artists', 'order' => 0],
+            ],
+        ])->fresh();
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $tenantId = (string) Tenant::current()?->getKey();
+        $wrongParentId = (string) new ObjectId;
+        $this->nestedPublicMembersProjectionCollection()->insertMany([
+            [
+                '_id' => 'head:wrong-parent:'.(string) $parent->_id,
+                'tenant_id' => $tenantId,
+                'parent_profile_id' => $wrongParentId,
+                'parent_slug' => (string) $parent->slug,
+                'group_id' => 'artists', 'group_order' => 0,
+                'doc_type' => 'group_head', 'doc_type_rank' => 0,
+            ],
+            [
+                '_id' => 'edge:wrong-parent:'.(string) $parent->_id,
+                'tenant_id' => $tenantId,
+                'parent_profile_id' => $wrongParentId,
+                'parent_slug' => (string) $parent->slug,
+                'group_id' => 'artists', 'raw_position' => 0,
+                'doc_type' => 'member_edge', 'doc_type_rank' => 1,
+            ],
+        ]);
+
+        $this->assertSame(
+            [],
+            app(AccountProfileNestedPublicMembersProjectionService::class)->publicMetadataGroups($parent),
+        );
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/immutable-projection-parent/nested_profile_groups/artists/members",
+            $this->getHeaders(),
+        )->assertNotFound();
+    }
+
+    public function test_public_nested_group_member_page_fails_closed_for_asymmetric_or_ambiguous_group_state(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Direct member invariant parent',
+            'slug' => 'direct-member-invariant-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+            'nested_profile_groups' => [],
+        ])->fresh();
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $tenantId = (string) Tenant::current()?->getKey();
+        $parentId = (string) $parent->_id;
+        $projection = $this->nestedPublicMembersProjectionCollection();
+        $projection->insertMany([
+            [
+                '_id' => 'head:direct-invariant:'.$parentId,
+                'tenant_id' => $tenantId, 'parent_profile_id' => $parentId,
+                'parent_slug' => (string) $parent->slug, 'group_id' => 'artists',
+                'group_order' => 0, 'doc_type' => 'group_head', 'doc_type_rank' => 0,
+            ],
+            [
+                '_id' => 'edge:direct-invariant:'.$parentId,
+                'tenant_id' => $tenantId, 'parent_profile_id' => $parentId,
+                'parent_slug' => (string) $parent->slug, 'group_id' => 'artists',
+                'raw_position' => 0, 'doc_type' => 'member_edge', 'doc_type_rank' => 1,
+            ],
+        ]);
+        $url = "{$this->base_api_tenant}account_profiles/direct-member-invariant-parent/nested_profile_groups/artists/members";
+
+        $this->getJson($url, $this->getHeaders())->assertNotFound();
+
+        $profiles = DB::connection('tenant')->getDatabase()->selectCollection('account_profiles');
+        $profiles->updateOne(
+            ['_id' => new ObjectId($parentId)],
+            ['$set' => ['nested_profile_groups' => [['id' => 'artists', 'label' => 'Artists', 'order' => 0]]]],
+        );
+        $projection->insertOne([
+            '_id' => 'head:direct-invariant-duplicate:'.$parentId,
+            'tenant_id' => $tenantId, 'parent_profile_id' => $parentId,
+            'parent_slug' => (string) $parent->slug, 'group_id' => 'artists',
+            'group_order' => 0, 'doc_type' => 'group_head', 'doc_type_rank' => 0,
+        ]);
+        $this->getJson($url, $this->getHeaders())->assertNotFound();
+
+        $projection->deleteOne(['_id' => 'head:direct-invariant-duplicate:'.$parentId]);
+        $profiles->updateOne(
+            ['_id' => new ObjectId($parentId)],
+            ['$set' => ['nested_profile_groups' => [
+                ['id' => 'artists', 'label' => 'Artists A', 'order' => 0],
+                ['id' => 'artists', 'label' => 'Artists B', 'order' => 1],
+            ]]],
+        );
+        $this->getJson($url, $this->getHeaders())->assertNotFound();
+
+        $profiles->updateOne(
+            ['_id' => new ObjectId($parentId)],
+            ['$set' => ['nested_profile_groups' => [['id' => 'artists', 'label' => '', 'order' => 0]]]],
+        );
+        $this->getJson($url, $this->getHeaders())->assertNotFound();
+    }
+
     public function test_public_account_profile_detail_nested_groups_use_public_catalog_eligibility(): void
     {
         TenantProfileType::query()->updateOrCreate(
@@ -7542,6 +8236,23 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ],
             $this->getHeaders(),
         );
+    }
+
+    /** @param callable():void $operation */
+    private function captureMongoCommands(callable $operation): MongoCommandTrace
+    {
+        $client = DB::connection('tenant')->getClient();
+        $this->assertNotNull($client);
+        $trace = new MongoCommandTrace;
+        $client->addSubscriber($trace);
+
+        try {
+            $operation();
+        } finally {
+            $client->removeSubscriber($trace);
+        }
+
+        return $trace;
     }
 
     private function patchAccountPublication(string $accountSlug, string $status): void

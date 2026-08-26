@@ -4,20 +4,6 @@ declare(strict_types=1);
 
 $riskMatrix = [
     [
-        'domain' => 'account_profile_nested_group_label_patch',
-        'pattern' => '#^admin/api/v1/account_profiles/[^/]+/nested_profile_groups/[^/]+$#',
-        'methods' => ['PATCH'],
-        'level' => 'L2',
-        'require_idempotency' => true,
-    ],
-    [
-        'domain' => 'event_occurrence_profile_group_label_patch',
-        'pattern' => '#^admin/api/v1/events/[^/]+/occurrences/[^/]+/profile_groups/[^/]+$#',
-        'methods' => ['PATCH'],
-        'level' => 'L2',
-        'require_idempotency' => true,
-    ],
-    [
         'domain' => 'ticketing_checkout',
         'pattern' => '#^api/v1/checkout/confirm$#',
         'methods' => ['POST'],

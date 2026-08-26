@@ -642,10 +642,6 @@ class EventQueryService
                 ->orderBy('starts_at')
                 ->get();
         }
-        $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
-            $event,
-            $event->trashed(),
-        );
         $hydrationDocuments = [$event];
         foreach ($occurrenceDocuments ?? [] as $occurrence) {
             $hydrationDocuments[] = $occurrence;
@@ -2377,11 +2373,6 @@ class EventQueryService
         ?int $suppliedPerPage,
         ?string $cursor,
     ): array {
-        $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
-            $event,
-            $event->trashed(),
-        );
-
         return $this->occurrenceNestedAccountStore->adminOccurrenceMemberPage(
             $occurrence,
             $groupId,

@@ -16,12 +16,12 @@ use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Http\Api\v1\Requests\AccountProfileCandidatesRequest;
+use App\Http\Api\v1\Requests\AccountProfileNearRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupDeleteRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupLabelPatchRequest;
-use App\Http\Api\v1\Requests\AccountProfileNearRequest;
-use App\Http\Api\v1\Requests\AccountProfileNestedGroupStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersPatchRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersRequest;
+use App\Http\Api\v1\Requests\AccountProfileNestedGroupStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicIndexRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicNestedGroupMembersRequest;
 use App\Http\Api\v1\Requests\AccountProfileStoreRequest;
@@ -281,7 +281,6 @@ class AccountProfilesController extends Controller
                     $profile,
                     $group_id,
                     $request->label(),
-                    $request->header('X-Request-Id'),
                 ),
             ],
         ]);

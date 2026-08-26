@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\Events\Application\Transactions;
 
 use Illuminate\Support\Facades\DB;
+use MongoDB\Laravel\Connection;
 use RuntimeException;
 use Throwable;
 
@@ -13,21 +14,31 @@ class EventTransactionRunner
     /**
      * @template T
      *
-     * @param  callable(): T  $callback
+     * @param  callable(EventTransactionContext): T  $callback
      * @return T
      */
     public function run(callable $callback): mixed
     {
         $connection = DB::connection('tenant');
 
-        if (! method_exists($connection, 'transaction')) {
+        if (! $connection instanceof Connection) {
             throw new RuntimeException(
                 'Tenant MongoDB transaction support is required for events writes, but the active driver has no transaction API.'
             );
         }
 
         try {
-            return $connection->transaction(static fn () => $callback());
+            return $connection->transaction(function () use ($callback, $connection) {
+                $session = $connection->getSession();
+                if ($session === null) {
+                    throw new RuntimeException('Event transaction session is unavailable.');
+                }
+
+                return $callback(new EventTransactionContext(
+                    $connection->getDatabase(),
+                    $session,
+                ));
+            });
         } catch (Throwable $throwable) {
             if ($this->isTransactionSupportError($throwable)) {
                 throw new RuntimeException(
