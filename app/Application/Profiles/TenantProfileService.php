@@ -28,9 +28,14 @@ class TenantProfileService
 
     public function updateProfile(AccountUser $user, array $attributes, Request $request): AccountUser
     {
+        if (array_key_exists('avatar_url', $attributes)) {
+            throw ValidationException::withMessages([
+                'avatar_url' => 'Avatar URLs are managed by the profile media flow.',
+            ]);
+        }
+
         $hasAvatarMutation = $request->hasFile('avatar')
-            || $request->boolean('remove_avatar')
-            || array_key_exists('avatar_url', $attributes);
+            || $request->boolean('remove_avatar');
 
         if ($attributes === [] && ! $hasAvatarMutation) {
             throw ValidationException::withMessages([
@@ -58,10 +63,6 @@ class TenantProfileService
         if (array_key_exists('bio', $attributes)) {
             $profileAttributes['bio'] = $attributes['bio'];
         }
-        if (array_key_exists('avatar_url', $attributes)) {
-            $profileAttributes['avatar_url'] = $attributes['avatar_url'];
-        }
-
         if ($profileAttributes !== [] || $hasAvatarMutation) {
             $profile = $this->ensurePersonalProfile($user);
             if ($profileAttributes !== []) {
