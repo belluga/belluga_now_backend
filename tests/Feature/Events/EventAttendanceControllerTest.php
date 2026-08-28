@@ -540,7 +540,11 @@ class EventAttendanceControllerTest extends TestCaseTenant
         }
         unset($occurrence);
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
+        app(EventOccurrenceSyncService::class)->syncFromEvent(
+            $event,
+            $occurrences,
+            (string) ($event->content ?? ''),
+        );
     }
 
     private function seedPushRuntimeReady(): void

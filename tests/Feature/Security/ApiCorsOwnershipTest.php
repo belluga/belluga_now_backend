@@ -27,7 +27,7 @@ class ApiCorsOwnershipTest extends TestCaseAuthenticated
         $preflightResponse = $this->withHeaders([
             'Origin' => $origin,
             'Access-Control-Request-Method' => 'GET',
-            'Access-Control-Request-Headers' => 'Authorization, Content-Type, X-App-Domain',
+            'Access-Control-Request-Headers' => 'Authorization, Content-Type, X-App-Domain, X-Request-Id',
         ])->options($url);
 
         $preflightResponse->assertStatus(204);
@@ -50,7 +50,7 @@ class ApiCorsOwnershipTest extends TestCaseAuthenticated
         $preflightResponse = $this->withHeaders([
             'Origin' => $origin,
             'Access-Control-Request-Method' => 'GET',
-            'Access-Control-Request-Headers' => 'Authorization, Content-Type, X-App-Domain',
+            'Access-Control-Request-Headers' => 'Authorization, Content-Type, X-App-Domain, X-Request-Id',
         ])->options($url);
 
         $preflightResponse->assertStatus(204);
@@ -73,7 +73,7 @@ class ApiCorsOwnershipTest extends TestCaseAuthenticated
         $preflightResponse = $this->withHeaders([
             'Origin' => $origin,
             'Access-Control-Request-Method' => 'GET',
-            'Access-Control-Request-Headers' => 'Authorization, Content-Type, X-App-Domain',
+            'Access-Control-Request-Headers' => 'Authorization, Content-Type, X-App-Domain, X-Request-Id',
         ])->options($url);
 
         $preflightResponse->assertStatus(204);
@@ -102,13 +102,17 @@ class ApiCorsOwnershipTest extends TestCaseAuthenticated
             );
             $this->assertSame(
                 [
-                    'accept, authorization, cache-control, content-language, content-type, dnt, if-modified-since, origin, range, user-agent, x-app-domain, x-csrf-token, x-http-method-override, x-requested-with, x-xsrf-token',
+                    'accept, authorization, cache-control, content-language, content-type, dnt, if-modified-since, origin, range, user-agent, x-app-domain, x-csrf-token, x-http-method-override, x-requested-with, x-request-id, idempotency-key, x-xsrf-token',
                 ],
                 $response->headers->all('Access-Control-Allow-Headers')
             );
             $this->assertSame(['86400'], $response->headers->all('Access-Control-Max-Age'));
         } else {
             $this->assertTrue($response->headers->has('Access-Control-Allow-Origin'));
+            $this->assertSame(
+                ['X-Idempotency-Replayed'],
+                $response->headers->all('Access-Control-Expose-Headers'),
+            );
         }
     }
 

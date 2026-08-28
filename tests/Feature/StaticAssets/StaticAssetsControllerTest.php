@@ -132,6 +132,50 @@ class StaticAssetsControllerTest extends TestCaseTenant
         $this->assertSame('Cuisine', data_get($poi->taxonomy_terms, '0.taxonomy_name'));
     }
 
+    public function test_static_asset_writes_keep_explicit_links_default_denied(): void
+    {
+        StaticAsset::query()->delete();
+        StaticProfileType::query()->delete();
+        StaticProfileType::create([
+            'type' => 'content_page',
+            'label' => 'Content page',
+            'allowed_taxonomies' => [],
+            'capabilities' => ['has_bio' => true, 'has_content' => true],
+        ]);
+
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}static_assets",
+            [
+                'profile_type' => 'content_page',
+                'display_name' => 'Static Link Policy',
+                'bio' => '<p><a href="https://example.test/bio">bio</a></p>',
+                'content' => '<p><a href="https://example.test/content">content</a></p>',
+            ],
+            $this->getHeaders(),
+        );
+
+        $response->assertCreated();
+        $response->assertJsonPath('data.bio', '<p>bio</p>');
+        $response->assertJsonPath('data.content', '<p>content</p>');
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $stored = StaticAsset::query()->findOrFail((string) $response->json('data.id'));
+        $this->assertSame('<p>bio</p>', $stored->bio);
+        $this->assertSame('<p>content</p>', $stored->content);
+
+        $updated = $this->patchJson(
+            "{$this->base_tenant_api_admin}static_assets/{$stored->_id}",
+            ['content' => '<p><a href="https://example.test/update">updated</a></p>'],
+            $this->getHeaders(),
+        );
+        $updated->assertOk();
+        $updated->assertJsonPath('data.content', '<p>updated</p>');
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $this->assertSame(
+            '<p>updated</p>',
+            StaticAsset::query()->findOrFail((string) $stored->_id)->content,
+        );
+    }
+
     public function test_static_asset_delete_removes_map_poi_projection(): void
     {
         MapPoi::query()->delete();

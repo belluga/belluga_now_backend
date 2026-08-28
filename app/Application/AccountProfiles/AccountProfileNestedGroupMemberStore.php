@@ -36,24 +36,17 @@ final class AccountProfileNestedGroupMemberStore
         private readonly AccountProfileNestedGroupService $nestedGroupService,
     ) {}
 
-    public function materializeLegacyIfNeeded(AccountProfile $profile): void
-    {
-        $this->transactionRunner->run(
-            fn (AccountProfileTransactionContext $context): null => $this->materializeLegacyIfNeededWithinContext(
-                $context,
-                $profile,
-            )
-        );
-    }
-
     /**
      * @return array<int, array<string, mixed>>
      */
     public function metadataGroups(AccountProfile $profile): array
     {
-        $this->materializeLegacyIfNeeded($profile);
+        $groups = $this->metadataGroupsFromCollection((string) $profile->getKey());
+        if ($groups === [] && $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []) !== []) {
+            throw new NotFoundHttpException;
+        }
 
-        return $this->metadataGroupsFromCollection((string) $profile->getKey());
+        return $groups;
     }
 
     /**
@@ -63,9 +56,61 @@ final class AccountProfileNestedGroupMemberStore
         AccountProfileTransactionContext $context,
         AccountProfile $profile,
     ): array {
-        $this->materializeLegacyIfNeededWithinContext($context, $profile);
+        $groups = $this->metadataGroupsFromCollection((string) $profile->getKey(), $context);
+        if ($groups === [] && $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []) !== []) {
+            throw new NotFoundHttpException;
+        }
 
-        return $this->metadataGroupsFromCollection((string) $profile->getKey(), $context);
+        return $groups;
+    }
+
+    /** @return array{id:string,label:string,_changed:bool} */
+    public function renameGroupLabelWithinContext(
+        AccountProfileTransactionContext $context,
+        AccountProfile $profile,
+        string $groupId,
+        string $label,
+    ): array {
+        $parentProfileId = trim((string) $profile->getKey());
+        $groupId = trim($groupId);
+        $label = trim($label);
+        if ($parentProfileId === '' || $groupId === '') {
+            throw new NotFoundHttpException;
+        }
+
+        $filter = [
+            '_id' => $this->headId($parentProfileId, $groupId),
+            'tenant_id' => $this->tenantId(),
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $parentProfileId,
+            'group_key' => $groupId,
+            'doc_type' => self::DOC_TYPE_HEAD,
+        ];
+        $result = $context->collection(self::COLLECTION)->updateOne(
+            $filter,
+            [[
+                '$set' => [
+                    'group_label' => ['$literal' => $label],
+                    'updated_at' => [
+                        '$cond' => [
+                            ['$ne' => ['$group_label', ['$literal' => $label]]],
+                            '$$NOW',
+                            '$updated_at',
+                        ],
+                    ],
+                ],
+            ]],
+            $context->rawOptions(),
+        );
+        if ($result->getMatchedCount() !== 1) {
+            throw new NotFoundHttpException;
+        }
+
+        return [
+            'id' => $groupId,
+            'label' => $label,
+            '_changed' => $result->getModifiedCount() === 1,
+        ];
     }
 
     /**
@@ -79,8 +124,6 @@ final class AccountProfileNestedGroupMemberStore
         ?string $cursor,
         AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
     ): array {
-        $this->materializeLegacyIfNeeded($parentProfile);
-
         $parentProfileId = (string) $parentProfile->getKey();
         $group = $this->findGroupHeadOrFail($parentProfileId, $groupId);
         $perPage = $defaultPerPage;
@@ -181,8 +224,6 @@ final class AccountProfileNestedGroupMemberStore
         AccountProfile $profile,
         string $groupId,
     ): array {
-        $this->materializeLegacyIfNeededWithinContext($context, $profile);
-
         $rows = iterator_to_array($context->collection(self::COLLECTION)->find(
             [
                 'tenant_id' => $this->tenantId(),
@@ -451,7 +492,6 @@ final class AccountProfileNestedGroupMemberStore
                 'parent_type' => self::PARENT_TYPE,
                 'parent_id' => $parentProfileId,
                 'group_key' => $groupId,
-                'group_label' => $groupLabel,
                 'group_order' => $groupOrder,
                 'item_order' => $position,
                 'doc_type' => self::DOC_TYPE_MEMBER,
@@ -485,59 +525,12 @@ final class AccountProfileNestedGroupMemberStore
             ],
             [
                 '$set' => [
-                    'group_label' => $groupLabel,
                     'group_order' => $groupOrder,
                     'updated_at' => new UTCDateTime((int) now()->getTimestampMs()),
                 ],
             ],
             $context->rawOptions(),
         );
-    }
-
-    public function materializeLegacyIfNeededWithinContext(
-        AccountProfileTransactionContext $context,
-        AccountProfile $profile,
-    ): null {
-        $profileId = (string) $profile->getKey();
-        if ($profileId === '') {
-            return null;
-        }
-
-        $groups = $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []);
-        if ($groups === []) {
-            return null;
-        }
-
-        $existing = $context->collection(self::COLLECTION)->countDocuments(
-            [
-                'tenant_id' => $this->tenantId(),
-                'parent_type' => self::PARENT_TYPE,
-                'parent_id' => $profileId,
-            ],
-            $context->rawOptions(),
-        );
-        if ($existing > 0) {
-            return null;
-        }
-
-        $memberIds = [];
-        foreach ($groups as $group) {
-            foreach ((array) ($group['account_profile_ids'] ?? []) as $memberId) {
-                $memberId = trim((string) $memberId);
-                if ($memberId !== '') {
-                    $memberIds[$memberId] = $memberId;
-                }
-            }
-        }
-
-        $this->replaceAllGroupsWithinContext(
-            $context,
-            $profile,
-            $groups,
-            $this->profilesByIdForIds(array_values($memberIds)),
-        );
-
-        return null;
     }
 
     /**

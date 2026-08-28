@@ -1135,7 +1135,7 @@ class TenantRequestLifecycleTraceTest extends TestCase
             $this->app->make(EventOccurrenceSyncService::class)->syncFromEvent($event, [[
                 'date_time_start' => $startsAt,
                 'date_time_end' => $startsAt->copy()->addHours(2),
-            ]]);
+            ]], (string) ($event->content ?? ''));
 
             return $event->fresh();
         } finally {

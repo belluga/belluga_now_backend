@@ -8,6 +8,7 @@ use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Support\Carbon;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\UTCDateTime;
@@ -27,8 +28,14 @@ class EventOccurrenceSyncService
     /**
      * @param  array<int, array<string, mixed>>  $occurrences
      */
-    public function syncFromEvent(Event $event, array $occurrences): void
-    {
+    public function syncFromEvent(
+        Event $event,
+        array $occurrences,
+        string $canonicalContent,
+    ): void {
+        if (count($occurrences) > InputConstraints::EVENT_OCCURRENCES_MAX) {
+            throw new RuntimeException('Event occurrence sync exceeds the configured occurrence limit.');
+        }
         $eventId = (string) $event->_id;
         $now = Carbon::now();
         $publication = $this->normalizePublication($event->publication ?? [], $event->created_at);
@@ -76,7 +83,7 @@ class EventOccurrenceSyncService
                 'slug' => (string) ($event->slug ?? ''),
                 'occurrence_slug' => $this->resolveOccurrenceSlug($occurrence, $document, (string) ($event->slug ?? ''), $eventId, $index, $claimedOccurrenceSlugs),
                 'title' => (string) ($event->title ?? ''),
-                'content' => (string) ($event->content ?? ''),
+                'content' => $canonicalContent,
                 'type' => $this->normalizeArray($event->type ?? []),
                 'location' => $effectiveLocation['location'],
                 'place_ref' => $effectiveLocation['place_ref'],
@@ -229,9 +236,14 @@ class EventOccurrenceSyncService
             ->where('event_id', $eventId)
             ->orderBy('starts_at')
             ->orderBy('_id')
+            ->limit(InputConstraints::EVENT_OCCURRENCES_MAX + 1)
             ->get()
             ->values()
             ->all();
+
+        if (count($documents) > InputConstraints::EVENT_OCCURRENCES_MAX) {
+            throw new RuntimeException('Stored Event occurrences exceed the configured occurrence limit.');
+        }
 
         $occurrenceRefs = $this->normalizeOccurrenceRefs($event->occurrence_refs ?? []);
         if ($occurrenceRefs === []) {
@@ -655,7 +667,6 @@ class EventOccurrenceSyncService
             $linkedProfiles
         );
     }
-
 
     /**
      * @param  array<int, array<string, mixed>>  $eventParties

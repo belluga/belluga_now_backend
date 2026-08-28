@@ -6,6 +6,7 @@ namespace Belluga\Events\Application\Events;
 
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Support\Carbon;
 use MongoDB\BSON\UTCDateTime;
 use RuntimeException;
@@ -78,9 +79,14 @@ class EventOccurrencePayloadSnapshotService
             ->where('event_id', $eventId)
             ->orderBy('starts_at')
             ->orderBy('_id')
+            ->limit(InputConstraints::EVENT_OCCURRENCES_MAX + 1)
             ->get()
             ->values()
             ->all();
+
+        if (count($fromCollection) > InputConstraints::EVENT_OCCURRENCES_MAX) {
+            throw new RuntimeException('Stored Event occurrences exceed the configured occurrence limit.');
+        }
 
         $orderedDocuments = $this->orderOccurrenceDocuments($fromCollection, $event);
 

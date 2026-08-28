@@ -85,6 +85,17 @@ class TenantProfileServiceTest extends TestCase
         );
     }
 
+    public function test_update_profile_rejects_client_written_avatar_url(): void
+    {
+        $this->expectException(ValidationException::class);
+
+        $this->service->updateProfile(
+            $this->user,
+            ['avatar_url' => 'https://attacker.example/avatar.png'],
+            Request::create('/api/v1/profile', 'PATCH'),
+        );
+    }
+
     public function test_update_profile_persists_personal_profile_fields(): void
     {
         $updated = $this->service->updateProfile(

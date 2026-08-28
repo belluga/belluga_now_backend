@@ -16,11 +16,12 @@ use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Http\Api\v1\Requests\AccountProfileCandidatesRequest;
-use App\Http\Api\v1\Requests\AccountProfileNestedGroupDeleteRequest;
 use App\Http\Api\v1\Requests\AccountProfileNearRequest;
-use App\Http\Api\v1\Requests\AccountProfileNestedGroupStoreRequest;
+use App\Http\Api\v1\Requests\AccountProfileNestedGroupDeleteRequest;
+use App\Http\Api\v1\Requests\AccountProfileNestedGroupLabelPatchRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersPatchRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersRequest;
+use App\Http\Api\v1\Requests\AccountProfileNestedGroupStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicIndexRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicNestedGroupMembersRequest;
 use App\Http\Api\v1\Requests\AccountProfileStoreRequest;
@@ -263,6 +264,25 @@ class AccountProfilesController extends Controller
                 $group_id,
                 $request->header('X-Request-Id'),
             ),
+        ]);
+    }
+
+    public function patchNestedGroupLabel(
+        AccountProfileNestedGroupLabelPatchRequest $request,
+        string $tenant_domain,
+        string $account_profile_id,
+        string $group_id,
+    ): JsonResponse {
+        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+
+        return response()->json([
+            'data' => [
+                'group' => $this->profileService->renameNestedGroup(
+                    $profile,
+                    $group_id,
+                    $request->label(),
+                ),
+            ],
         ]);
     }
 

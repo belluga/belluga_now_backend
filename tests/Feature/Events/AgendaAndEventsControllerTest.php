@@ -2349,6 +2349,22 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         ], (string) $role->_id);
     }
 
+    public function test_event_read_projections_recanonicalize_legacy_content_and_preserve_safe_variants(): void
+    {
+        $event = $this->createEvent([
+            'content' => '<p><a HREF="HTTPS://example.test/docs">safe</a><a href="javascript:alert(1)">unsafe</a></p>',
+        ]);
+        $query = app(EventQueryService::class);
+        $detail = $query->formatEventDetail($event);
+        $management = $query->formatManagementEvent($event);
+
+        $this->assertSame('<p><a href="https://example.test/docs">safe</a>unsafe</p>', $detail['content']);
+        $this->assertSame($detail['content'], $management['content']);
+
+        $event->content = str_repeat('x', 102401);
+        $this->assertSame('', $query->formatManagementEvent($event)['content']);
+    }
+
     private function createEvent(array $overrides = []): Event
     {
         $now = Carbon::now();
@@ -2704,7 +2720,11 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         }
         unset($occurrence);
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent($event, $occurrences);
+        app(EventOccurrenceSyncService::class)->syncFromEvent(
+            $event,
+            $occurrences,
+            (string) ($event->content ?? ''),
+        );
     }
 
     private function initializeSystem(): void

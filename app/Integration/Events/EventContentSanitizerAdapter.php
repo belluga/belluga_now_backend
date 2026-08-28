@@ -9,8 +9,13 @@ use Belluga\Events\Contracts\EventContentSanitizerContract;
 
 class EventContentSanitizerAdapter implements EventContentSanitizerContract
 {
-    public function sanitize(?string $value): string
-    {
-        return SafeRichTextHtmlSanitizer::sanitize($value);
+    public function sanitize(
+        ?string $value,
+        bool $allowExplicitHttpsLinks = false,
+    ): string {
+        return SafeRichTextHtmlSanitizer::sanitize(
+            $value,
+            $allowExplicitHttpsLinks,
+        );
     }
 }

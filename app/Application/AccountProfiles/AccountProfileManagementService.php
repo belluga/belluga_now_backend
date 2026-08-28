@@ -14,6 +14,7 @@ use Closure;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
+use MongoDB\BSON\UTCDateTime;
 use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Operation\FindOneAndUpdate;
@@ -407,11 +408,6 @@ class AccountProfileManagementService
                                 $normalizedNestedProfileGroups ?? [],
                                 $admittedTargets,
                             );
-                        } else {
-                            $this->nestedGroupMemberStore->materializeLegacyIfNeededWithinContext(
-                                $context,
-                                $persistedProfile,
-                            );
                         }
                         $this->nestedPublicMembersProjectionService->rebuildForProfileWithinContext($context, $persistedProfile);
                     } catch (BulkWriteException|CommandException $exception) {
@@ -650,6 +646,73 @@ class AccountProfileManagementService
         return [
             'nested_profile_groups' => $this->nestedGroupMemberStore->metadataGroups($updatedProfile),
         ];
+    }
+
+    /** @return array{id:string,label:string} */
+    public function renameNestedGroup(
+        AccountProfile $profile,
+        string $groupId,
+        string $label,
+    ): array {
+        $label = trim($label);
+
+        if ($label === '') {
+            throw ValidationException::withMessages(['label' => ['Nested profile group label is required.']]);
+        }
+
+        /** @var array{id:string,label:string,_changed:bool} $group */
+        $group = $this->transactionRunner->run(function (AccountProfileTransactionContext $context) use (
+            $profile,
+            $groupId,
+            $label,
+        ): array {
+            $group = $this->nestedGroupMemberStore->renameGroupLabelWithinContext(
+                $context,
+                $profile,
+                $groupId,
+                $label,
+            );
+            if (! $group['_changed']) {
+                return $group;
+            }
+
+            $this->lifecycleService->assertProfileMutationAllowed($profile, $context);
+            try {
+                $profileObjectId = new ObjectId((string) $profile->getKey());
+            } catch (\Throwable) {
+                throw new ConcurrencyConflictException('Account Profile aggregate id is invalid for nested group rename.');
+            }
+            $expectedFence = max(0, (int) $profile->getAttribute('lifecycle_fence_revision'));
+            $fenceFilter = $expectedFence === 0
+                ? ['$or' => [['lifecycle_fence_revision' => 0], ['lifecycle_fence_revision' => ['$exists' => false]]]]
+                : ['lifecycle_fence_revision' => $expectedFence];
+            $updated = $context->collection('account_profiles')->updateOne(
+                [
+                    '_id' => $profileObjectId,
+                    'deleted_at' => null,
+                    'account_profile_deletion_attempt_id' => null,
+                    'nested_profile_groups.id' => (string) $group['id'],
+                    ...$fenceFilter,
+                ],
+                [
+                    '$set' => [
+                        'nested_profile_groups.$[group].label' => $label,
+                        'updated_at' => new UTCDateTime((int) now()->getTimestampMs()),
+                    ],
+                    '$inc' => ['aggregate_revision' => 1],
+                ],
+                [...$context->rawOptions(), 'arrayFilters' => [['group.id' => (string) $group['id']]]],
+            );
+            if ($updated->getMatchedCount() !== 1 || $updated->getModifiedCount() !== 1) {
+                throw new ConcurrencyConflictException('Account Profile nested group mirror changed during rename.');
+            }
+
+            return $group;
+        });
+
+        unset($group['_changed']);
+
+        return $group;
     }
 
     /**

@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Application\StaticAssets;
 
-use App\Application\AccountProfiles\AccountProfileRichTextSanitizer;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Models\Tenants\StaticAsset;
+use App\Support\RichText\SafeRichTextHtmlSanitizer;
+use App\Support\Validation\InputConstraints;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromStaticAssetJob;
 use Illuminate\Support\Facades\DB;
@@ -27,7 +28,7 @@ class StaticAssetManagementService
      */
     public function create(array $payload): StaticAsset
     {
-        $payload = AccountProfileRichTextSanitizer::sanitizePayload($payload);
+        $payload = $this->sanitizeRichTextPayload($payload);
         $profileType = (string) $payload['profile_type'];
 
         $definition = $this->registryService->typeDefinition($profileType);
@@ -82,7 +83,7 @@ class StaticAssetManagementService
      */
     public function update(StaticAsset $asset, array $attributes): StaticAsset
     {
-        $attributes = AccountProfileRichTextSanitizer::sanitizePayload($attributes);
+        $attributes = $this->sanitizeRichTextPayload($attributes);
         $profileType = $asset->profile_type;
         if (array_key_exists('profile_type', $attributes)) {
             $profileType = (string) $attributes['profile_type'];
@@ -158,6 +159,33 @@ class StaticAssetManagementService
     {
         $asset->forceDelete();
         DeleteMapPoiByRefJob::dispatch('static', (string) $asset->_id);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function sanitizeRichTextPayload(array $payload): array
+    {
+        $errors = [];
+        foreach (['bio', 'content'] as $field) {
+            if (! array_key_exists($field, $payload)) {
+                continue;
+            }
+            $value = is_string($payload[$field]) ? $payload[$field] : null;
+            $payload[$field] = SafeRichTextHtmlSanitizer::sanitize($value);
+            if (strlen($payload[$field]) > InputConstraints::ACCOUNT_PROFILE_RICH_TEXT_MAX_BYTES) {
+                $errors[$field] = [sprintf(
+                    'The %s may not be greater than 100 KB after sanitization.',
+                    str_replace('_', ' ', $field),
+                )];
+            }
+        }
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
+
+        return $payload;
     }
 
     /**
