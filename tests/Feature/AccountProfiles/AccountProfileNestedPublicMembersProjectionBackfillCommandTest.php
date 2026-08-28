@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\AccountProfiles;
 
 use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
+use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
@@ -128,14 +129,46 @@ class AccountProfileNestedPublicMembersProjectionBackfillCommandTest extends Tes
                 'id' => 'parceiros',
                 'label' => 'Parceiros',
                 'order' => 0,
-                'account_profile_ids' => [
-                    (string) $visibleMember->_id,
-                    (string) $hiddenMember->_id,
-                ],
             ]],
         ])->fresh();
 
         $database = DB::connection('tenant')->getDatabase();
+        $tenantId = (string) Tenant::current()?->getKey();
+        $parentId = (string) $parent->_id;
+        $database->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)->insertMany([
+            [
+                '_id' => 'accounts-nested:head:account_profile:'.$parentId.':parceiros',
+                'tenant_id' => $tenantId,
+                'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
+                'parent_id' => $parentId,
+                'group_key' => 'parceiros',
+                'group_label' => 'Parceiros',
+                'group_order' => 0,
+                'doc_type' => 'group_head',
+            ],
+            [
+                '_id' => 'accounts-nested:member:account_profile:'.$parentId.':parceiros:'.(string) $visibleMember->_id,
+                'tenant_id' => $tenantId,
+                'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
+                'parent_id' => $parentId,
+                'group_key' => 'parceiros',
+                'group_order' => 0,
+                'item_order' => 0,
+                'doc_type' => 'member_row',
+                'nested_profile' => ['id' => (string) $visibleMember->_id],
+            ],
+            [
+                '_id' => 'accounts-nested:member:account_profile:'.$parentId.':parceiros:'.(string) $hiddenMember->_id,
+                'tenant_id' => $tenantId,
+                'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
+                'parent_id' => $parentId,
+                'group_key' => 'parceiros',
+                'group_order' => 0,
+                'item_order' => 1,
+                'doc_type' => 'member_row',
+                'nested_profile' => ['id' => (string) $hiddenMember->_id],
+            ],
+        ]);
         $database->selectCollection(AccountProfileNestedPublicMembersProjectionService::COLLECTION)->insertMany([
             [
                 '_id' => 'stale-row',

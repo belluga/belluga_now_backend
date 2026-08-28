@@ -7811,33 +7811,32 @@ class AccountProfilesControllerTest extends TestCaseTenant
         }
     }
 
-    public function test_public_nested_group_members_rebuild_embedded_parent_memberships_after_member_account_publication_round_trip(): void
+    public function test_public_nested_group_members_rebuild_canonical_memberships_after_member_account_publication_round_trip(): void
     {
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
             'profile_type' => 'venue',
-            'display_name' => 'Embedded Nested Parent',
-            'slug' => 'embedded-nested-parent',
+            'display_name' => 'Canonical Nested Parent',
+            'slug' => 'canonical-nested-parent',
             'is_active' => true,
             'visibility' => 'public',
             'nested_profile_groups' => [],
         ])->fresh();
 
-        $member = $this->createNestedProfileFixture('Embedded Nested Member', 'embedded-nested-member');
-        $parent->nested_profile_groups = [[
-            'id' => 'parceiros',
-            'label' => 'Parceiros',
-            'order' => 0,
-            'account_profile_ids' => [(string) $member->_id],
-            'member_count' => 1,
-        ]];
-        $parent->save();
+        $member = $this->createNestedProfileFixture('Canonical Nested Member', 'canonical-nested-member');
+        $this->createNestedGroupHead($parent, 'Parceiros')->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/parceiros/members",
+            ['add_ids' => [(string) $member->_id]],
+            $this->getHeaders(),
+        )->assertOk()->assertJsonPath('data.member_count', 1);
 
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $nestedCollection = DB::connection('tenant')
             ->getDatabase()
             ->selectCollection('accounts_nested');
         $this->assertSame(
-            0,
+            2,
             $nestedCollection->countDocuments([
                 'parent_id' => (string) $parent->_id,
             ])
@@ -7849,14 +7848,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             AccountPublicationStateService::DRAFT,
         );
 
-        $this->assertGreaterThan(
-            0,
-            $nestedCollection->countDocuments([
-                'parent_id' => (string) $parent->_id,
-            ])
-        );
         $this->getJson(
-            "{$this->base_api_tenant}account_profiles/embedded-nested-parent/nested_profile_groups/parceiros/members",
+            "{$this->base_api_tenant}account_profiles/canonical-nested-parent/nested_profile_groups/parceiros/members",
             $this->getHeaders()
         )->assertStatus(404)
             ->assertJsonPath('message', 'Resource you are looking for was not found.');
@@ -7867,12 +7860,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             AccountPublicationStateService::PUBLISHED,
         );
 
-        $this->getJson("{$this->base_api_tenant}account_profiles/embedded-nested-parent")
+        $this->getJson("{$this->base_api_tenant}account_profiles/canonical-nested-parent")
             ->assertOk()
             ->assertJsonCount(1, 'data.nested_profile_groups')
             ->assertJsonPath('data.nested_profile_groups.0.member_count', 1);
         $this->getJson(
-            "{$this->base_api_tenant}account_profiles/embedded-nested-parent/nested_profile_groups/parceiros/members",
+            "{$this->base_api_tenant}account_profiles/canonical-nested-parent/nested_profile_groups/parceiros/members",
             $this->getHeaders()
         )->assertOk()
             ->assertJsonCount(1, 'data')

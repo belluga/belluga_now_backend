@@ -5111,7 +5111,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $eventId,
             (string) $occurrence->_id,
             'artists',
-            ['event_id' => $eventId, 'deleted_at' => null, 'own_profile_groups._id' => 'artists', 'profile_groups._id' => 'artists'],
+            [],
             [(string) $secondArtist->_id],
         );
 
