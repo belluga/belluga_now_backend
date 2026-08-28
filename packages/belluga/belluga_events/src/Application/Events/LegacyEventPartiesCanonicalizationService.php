@@ -11,6 +11,7 @@ use Belluga\Events\Models\Tenants\EventOccurrence;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class LegacyEventPartiesCanonicalizationService
 {
@@ -1094,7 +1095,11 @@ class LegacyEventPartiesCanonicalizationService
      */
     private function analyzeManagementPayloadContract(Event $event): array
     {
-        $payload = $this->eventQueryService->formatManagementEvent($event);
+        try {
+            $payload = $this->eventQueryService->formatManagementEvent($event);
+        } catch (NotFoundHttpException) {
+            return ['profile_groups.canonical_heads'];
+        }
         $issues = [];
 
         if (! $this->isNonEmptyScalar($payload['event_id'] ?? null)) {

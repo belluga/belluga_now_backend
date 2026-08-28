@@ -29,6 +29,8 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
             ->middleware('abilities:events:update');
         Route::delete('/events/{event_id}/occurrences/{occurrence_id}/profile_groups/{group_id}', [EventsController::class, 'deleteOccurrenceProfileGroup'])
             ->middleware('abilities:events:update');
+        Route::patch('/events/{event_id}/occurrences/{occurrence_id}/profile_groups/{group_id}', [EventsController::class, 'patchOccurrenceProfileGroupLabel'])
+            ->middleware('abilities:events:update');
         Route::get('/events/{event_id}/occurrences/{occurrence_id}/profile_groups/{group_id}/members', [EventsController::class, 'occurrenceProfileGroupMembers'])
             ->middleware('abilities:events:read');
         Route::patch('/events/{event_id}/occurrences/{occurrence_id}/profile_groups/{group_id}/members', [EventsController::class, 'patchOccurrenceProfileGroupMembers'])

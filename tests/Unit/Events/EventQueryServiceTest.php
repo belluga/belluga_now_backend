@@ -9,13 +9,14 @@ use Belluga\Events\Application\Events\EventHeroImageResolver;
 use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
 use Belluga\Events\Application\Events\EventQueryService;
-use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventAccountResolverContract;
+use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
+use Belluga\Events\Contracts\EventContentReadCanonicalizerContract;
 use Belluga\Events\Contracts\EventDiscoveryFilterCatalogContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
-use Belluga\Events\Contracts\EventRequestLifecycleTraceContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
+use Belluga\Events\Contracts\EventRequestLifecycleTraceContract;
 use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Exceptions\EventNotPubliclyVisibleException;
@@ -84,6 +85,7 @@ class EventQueryServiceTest extends TestCase
             ),
             Mockery::mock(EventDiscoveryFilterCatalogContract::class),
             Mockery::mock(EventRequestLifecycleTraceContract::class),
+            Mockery::mock(EventContentReadCanonicalizerContract::class),
         );
     }
 }

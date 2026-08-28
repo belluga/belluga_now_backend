@@ -30,7 +30,7 @@ class UpdateProfileRequestTenant extends UpdateProfileRequestContract
             'bio' => 'sometimes|string|max:'.InputConstraints::DESCRIPTION_MAX,
             'timezone' => 'sometimes|string|max:64',
             'avatar' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:'.InputConstraints::IMAGE_MAX_KB,
-            'avatar_url' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
+            'avatar_url' => 'prohibited',
             'remove_avatar' => 'sometimes|boolean',
         ];
     }

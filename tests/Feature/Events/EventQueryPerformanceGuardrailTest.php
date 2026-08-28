@@ -976,7 +976,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
                 'date_time_start' => $start->copy()->addHours(3),
                 'date_time_end' => $start->copy()->addHours(5),
             ],
-        ]);
+        ], (string) ($event->content ?? ''));
 
         return $event->fresh();
     }
@@ -1077,6 +1077,16 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
 
         return Event::query()->where('title', $title)->firstOrFail()->fresh();
+    }
+
+    public function test_event_occurrence_sync_receives_precomputed_content_without_sanitizing_inside_loop(): void
+    {
+        $source = $this->readSource('packages/belluga/belluga_events/src/Application/Events/EventOccurrenceSyncService.php');
+
+        $this->assertStringNotContainsString('Sanitizer', $source);
+        $this->assertStringNotContainsString('sanitize(', $source);
+        $this->assertStringNotContainsString("'content' => (string) (\$event->content ?? '')", $source);
+        $this->assertStringContainsString("'content' => \$canonicalContent", $source);
     }
 
     private function createAccountUserWithWildcardEventsRole(Account $account, string $slug): mixed

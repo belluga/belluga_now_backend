@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\AccountProfile;
+use App\Support\RichText\RichTextReadCanonicalizer;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\ObjectId;
@@ -17,6 +18,8 @@ final class AccountProfileOutboxPublisher
     private const OUTBOX_COLLECTION = 'account_profile_outbox';
 
     private const RECEIPTS_COLLECTION = 'account_profile_command_receipts';
+
+    public function __construct(private readonly RichTextReadCanonicalizer $richTextReadCanonicalizer) {}
 
     /** @param array<string, mixed> $attributes */
     public function fingerprintForUpdate(
@@ -276,7 +279,20 @@ final class AccountProfileOutboxPublisher
             'slug' => $profile->slug,
             'visibility' => (string) ($profile->visibility ?? ''),
             'is_active' => (bool) ($profile->is_active ?? false),
-            'bio' => $profile->bio,
+            'bio' => $this->richTextReadCanonicalizer->canonicalize(
+                $profile->bio,
+                true,
+                'account_profile',
+                (string) $profile->getKey(),
+                'bio',
+            ),
+            'content' => $this->richTextReadCanonicalizer->canonicalize(
+                $profile->content,
+                true,
+                'account_profile',
+                (string) $profile->getKey(),
+                'content',
+            ),
             'location' => $profile->location,
             'taxonomy_terms' => $profile->taxonomy_terms,
             'contact_mode' => $profile->contact_mode,

@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
-use App\Auth\Sanctum\RefreshingRequestGuard;
-use App\Auth\Sanctum\TracingGuard;
 use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Media\ExternalImageDnsResolverContract;
@@ -14,6 +12,8 @@ use App\Application\Telemetry\Contracts\TelemetryEmitterContract;
 use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Tenants\TenantDomainResolverService;
 use App\Application\Tenants\TenantRequestLifecycleTrace;
+use App\Auth\Sanctum\RefreshingRequestGuard;
+use App\Auth\Sanctum\TracingGuard;
 use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 use App\Http\Api\v1\Requests\ResetPasswordRequestContract;
@@ -23,6 +23,7 @@ use App\Http\Api\v1\Requests\UpdateProfileRequestContract;
 use App\Http\Api\v1\Requests\UpdateProfileRequestLandlord;
 use App\Http\Api\v1\Requests\UpdateProfileRequestTenant;
 use App\Models\Landlord\PersonalAccessToken;
+use App\Support\RichText\RichTextReadCanonicalizer;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
@@ -37,6 +38,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(TenantDomainResolverService::class);
         $this->app->singleton(TenantRequestLifecycleTrace::class);
         $this->app->scoped(AccountProfilePublicCatalogSnapshotReader::class);
+        $this->app->scoped(RichTextReadCanonicalizer::class);
         $this->app->bind(AccountProfileTypeSetProvider::class);
 
         $this->app->bind(

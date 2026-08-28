@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
-use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountOwnershipStateService;
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Application\Shared\Query\AbstractQueryService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
+use App\Support\RichText\RichTextReadCanonicalizer;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Eloquent\Builder;
@@ -37,6 +38,7 @@ class AccountProfileQueryService extends AbstractQueryService
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly AccountProfileContactChannelsService $contactChannelsService,
         private readonly RuntimeDiscoveryFilterCatalogService $runtimeDiscoveryFilterCatalogService,
+        private readonly RichTextReadCanonicalizer $richTextReadCanonicalizer,
     ) {}
 
     public function paginate(array $queryParams, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
@@ -1047,8 +1049,20 @@ class AccountProfileQueryService extends AbstractQueryService
                 'cover',
                 is_string($profile->cover_url) ? $profile->cover_url : null
             ),
-            'bio' => $profile->bio,
-            'content' => $profile->content,
+            'bio' => $this->richTextReadCanonicalizer->canonicalize(
+                $profile->bio,
+                allowExplicitHttpsLinks: true,
+                resource: 'account_profile',
+                resourceId: (string) $profile->getKey(),
+                field: 'bio',
+            ),
+            'content' => $this->richTextReadCanonicalizer->canonicalize(
+                $profile->content,
+                allowExplicitHttpsLinks: true,
+                resource: 'account_profile',
+                resourceId: (string) $profile->getKey(),
+                field: 'content',
+            ),
             'taxonomy_terms' => $this->taxonomyTermSummaryResolver->ensureSnapshots(
                 is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
             ),

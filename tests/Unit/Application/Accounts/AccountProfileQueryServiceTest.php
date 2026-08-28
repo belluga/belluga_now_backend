@@ -10,10 +10,11 @@ use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
-use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountOwnershipStateService;
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
+use App\Support\RichText\RichTextReadCanonicalizer;
 use MongoDB\BSON\ObjectId;
 use ReflectionClass;
 use ReflectionMethod;
@@ -37,6 +38,7 @@ class AccountProfileQueryServiceTest extends TestCase
             new AccountProfilePublicCatalogSnapshotReader(new AccountProfileTypeCapabilityCatalog),
             $contactChannelsService,
             $runtimeCatalogService,
+            new RichTextReadCanonicalizer,
         );
 
         $resolver = new ReflectionMethod($service, 'resolveAggregateRowId');

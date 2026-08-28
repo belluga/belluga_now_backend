@@ -7,6 +7,7 @@ namespace App\Application\AccountProfiles;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
+use MongoDB\BSON\ObjectId;
 use MongoDB\Model\BSONDocument;
 
 /**
@@ -23,11 +24,30 @@ final class AccountProfileMutationGate
         private readonly AccountProfileDeletionBarrier $deletionBarrier,
     ) {}
 
-    public function assertAccountMutationAllowed(string $accountId): void
+    public function assertAccountMutationAllowed(string $accountId, ?AccountProfileTransactionContext $context = null): void
     {
         $accountId = trim($accountId);
         if ($accountId === '') {
             return;
+        }
+
+        if ($context !== null) {
+            try {
+                $rawId = new ObjectId($accountId);
+            } catch (\Throwable) {
+                $rawId = $accountId;
+            }
+            $account = $context->collection('accounts')->findOne(['_id' => $rawId], $context->rawOptions());
+            $raw = $account instanceof BSONDocument ? $account->getArrayCopy() : (is_array($account) ? $account : []);
+            $gate = $raw['account_profile_deletion_gate'] ?? null;
+            if ($gate instanceof BSONDocument) {
+                $gate = $gate->getArrayCopy();
+            }
+            if (! is_array($gate)) {
+                return;
+            }
+
+            throw new ConcurrencyConflictException(self::DELETION_GATE_ERROR);
         }
 
         $account = Account::withTrashed()->find($accountId);
@@ -47,7 +67,7 @@ final class AccountProfileMutationGate
         }
 
         $this->assertNoActiveDeletionAttempt($profile, $context);
-        $this->assertAccountMutationAllowed((string) $profile->account_id);
+        $this->assertAccountMutationAllowed((string) $profile->account_id, $context);
     }
 
     /** @param array<string, mixed> $payload */
@@ -55,7 +75,7 @@ final class AccountProfileMutationGate
         array $payload,
         AccountProfileTransactionContext $context,
     ): void {
-        $this->assertAccountMutationAllowed((string) ($payload['account_id'] ?? ''));
+        $this->assertAccountMutationAllowed((string) ($payload['account_id'] ?? ''), $context);
         if ((string) ($payload['profile_type'] ?? '') !== 'personal') {
             return;
         }

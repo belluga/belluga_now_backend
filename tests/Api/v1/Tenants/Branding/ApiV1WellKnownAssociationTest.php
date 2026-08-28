@@ -98,6 +98,50 @@ class ApiV1WellKnownAssociationTest extends TestCaseTenant
         $apple->assertJsonPath('applinks.details', []);
     }
 
+    public function test_assetlinks_inherits_landlord_settings_when_tenant_document_is_absent(): void
+    {
+        $landlordFingerprint = '00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF';
+        $tenantFingerprint = 'FF:EE:DD:CC:BB:AA:99:88:77:66:55:44:33:22:11:00:FF:EE:DD:CC:BB:AA:99:88:77:66:55:44:33:22:11:00';
+
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.tenant.inheritance');
+
+        LandlordSettings::query()->delete();
+        LandlordSettings::query()->create([
+            '_id' => LandlordSettings::ROOT_ID,
+            'app_links' => [
+                'android' => [
+                    'sha256_cert_fingerprints' => [$landlordFingerprint],
+                ],
+            ],
+        ]);
+
+        TenantSettings::query()->delete();
+        TenantSettings::create([
+            'app_links' => [
+                'android' => [
+                    'sha256_cert_fingerprints' => [$tenantFingerprint],
+                ],
+            ],
+        ]);
+        TenantSettings::query()->delete();
+
+        $assetLinks = $this->get("{$this->base_tenant_url}.well-known/assetlinks.json");
+
+        $assetLinks->assertOk();
+        $assetLinks->assertHeader('Content-Type', 'application/json');
+        $assetLinks->assertDontSee('<!DOCTYPE html>', false);
+        $this->assertSame(
+            [$landlordFingerprint],
+            $assetLinks->json('0.target.sha256_cert_fingerprints')
+        );
+        $this->assertNotContains(
+            $tenantFingerprint,
+            $assetLinks->json('0.target.sha256_cert_fingerprints')
+        );
+        $assetLinks->assertJsonPath('0.target.package_name', 'com.tenant.inheritance');
+    }
+
     public function test_tenant_settings_are_scoped_to_the_current_tenant(): void
     {
         $tenant = $this->makeCanonicalTenantCurrent($this->tenant);

@@ -14,6 +14,7 @@ use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
+use App\Support\RichText\RichTextReadCanonicalizer;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -30,6 +31,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         private readonly AccountProfileGalleryService $galleryService,
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly AccountProfileQueryService $accountProfileQueryService,
+        private readonly RichTextReadCanonicalizer $richTextReadCanonicalizer,
     ) {}
 
     public function resolvePhysicalHostByProfileId(string $profileId): array
@@ -98,8 +100,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         AccountProfile $profile,
         ?AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy = null,
         bool $skipTypeEligibilityValidation = false,
-    ): array
-    {
+    ): array {
         $location = $this->validatedPhysicalHostLocation($profile, $skipTypeEligibilityValidation);
         $slug = $this->normalizeSlug($profile->slug ?? null);
         $canOpenPublicDetail = $this->canOpenPublicDetail($profile, $publicCatalogPolicy);
@@ -133,7 +134,20 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
                 'logo_url' => $avatarUrl,
                 'avatar_url' => $avatarUrl,
                 'cover_url' => $coverUrl,
-                'bio' => $profile->bio,
+                'bio' => $this->richTextReadCanonicalizer->canonicalize(
+                    $profile->bio,
+                    true,
+                    'account_profile',
+                    (string) $profile->getKey(),
+                    'bio',
+                ),
+                'content' => $this->richTextReadCanonicalizer->canonicalize(
+                    $profile->content,
+                    true,
+                    'account_profile',
+                    (string) $profile->getKey(),
+                    'content',
+                ),
                 'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
                     is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
                 ),
@@ -752,8 +766,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     private function validatedPhysicalHostLocation(
         AccountProfile $profile,
         bool $skipTypeEligibilityValidation = false,
-    ): array
-    {
+    ): array {
         if (! $skipTypeEligibilityValidation) {
             $profileType = trim((string) ($profile->profile_type ?? ''));
             if (! $this->isProfileTypeQueryable($profileType)) {
@@ -786,8 +799,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     private function canOpenPublicDetail(
         AccountProfile $profile,
         ?AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy = null,
-    ): bool
-    {
+    ): bool {
         return ($publicCatalogPolicy ?? $this->publicCatalogSnapshotReader
             ->catalogSnapshot()
             ->policy())

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
-use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Exceptions\FoundationControlPlane\StaleNestedPublicMembersCursorException;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
@@ -110,15 +109,25 @@ final class AccountProfileNestedPublicMembersProjectionService
             throw new NotFoundHttpException;
         }
 
-        $head = $this->findHeadRow($tenantId, $parentSlug, $groupId);
-        if ($head === null) {
-            throw new NotFoundHttpException;
-        }
-
-        $parentProfile = $this->findProfileById((string) ($head['parent_profile_id'] ?? ''));
+        $parentProfile = AccountProfile::query()->where('slug', $parentSlug)->first();
         if (! $parentProfile instanceof AccountProfile
             || ! $this->profileQueryService->isPublicNestedParent($parentProfile)
             || trim((string) ($parentProfile->slug ?? '')) !== $parentSlug) {
+            throw new NotFoundHttpException;
+        }
+        $matchingParentGroups = [];
+        foreach ((array) ($parentProfile->nested_profile_groups ?? []) as $rawGroup) {
+            $parentGroup = $this->documentToArray($rawGroup) ?? (is_array($rawGroup) ? $rawGroup : []);
+            if (trim((string) ($parentGroup['id'] ?? '')) === $groupId) {
+                $matchingParentGroups[] = $parentGroup;
+            }
+        }
+        if (count($matchingParentGroups) !== 1
+            || trim((string) ($matchingParentGroups[0]['label'] ?? '')) === '') {
+            throw new NotFoundHttpException;
+        }
+        $head = $this->findHeadRow($tenantId, (string) $parentProfile->getKey(), $parentSlug, $groupId);
+        if ($head === null) {
             throw new NotFoundHttpException;
         }
 
@@ -160,6 +169,7 @@ final class AccountProfileNestedPublicMembersProjectionService
         $rows = iterator_to_array($this->collection()->find(
             [
                 'tenant_id' => $tenantId,
+                'parent_profile_id' => (string) $parentProfile->getKey(),
                 'parent_slug' => $parentSlug,
                 'group_id' => $groupId,
                 '$or' => [
@@ -224,10 +234,23 @@ final class AccountProfileNestedPublicMembersProjectionService
         if ($tenantId === '' || $parentSlug === '') {
             return [];
         }
+        $parentMetadata = [];
+        foreach ((array) ($profile->nested_profile_groups ?? []) as $rawGroup) {
+            $group = $this->documentToArray($rawGroup) ?? (is_array($rawGroup) ? $rawGroup : []);
+            $groupId = trim((string) ($group['id'] ?? ''));
+            $label = trim((string) ($group['label'] ?? ''));
+            if ($groupId === '' || $label === '' || array_key_exists($groupId, $parentMetadata)) {
+                $parentMetadata[$groupId] = null;
+
+                continue;
+            }
+            $parentMetadata[$groupId] = ['label' => $label, 'order' => (int) ($group['order'] ?? 0)];
+        }
 
         $rows = iterator_to_array($this->collection()->find(
             [
                 'tenant_id' => $tenantId,
+                'parent_profile_id' => (string) $profile->getKey(),
                 'parent_slug' => $parentSlug,
             ],
             [
@@ -237,6 +260,7 @@ final class AccountProfileNestedPublicMembersProjectionService
 
         $groups = [];
         $visibleCounts = [];
+        $headCounts = [];
         foreach ($rows as $row) {
             $document = $this->documentToArray($row);
             if (! is_array($document)) {
@@ -249,10 +273,15 @@ final class AccountProfileNestedPublicMembersProjectionService
             }
 
             if ((string) ($document['doc_type'] ?? '') === self::DOC_TYPE_HEAD) {
+                $headCounts[$groupId] = ($headCounts[$groupId] ?? 0) + 1;
+                $metadata = $parentMetadata[$groupId] ?? null;
+                if (! is_array($metadata)) {
+                    continue;
+                }
                 $groups[$groupId] = [
                     'id' => $groupId,
-                    'label' => (string) ($document['group_label'] ?? ''),
-                    'order' => (int) ($document['group_order'] ?? 0),
+                    'label' => $metadata['label'],
+                    'order' => $metadata['order'],
                     'member_count' => 0,
                     'members_path' => "/api/v1/account_profiles/{$parentSlug}/nested_profile_groups/{$groupId}/members",
                 ];
@@ -267,7 +296,10 @@ final class AccountProfileNestedPublicMembersProjectionService
         }
 
         return array_values(array_filter(array_map(
-            function (array $group) use ($visibleCounts): ?array {
+            function (array $group) use ($visibleCounts, $headCounts): ?array {
+                if (($headCounts[$group['id']] ?? 0) !== 1) {
+                    return null;
+                }
                 $visibleCount = max(0, (int) ($visibleCounts[$group['id']] ?? 0));
                 if ($visibleCount === 0) {
                     return null;
@@ -333,7 +365,7 @@ final class AccountProfileNestedPublicMembersProjectionService
             ? collect()
             : collect($this->profileQueryService->findExistingPublicCatalogProfilesByIds(array_values($memberIds)));
 
-        $projectionRevision = (string) new ObjectId();
+        $projectionRevision = (string) new ObjectId;
         $now = new UTCDateTime((int) now()->getTimestampMs());
         $rows = [];
         foreach ($groups as $group) {
@@ -344,7 +376,6 @@ final class AccountProfileNestedPublicMembersProjectionService
                 'parent_slug' => $parentSlug,
                 'parent_profile_type' => (string) ($profile->profile_type ?? ''),
                 'group_id' => $group['id'],
-                'group_label' => $group['label'],
                 'group_order' => (int) ($group['order'] ?? 0),
                 'parent_aggregate_revision' => $aggregateRevision,
                 'projection_revision' => $projectionRevision,
@@ -446,28 +477,24 @@ final class AccountProfileNestedPublicMembersProjectionService
     }
 
     /** @return array<string, mixed>|null */
-    private function findHeadRow(string $tenantId, string $parentSlug, string $groupId): ?array
-    {
-        return $this->documentToArray($this->collection()->findOne([
-            'tenant_id' => $tenantId,
-            'parent_slug' => $parentSlug,
-            'group_id' => $groupId,
-            'doc_type' => self::DOC_TYPE_HEAD,
-        ]));
-    }
+    private function findHeadRow(
+        string $tenantId,
+        string $parentProfileId,
+        string $parentSlug,
+        string $groupId,
+    ): ?array {
+        $heads = iterator_to_array($this->collection()->find(
+            [
+                'tenant_id' => $tenantId,
+                'parent_profile_id' => $parentProfileId,
+                'parent_slug' => $parentSlug,
+                'group_id' => $groupId,
+                'doc_type' => self::DOC_TYPE_HEAD,
+            ],
+            ['limit' => 2],
+        ));
 
-    private function findProfileById(string $profileId): ?AccountProfile
-    {
-        $profile = AccountProfile::query()->find($profileId);
-        if ($profile instanceof AccountProfile) {
-            return $profile;
-        }
-
-        try {
-            return AccountProfile::query()->where('_id', new ObjectId($profileId))->first();
-        } catch (\Throwable) {
-            return null;
-        }
+        return count($heads) === 1 ? $this->documentToArray($heads[0]) : null;
     }
 
     /**

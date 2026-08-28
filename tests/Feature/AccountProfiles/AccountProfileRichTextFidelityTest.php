@@ -13,6 +13,7 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
+use App\Support\RichText\RichTextReadCanonicalizer;
 use App\Support\RichText\SafeRichTextHtmlSanitizer;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -105,14 +106,13 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
         $this->assertStringContainsString('<strong>Forte</strong>', $content);
         $this->assertStringContainsString('<em>italico</em>', $content);
         $this->assertStringContainsString('<s>corte</s>', $content);
-        $this->assertStringContainsString('under link 🎉', $content);
+        $this->assertStringContainsString('under <a href="https://example.com">link</a> 🎉', $content);
         $this->assertStringContainsString('<blockquote>Quote</blockquote>', $content);
         $this->assertStringContainsString('<ul><li>Um</li></ul>', $content);
         $this->assertStringContainsString('<ol><li>Dois</li></ol>', $content);
         $this->assertStringNotContainsString('<u>', $content);
         $this->assertStringNotContainsString('</u>', $content);
-        $this->assertStringNotContainsString('<a', $content);
-        $this->assertStringNotContainsString('href=', $content);
+        $this->assertStringContainsString('<a href="https://example.com">link</a>', $content);
         $this->assertStringNotContainsString('<img', $content);
         $this->assertStringNotContainsString('<script', $content);
         $this->assertStringNotContainsString('alert', $content);
@@ -314,12 +314,149 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
         );
 
         foreach ($fixtures as $fixture) {
+            $input = $this->fixtureText($fixture, 'input', 'input_repeat');
+            $expected = $this->fixtureText($fixture, 'expected', 'expected_repeat');
             $this->assertSame(
-                $fixture['expected'],
-                SafeRichTextHtmlSanitizer::sanitize($fixture['input']),
+                $expected,
+                SafeRichTextHtmlSanitizer::sanitize($input),
                 (string) $fixture['name']
             );
+            if (isset($fixture['explicit_https_expected']) || isset($fixture['explicit_https_expected_repeat'])) {
+                $explicitHttpsExpected = $this->fixtureText(
+                    $fixture,
+                    'explicit_https_expected',
+                    'explicit_https_expected_repeat'
+                );
+                $canonical = SafeRichTextHtmlSanitizer::sanitize($input, true);
+                $this->assertSame(
+                    $explicitHttpsExpected,
+                    $canonical,
+                    (string) $fixture['name']
+                );
+                $this->assertSame(
+                    $explicitHttpsExpected,
+                    SafeRichTextHtmlSanitizer::sanitize($canonical, true),
+                    (string) $fixture['name'].' must be idempotent'
+                );
+            }
         }
+    }
+
+    public function test_unterminated_anchor_preflight_grows_proportionately_near_100_kb(): void
+    {
+        $smaller = $this->unterminatedAnchorSequence(800);
+        $nearLimit = $this->unterminatedAnchorSequence(2450);
+
+        $this->assertLessThanOrEqual(self::RICH_TEXT_MAX_BYTES, strlen($nearLimit));
+        $this->assertGreaterThan(98000, strlen($nearLimit));
+        $this->assertSame(
+            '<p>'.str_repeat('x', 2450).'</p>',
+            SafeRichTextHtmlSanitizer::sanitize($nearLimit, true)
+        );
+
+        // A 3.06x input increase has a deliberately loose 6x budget. The former
+        // repeated forward matching grows quadratically and exceeds this ratio.
+        $smallerNanoseconds = $this->bestSanitizationNanoseconds($smaller);
+        $nearLimitNanoseconds = $this->bestSanitizationNanoseconds($nearLimit);
+        $this->assertLessThanOrEqual($smallerNanoseconds * 6, $nearLimitNanoseconds);
+        $this->assertLessThan(2_000_000_000, $nearLimitNanoseconds);
+    }
+
+    public function test_quoted_unterminated_anchor_candidates_after_valid_prefix_stay_linear(): void
+    {
+        $smaller = $this->unterminatedQuotedAnchorCandidates(2500);
+        $nearLimit = $this->unterminatedQuotedAnchorCandidates(10000);
+
+        $this->assertLessThanOrEqual(self::RICH_TEXT_MAX_BYTES, strlen($nearLimit));
+        $this->assertGreaterThan(90000, strlen($nearLimit));
+        $this->assertSame(
+            '<p><a href="https://example.test/valid">valid</a></p>',
+            SafeRichTextHtmlSanitizer::sanitize($nearLimit, true)
+        );
+
+        // The 4x input increase has a loose 8x budget. A scanner that restarts
+        // at every nested `<a` candidate grows quadratically and exceeds it.
+        $smallerNanoseconds = $this->bestSanitizationNanoseconds($smaller);
+        $nearLimitNanoseconds = $this->bestSanitizationNanoseconds($nearLimit);
+        $this->assertLessThanOrEqual($smallerNanoseconds * 8, $nearLimitNanoseconds);
+        $this->assertLessThan(2_000_000_000, $nearLimitNanoseconds);
+    }
+
+    public function test_many_valid_anchors_grow_proportionately_near_100_kb(): void
+    {
+        $smaller = $this->manyValidAnchors(550);
+        $nearLimit = $this->manyValidAnchors(2200);
+
+        $this->assertLessThanOrEqual(self::RICH_TEXT_MAX_BYTES, strlen($nearLimit));
+        $this->assertGreaterThan(90000, strlen($nearLimit));
+        $this->assertSame($nearLimit, SafeRichTextHtmlSanitizer::sanitize($nearLimit, true));
+
+        $smallerNanoseconds = $this->bestSanitizationNanoseconds($smaller);
+        $nearLimitNanoseconds = $this->bestSanitizationNanoseconds($nearLimit);
+        $this->assertLessThanOrEqual($smallerNanoseconds * 8, $nearLimitNanoseconds);
+        $this->assertLessThan(2_000_000_000, $nearLimitNanoseconds);
+    }
+
+    public function test_shared_https_anchor_fixture_preserves_explicit_link_and_rejects_unsafe_values(): void
+    {
+        $this->assertSame(
+            '<p><a href="https://example.test/docs?one=1&amp;two=2">documentação</a></p>',
+            SafeRichTextHtmlSanitizer::sanitize(
+                '<p><a href="HTTPS://example.test/docs?one=1&amp;two=2">documentação</a></p>',
+                true
+            )
+        );
+        $this->assertSame(
+            '<p>unsafe</p>',
+            SafeRichTextHtmlSanitizer::sanitize(
+                '<p><a href="javascript:alert(1)">unsafe</a></p>',
+                true
+            )
+        );
+    }
+
+    public function test_read_canonicalizer_bounds_legacy_values_and_memoizes_safe_anchors(): void
+    {
+        $calls = [];
+        $canonicalizer = new RichTextReadCanonicalizer(
+            static function (string $value, bool $allowExplicitHttpsLinks) use (&$calls): string {
+                $calls[] = [$value, $allowExplicitHttpsLinks];
+
+                return SafeRichTextHtmlSanitizer::sanitize($value, $allowExplicitHttpsLinks);
+            }
+        );
+        $safe = '<p><a href="https://example.test">safe</a></p>';
+        $identity = ['account_profile', 'profile-1', 'bio'];
+        $this->assertSame($safe, $canonicalizer->canonicalize($safe, true, ...$identity));
+        $this->assertSame($safe, $canonicalizer->canonicalize($safe, true, ...$identity));
+        $this->assertSame('<p>safe</p>', $canonicalizer->canonicalize($safe, false, ...$identity));
+        $this->assertSame($safe, $canonicalizer->canonicalize($safe, true, 'account_profile', 'profile-1', 'content'));
+        $this->assertSame($safe, $canonicalizer->canonicalize($safe, true, 'account_profile', 'profile-2', 'bio'));
+        $this->assertSame($safe, $canonicalizer->canonicalize($safe, true, 'event', 'profile-1', 'bio'));
+        $this->assertSame('<p>distinct</p>', $canonicalizer->canonicalize('<p>distinct</p>', true, ...$identity));
+        $this->assertSame(
+            [
+                [$safe, true],
+                [$safe, false],
+                [$safe, true],
+                [$safe, true],
+                [$safe, true],
+                ['<p>distinct</p>', true],
+            ],
+            $calls
+        );
+        $this->assertSame('', $canonicalizer->canonicalize(str_repeat('a', RichTextReadCanonicalizer::RICH_TEXT_READ_MAX_BYTES + 1), true, ...$identity));
+        $this->assertSame('', $canonicalizer->canonicalize(['invalid'], true, ...$identity));
+    }
+
+    public function test_read_canonicalizer_has_request_scoped_lifecycle(): void
+    {
+        $first = $this->app->make(RichTextReadCanonicalizer::class);
+        $this->assertSame($first, $this->app->make(RichTextReadCanonicalizer::class));
+
+        $this->app->forgetScopedInstances();
+
+        $this->assertNotSame($first, $this->app->make(RichTextReadCanonicalizer::class));
     }
 
     /**
@@ -344,6 +481,48 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
         $this->assertGreaterThan($overhead, $bytes);
 
         return '<p>'.str_repeat('a', $bytes - $overhead).'</p>';
+    }
+
+    /** @param array<string, mixed> $fixture */
+    private function fixtureText(array $fixture, string $directKey, string $repeatKey): string
+    {
+        if (isset($fixture[$directKey]) && is_string($fixture[$directKey])) {
+            return $fixture[$directKey];
+        }
+
+        /** @var array{prefix:string,fragment:string,count:int,suffix:string} $repeat */
+        $repeat = $fixture[$repeatKey];
+
+        return $repeat['prefix'].str_repeat($repeat['fragment'], $repeat['count']).$repeat['suffix'];
+    }
+
+    private function unterminatedAnchorSequence(int $count): string
+    {
+        return '<p>'.str_repeat('<a href="https://example.test/unclosed">x', $count).'</p>';
+    }
+
+    private function unterminatedQuotedAnchorCandidates(int $count): string
+    {
+        return '<p><a href="https://example.test/valid">valid</a></p>'.str_repeat('<a href="', $count);
+    }
+
+    private function manyValidAnchors(int $count): string
+    {
+        return '<p>'.str_repeat('<a href="https://example.test/valid">x</a>', $count).'</p>';
+    }
+
+    private function bestSanitizationNanoseconds(string $input): int
+    {
+        $best = PHP_INT_MAX;
+        for ($sample = 0; $sample < 3; $sample++) {
+            $started = hrtime(true);
+            for ($iteration = 0; $iteration < 3; $iteration++) {
+                SafeRichTextHtmlSanitizer::sanitize($input, true);
+            }
+            $best = min($best, hrtime(true) - $started);
+        }
+
+        return $best;
     }
 
     private function initializeSystem(): void
