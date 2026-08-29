@@ -43,6 +43,99 @@ class LegacyEventPartiesCanonicalizationService
     }
 
     /**
+     * Canonicalize only the nested-group storage required by the copied-label
+     * cutover. Unlike the administrative legacy repair, this includes retained
+     * history and deliberately does not reconcile Event schedules or parties.
+     *
+     * @return array{scanned:int, invalid:int, repaired:int, unchanged:int, failed:int}
+     */
+    public function repairNestedGroupsForCutover(bool $failOnError = false): array
+    {
+        $summary = [
+            'scanned' => 0,
+            'invalid' => 0,
+            'repaired' => 0,
+            'unchanged' => 0,
+            'failed' => 0,
+        ];
+
+        EventOccurrence::withTrashed()
+            ->orderBy('_id')
+            ->cursor()
+            ->each(function (EventOccurrence $occurrence) use (&$summary, $failOnError): void {
+                $summary['scanned']++;
+
+                try {
+                    $eventId = trim((string) ($occurrence->event_id ?? ''));
+                    $occurrenceId = trim((string) $occurrence->getKey());
+                    if ($eventId === '' || $occurrenceId === '') {
+                        throw new \RuntimeException(
+                            'Historical Event nested-group cutover found an occurrence without canonical ownership.',
+                        );
+                    }
+
+                    $storedGroups = $this->nestedAccountStore->legacyGroupsForOwner(
+                        $eventId,
+                        EventOccurrenceNestedAccountStore::PARENT_TYPE,
+                        $occurrenceId,
+                        includeEmptyGroups: true,
+                    );
+                    $ownGroups = $this->cutoverProfileGroups($occurrence->own_profile_groups ?? []);
+                    $effectiveGroups = $this->cutoverProfileGroups($occurrence->profile_groups ?? []);
+                    $targetGroups = $this->mergeCutoverProfileGroups(
+                        $storedGroups,
+                        $ownGroups,
+                        $effectiveGroups,
+                    );
+                    $targetMetadata = $this->profileGroupMetadata($targetGroups);
+
+                    $storageMatches = $this->profileGroupsComparable(
+                        $this->canonicalizeProfileGroups($storedGroups),
+                    ) === $this->profileGroupsComparable($targetGroups);
+                    $ownMirrorMatches = $this->profileGroupMetadata($ownGroups) === $targetMetadata;
+                    $effectiveMirrorMatches = $this->profileGroupMetadata($effectiveGroups) === $targetMetadata;
+
+                    if ($storageMatches && $ownMirrorMatches && $effectiveMirrorMatches) {
+                        $summary['unchanged']++;
+
+                        return;
+                    }
+
+                    $summary['invalid']++;
+
+                    if (! $ownMirrorMatches || ! $effectiveMirrorMatches) {
+                        $occurrence->own_profile_groups = $targetMetadata;
+                        $occurrence->profile_groups = $targetMetadata;
+                        $occurrence->save();
+                    }
+
+                    if (! $storageMatches) {
+                        $this->nestedAccountStore->syncOccurrenceGroups(
+                            $eventId,
+                            $occurrence,
+                            $targetGroups,
+                        );
+                    }
+
+                    $summary['repaired']++;
+                } catch (\Throwable $throwable) {
+                    $summary['failed']++;
+
+                    if ($failOnError) {
+                        throw $throwable;
+                    }
+
+                    Log::warning('historical_event_nested_group_cutover_failed', [
+                        'occurrence_id' => (string) $occurrence->getKey(),
+                        'message' => $throwable->getMessage(),
+                    ]);
+                }
+            });
+
+        return $summary;
+    }
+
+    /**
      * @return array{scanned:int, invalid:int, repaired:int, unchanged:int, failed:int}
      */
     private function run(bool $applyRepair): array
@@ -724,6 +817,93 @@ class LegacyEventPartiesCanonicalizationService
         );
 
         return array_values($groups);
+    }
+
+    /**
+     * @return array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>
+     */
+    private function cutoverProfileGroups(mixed $rawGroups): array
+    {
+        $groups = [];
+
+        foreach ($this->normalizeArray($rawGroups) as $index => $rawGroup) {
+            $group = $this->normalizeArray($rawGroup);
+            $groupId = trim((string) ($group['id'] ?? $group['key'] ?? ''));
+            $label = trim((string) ($group['label'] ?? ''));
+            if ($groupId === '' || $label === '') {
+                throw new \RuntimeException(
+                    'Historical Event nested-group cutover found malformed embedded metadata.',
+                );
+            }
+
+            $groups[] = [
+                'id' => $groupId,
+                'label' => $label,
+                'order' => isset($group['order']) ? (int) $group['order'] : $index,
+                'account_profile_ids' => array_values(array_unique(array_filter(array_map(
+                    static fn (mixed $memberId): string => trim((string) $memberId),
+                    $this->normalizeArray($group['account_profile_ids'] ?? []),
+                ), static fn (string $memberId): bool => $memberId !== ''))),
+            ];
+        }
+
+        return $this->mergeCutoverProfileGroups($groups);
+    }
+
+    /**
+     * Existing canonical storage wins metadata conflicts; mirrors contribute
+     * only missing groups and member ids. Duplicate labels remain valid.
+     *
+     * @param  array<int, array<string, mixed>>  ...$groupSets
+     * @return array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>
+     */
+    private function mergeCutoverProfileGroups(array ...$groupSets): array
+    {
+        $groupsById = [];
+
+        foreach ($groupSets as $groupSet) {
+            foreach ($groupSet as $index => $rawGroup) {
+                $group = $this->normalizeArray($rawGroup);
+                $groupId = trim((string) ($group['id'] ?? $group['key'] ?? ''));
+                $label = trim((string) ($group['label'] ?? ''));
+                if ($groupId === '' || $label === '') {
+                    throw new \RuntimeException(
+                        'Historical Event nested-group cutover found malformed canonical metadata.',
+                    );
+                }
+
+                $memberIds = array_values(array_unique(array_filter(array_map(
+                    static fn (mixed $memberId): string => trim((string) $memberId),
+                    $this->normalizeArray($group['account_profile_ids'] ?? []),
+                ), static fn (string $memberId): bool => $memberId !== '')));
+
+                if (! isset($groupsById[$groupId])) {
+                    $groupsById[$groupId] = [
+                        'id' => $groupId,
+                        'label' => $label,
+                        'order' => isset($group['order']) ? (int) $group['order'] : $index,
+                        'account_profile_ids' => $memberIds,
+                    ];
+
+                    continue;
+                }
+
+                foreach ($memberIds as $memberId) {
+                    if (! in_array($memberId, $groupsById[$groupId]['account_profile_ids'], true)) {
+                        $groupsById[$groupId]['account_profile_ids'][] = $memberId;
+                    }
+                }
+            }
+        }
+
+        $groups = array_values($groupsById);
+        usort(
+            $groups,
+            static fn (array $left, array $right): int => [$left['order'], $left['label'], $left['id']]
+                <=> [$right['order'], $right['label'], $right['id']],
+        );
+
+        return $groups;
     }
 
     /**

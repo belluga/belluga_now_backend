@@ -664,8 +664,12 @@ final class EventOccurrenceNestedAccountStore
      *
      * @return array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>
      */
-    public function legacyGroupsForOwner(string $eventId, string $parentType, string $parentId): array
-    {
+    public function legacyGroupsForOwner(
+        string $eventId,
+        string $parentType,
+        string $parentId,
+        bool $includeEmptyGroups = false,
+    ): array {
         $eventId = trim($eventId);
         $parentType = trim($parentType);
         $parentId = trim($parentId);
@@ -743,10 +747,12 @@ final class EventOccurrenceNestedAccountStore
             }
         }
 
-        $groups = array_values(array_filter(
-            $groupsByKey,
-            static fn (array $group): bool => $group['account_profile_ids'] !== [],
-        ));
+        $groups = array_values($includeEmptyGroups
+            ? $groupsByKey
+            : array_filter(
+                $groupsByKey,
+                static fn (array $group): bool => $group['account_profile_ids'] !== [],
+            ));
 
         usort(
             $groups,
