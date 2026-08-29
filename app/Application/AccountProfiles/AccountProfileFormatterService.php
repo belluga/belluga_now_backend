@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
-use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountOwnershipStateService;
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
+use App\Support\RichText\RichTextReadCanonicalizer;
 
 class AccountProfileFormatterService
 {
@@ -24,6 +25,7 @@ class AccountProfileFormatterService
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly AccountProfileContactChannelsService $contactChannelsService,
         private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
+        private readonly RichTextReadCanonicalizer $richTextReadCanonicalizer,
     ) {}
 
     /**
@@ -74,8 +76,8 @@ class AccountProfileFormatterService
                 'cover',
                 is_string($profile->cover_url) ? $profile->cover_url : null
             ),
-            'bio' => $profile->bio,
-            'content' => $profile->content,
+            'bio' => $this->canonicalRichText($profile, 'bio'),
+            'content' => $this->canonicalRichText($profile, 'content'),
             'taxonomy_terms' => $this->taxonomyTermSummaryResolver->ensureSnapshots(
                 is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
             ),
@@ -104,6 +106,17 @@ class AccountProfileFormatterService
         }
 
         return $payload;
+    }
+
+    private function canonicalRichText(AccountProfile $profile, string $field): string
+    {
+        return $this->richTextReadCanonicalizer->canonicalize(
+            $profile->getAttribute($field),
+            true,
+            'account_profile',
+            (string) $profile->getKey(),
+            $field,
+        );
     }
 
     /**

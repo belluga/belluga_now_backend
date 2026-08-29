@@ -4,14 +4,19 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
+use Belluga\Events\Application\Transactions\EventTransactionContext;
 use Belluga\Events\Application\Transactions\EventTransactionRunner;
+use Belluga\Events\Contracts\EventContentSanitizerContract;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use Belluga\Events\Support\Validation\InputConstraints;
+use MongoDB\BSON\ObjectId;
+use MongoDB\BSON\UTCDateTime;
+use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class EventAggregateWriteService
@@ -22,6 +27,7 @@ class EventAggregateWriteService
         private readonly EventOccurrenceNestedAccountStore $occurrenceNestedAccountStore,
         private readonly EventOccurrenceSyncService $occurrenceSyncService,
         private readonly EventOccurrencePayloadSnapshotService $occurrencePayloadSnapshots,
+        private readonly EventContentSanitizerContract $contentSanitizer,
     ) {}
 
     /**
@@ -34,10 +40,18 @@ class EventAggregateWriteService
         $event = $this->transactions->run(function () use ($payload, $occurrences): Event {
             $canonicalPayload = $payload;
             $canonicalPayload['profile_groups'] = [];
+            $canonicalContent = $this->canonicalEventContent(
+                $payload['content'] ?? null,
+            );
+            $canonicalPayload['content'] = $canonicalContent;
 
             $created = Event::query()->create($canonicalPayload);
             $this->pruneLegacyRelatedAccountFields($created);
-            $this->occurrenceSyncService->syncFromEvent($created, $occurrences);
+            $this->occurrenceSyncService->syncFromEvent(
+                $created,
+                $occurrences,
+                $canonicalContent,
+            );
 
             return $created->fresh() ?? $created;
         });
@@ -55,6 +69,12 @@ class EventAggregateWriteService
         $updated = $this->transactions->run(function () use ($event, $payload, $occurrences): Event {
             $canonicalPayload = $payload;
             $canonicalPayload['profile_groups'] = [];
+            $canonicalContent = $this->canonicalEventContent(
+                array_key_exists('content', $payload)
+                    ? $payload['content']
+                    : $event->content,
+            );
+            $canonicalPayload['content'] = $canonicalContent;
 
             $event->unset('tags');
             $this->pruneLegacyRelatedAccountFields($event);
@@ -62,7 +82,11 @@ class EventAggregateWriteService
             $event->save();
 
             $fresh = $event->fresh() ?? $event;
-            $this->occurrenceSyncService->syncFromEvent($fresh, $occurrences);
+            $this->occurrenceSyncService->syncFromEvent(
+                $fresh,
+                $occurrences,
+                $canonicalContent,
+            );
 
             return $fresh;
         });
@@ -101,11 +125,6 @@ class EventAggregateWriteService
             if ($eventId === '' || $occurrenceId === '' || trim((string) ($occurrence->event_id ?? '')) !== $eventId) {
                 throw new NotFoundHttpException;
             }
-
-            $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
-                $event,
-                $event->trashed(),
-            );
 
             $existingIds = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMemberIds(
                 $occurrence,
@@ -177,11 +196,6 @@ class EventAggregateWriteService
                 ]);
             }
 
-            $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
-                $event,
-                $event->trashed(),
-            );
-
             $existingGroups = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata(
                 $occurrence,
                 $eventId,
@@ -246,11 +260,6 @@ class EventAggregateWriteService
                 throw new NotFoundHttpException;
             }
 
-            $this->occurrenceNestedAccountStore->materializeLegacyIfNeeded(
-                $event,
-                $event->trashed(),
-            );
-
             $existingGroups = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMetadata(
                 $occurrence,
                 $eventId,
@@ -309,18 +318,96 @@ class EventAggregateWriteService
         return $result;
     }
 
+    /** @return array{id:string,label:string,_changed:bool} */
+    public function renameOccurrenceGroup(
+        Event $event,
+        EventOccurrence $occurrence,
+        string $groupId,
+        string $label,
+    ): array {
+        return $this->transactions->run(function (EventTransactionContext $context) use ($event, $occurrence, $groupId, $label): array {
+            $eventId = trim((string) $event->getKey());
+            if ($eventId === '' || trim((string) ($occurrence->event_id ?? '')) !== $eventId) {
+                throw new NotFoundHttpException;
+            }
+            $label = trim($label);
+            if ($label === '') {
+                throw ValidationException::withMessages(['label' => ['Related-account group label is required.']]);
+            }
+            $updated = $this->occurrenceNestedAccountStore->renameOccurrenceGroupLabel(
+                $context,
+                $eventId,
+                (string) $occurrence->getKey(),
+                $groupId,
+                $label,
+            );
+            if (! $updated['_changed']) {
+                return $updated;
+            }
+
+            try {
+                $occurrenceId = new ObjectId((string) $occurrence->getKey());
+                $eventObjectId = new ObjectId($eventId);
+            } catch (\Throwable) {
+                throw new NotFoundHttpException;
+            }
+            $occurrenceUpdate = $context->collection('event_occurrences')->updateOne(
+                [
+                    '_id' => $occurrenceId,
+                    'event_id' => $eventId,
+                    'deleted_at' => null,
+                    'own_profile_groups._id' => (string) $updated['id'],
+                    'profile_groups._id' => (string) $updated['id'],
+                ],
+                ['$set' => [
+                    'own_profile_groups.$[group].label' => $label,
+                    'profile_groups.$[group].label' => $label,
+                    'updated_at' => new UTCDateTime((int) now()->getTimestampMs()),
+                ]],
+                [...$context->rawOptions(), 'arrayFilters' => [['group._id' => (string) $updated['id']]]],
+            );
+            if ($occurrenceUpdate->getMatchedCount() !== 1 || $occurrenceUpdate->getModifiedCount() !== 1) {
+                throw new RuntimeException('Event occurrence nested group mirror changed during rename.');
+            }
+            $eventUpdate = $context->collection('events')->updateOne(
+                ['_id' => $eventObjectId],
+                ['$set' => ['updated_at' => new UTCDateTime((int) now()->getTimestampMs())]],
+                $context->rawOptions(),
+            );
+            if ($eventUpdate->getMatchedCount() !== 1) {
+                throw new RuntimeException('Event root changed during occurrence group rename.');
+            }
+
+            return $updated;
+        });
+    }
+
     public function repairOccurrences(Event $event): void
     {
         $eventId = (string) $event->_id;
-        $occurrences = $this->occurrencePayloadSnapshots->resolveForRepair($event);
+        try {
+            $occurrences = $this->occurrencePayloadSnapshots->resolveForRepair($event);
+        } catch (RuntimeException $exception) {
+            Log::warning('events_occurrence_reconciliation_skipped_schedule_overflow', [
+                'event_id' => $eventId,
+                'reason' => $exception->getMessage(),
+            ]);
+
+            return;
+        }
+        $canonicalContent = $this->canonicalEventContent($event->content);
 
         if ($event->trashed()) {
             $deletedAt = $event->deleted_at;
 
-            $this->transactions->run(function () use ($event, $eventId, $occurrences, $deletedAt): null {
+            $this->transactions->run(function () use ($event, $eventId, $occurrences, $deletedAt, $canonicalContent): null {
                 $this->profileGroupMemberStore->materializeLegacyIfNeeded($event, includeTrashedOccurrences: true);
                 if ($occurrences !== []) {
-                    $this->occurrenceSyncService->syncFromEvent($event, $occurrences);
+                    $this->occurrenceSyncService->syncFromEvent(
+                        $event,
+                        $occurrences,
+                        $canonicalContent,
+                    );
                 }
 
                 $this->occurrenceSyncService->softDeleteByEventId($eventId, $deletedAt);
@@ -339,12 +426,34 @@ class EventAggregateWriteService
             return;
         }
 
-        $this->transactions->run(function () use ($event, $occurrences): null {
+        $this->transactions->run(function () use ($event, $occurrences, $canonicalContent): null {
             $this->profileGroupMemberStore->materializeLegacyIfNeeded($event);
-            $this->occurrenceSyncService->syncFromEvent($event, $occurrences);
+            if ((string) ($event->content ?? '') !== $canonicalContent) {
+                $event->forceFill(['content' => $canonicalContent])->saveQuietly();
+            }
+            $this->occurrenceSyncService->syncFromEvent(
+                $event,
+                $occurrences,
+                $canonicalContent,
+            );
 
             return null;
         });
+    }
+
+    private function canonicalEventContent(mixed $value): string
+    {
+        $canonical = $this->contentSanitizer->sanitize(
+            is_string($value) ? $value : null,
+            allowExplicitHttpsLinks: true,
+        );
+        if (strlen($canonical) > InputConstraints::RICH_TEXT_MAX_BYTES) {
+            throw ValidationException::withMessages([
+                'content' => ['The content may not be greater than 100 KB after sanitization.'],
+            ]);
+        }
+
+        return $canonical;
     }
 
     /**

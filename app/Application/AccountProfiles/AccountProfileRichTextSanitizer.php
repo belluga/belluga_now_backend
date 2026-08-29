@@ -44,6 +44,6 @@ final class AccountProfileRichTextSanitizer
 
     public static function sanitize(mixed $value): string
     {
-        return SafeRichTextHtmlSanitizer::sanitize(is_string($value) ? $value : null);
+        return SafeRichTextHtmlSanitizer::sanitize(is_string($value) ? $value : null, true);
     }
 }

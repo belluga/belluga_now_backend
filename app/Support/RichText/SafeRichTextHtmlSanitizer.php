@@ -8,8 +8,8 @@ use Belluga\RichText\SafeRichTextHtmlSanitizer as SharedSafeRichTextHtmlSanitize
 
 final class SafeRichTextHtmlSanitizer
 {
-    public static function sanitize(?string $value): string
+    public static function sanitize(?string $value, bool $allowExplicitHttpsLinks = false): string
     {
-        return SharedSafeRichTextHtmlSanitizer::sanitize($value);
+        return SharedSafeRichTextHtmlSanitizer::sanitize($value, $allowExplicitHttpsLinks);
     }
 }

@@ -6,5 +6,8 @@ namespace Belluga\Events\Contracts;
 
 interface EventContentSanitizerContract
 {
-    public function sanitize(?string $value): string;
+    public function sanitize(
+        ?string $value,
+        bool $allowExplicitHttpsLinks = false,
+    ): string;
 }

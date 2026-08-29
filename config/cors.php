@@ -56,10 +56,12 @@ return [
         'X-CSRF-TOKEN',
         'X-HTTP-Method-Override',
         'X-Requested-With',
+        'X-Request-Id',
+        'Idempotency-Key',
         'X-XSRF-TOKEN',
     ],
 
-    'exposed_headers' => [],
+    'exposed_headers' => ['X-Idempotency-Replayed'],
 
     'max_age' => 86400,
 
