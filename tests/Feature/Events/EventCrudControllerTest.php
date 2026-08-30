@@ -9301,7 +9301,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['profile_groups']);
     }
 
-    public function test_event_occurrence_group_delete_rejects_over_budget_member_fanout(): void
+    public function test_event_occurrence_group_delete_purges_unbounded_members_and_preserves_sibling_group_without_touching_event(): void
     {
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
             'occurrences' => $this->makeOccurrences(1),
@@ -9315,6 +9315,9 @@ class EventCrudControllerTest extends TestCaseTenant
         $label = 'Budget Members';
 
         $this->createOccurrenceGroupHead($eventId, $occurrenceId, $label)->assertCreated();
+        $this->createOccurrenceGroupHead($eventId, $occurrenceId, 'Surviving Group')->assertCreated();
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $eventUpdatedAt = (string) Event::query()->findOrFail($eventId)->updated_at;
 
         $tenantId = (string) Tenant::current()->getKey();
         $memberIds = array_map(
@@ -9346,8 +9349,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response = $this->deleteOccurrenceProfileGroup($eventId, $occurrenceId, $groupId);
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['profile_groups']);
+        $response->assertOk();
 
         $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
         $management->assertOk();
@@ -9355,13 +9357,15 @@ class EventCrudControllerTest extends TestCaseTenant
             $management,
             0,
             0,
-            $label,
-            InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX + 1,
+            'Surviving Group',
+            0,
         );
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $this->assertSame($eventUpdatedAt, (string) Event::query()->findOrFail($eventId)->updated_at);
 
         $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $this->assertSame(
-            InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX + 1,
+            0,
             DB::connection('tenant')
                 ->getDatabase()
                 ->selectCollection(EventOccurrenceNestedAccountStore::COLLECTION)
@@ -9461,19 +9465,15 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertContains('Delete Me Into Archived', $archivedTitles);
     }
 
-    public function test_event_delete_dispatches_map_projection_delete_job_via_lifecycle_event(): void
+    public function test_event_delete_does_not_dispatch_map_projection_delete_job_after_transactional_cleanup_cutover(): void
     {
         Queue::fake();
         $event = $this->createEvent();
-        $eventId = (string) $event->_id;
 
         $response = $this->deleteJson("{$this->accountEventsBase}/{$event->_id}");
 
         $response->assertStatus(200);
-        Queue::assertPushed(DeleteMapPoiByRefJob::class, function (DeleteMapPoiByRefJob $job) use ($eventId): bool {
-            return (string) $this->readPrivateProperty($job, 'refType') === 'event'
-                && (string) $this->readPrivateProperty($job, 'refId') === $eventId;
-        });
+        Queue::assertNotPushed(DeleteMapPoiByRefJob::class);
     }
 
     public function test_publish_scheduled_events_job_promotes_ready_events_and_dispatches_projection_sync(): void

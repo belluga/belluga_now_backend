@@ -14,7 +14,6 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
-use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -29,7 +28,6 @@ class AccountManagementService
         private readonly AccountQueryService $accountQueryService,
         private readonly AccountOwnershipStateService $ownershipStateService,
         private readonly AccountPublicationStateService $accountPublicationStateService,
-        private readonly MapPoiProjectionService $mapPoiProjectionService,
         private readonly PushUserGatewayContract $pushUsers,
         private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly AccountProfileLifecycleService $accountProfileLifecycleService,
@@ -249,10 +247,7 @@ class AccountManagementService
 
         $baseCommandId = $this->normalizeAggregateDeleteCommandId($account, $commandId, 'soft_delete');
         $outboxEventIds = [];
-        $profileIds = [];
-
-        $tenantConnection->transaction(function () use ($account, $tenantConnection, $baseCommandId, &$outboxEventIds, &$profileIds): void {
-            $profileIds = $this->allAccountProfileIds($account);
+        $tenantConnection->transaction(function () use ($account, $tenantConnection, $baseCommandId, &$outboxEventIds): void {
             $context = $this->profileTransactionContext($tenantConnection);
 
             $outboxEventIds = $this->deleteProfilesInsideAccountAggregateDeletionBoundary(
@@ -268,7 +263,6 @@ class AccountManagementService
             $this->accountProfileOutboxDispatcher->dispatchEvent($eventId);
         }
 
-        $this->deleteMapPoiProjections($profileIds);
     }
 
     private function forceDeleteInsideAccountAggregateDeletionBoundary(Account $account, ?string $commandId = null): void
@@ -280,10 +274,7 @@ class AccountManagementService
 
         $baseCommandId = $this->normalizeAggregateDeleteCommandId($account, $commandId, 'force_delete');
         $outboxEventIds = [];
-        $profileIds = [];
-
-        $tenantConnection->transaction(function () use ($account, $tenantConnection, $baseCommandId, &$outboxEventIds, &$profileIds): void {
-            $profileIds = $this->allAccountProfileIds($account);
+        $tenantConnection->transaction(function () use ($account, $tenantConnection, $baseCommandId, &$outboxEventIds): void {
             $context = $this->profileTransactionContext($tenantConnection);
 
             $outboxEventIds = $this->forceDeleteProfilesInsideAccountAggregateDeletionBoundary(
@@ -299,7 +290,6 @@ class AccountManagementService
             $this->accountProfileOutboxDispatcher->dispatchEvent($eventId);
         }
 
-        $this->deleteMapPoiProjections($profileIds);
     }
 
     private function assertUnmanagedAccountForDelete(Account $account): void
@@ -526,15 +516,5 @@ class AccountManagementService
             trim((string) $account->getKey()),
             bin2hex(random_bytes(8)),
         );
-    }
-
-    /**
-     * @param  array<int, string>  $profileIds
-     */
-    private function deleteMapPoiProjections(array $profileIds): bool
-    {
-        $this->mapPoiProjectionService->deleteByRefs('account_profile', $profileIds);
-
-        return true;
     }
 }

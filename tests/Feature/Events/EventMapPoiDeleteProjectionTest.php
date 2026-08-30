@@ -4,22 +4,33 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Events;
 
-use App\Application\Accounts\AccountUserService;
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
+use App\Application\Accounts\AccountUserService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Listeners\Events\SyncMapPoiOnEventCreated;
+use App\Listeners\Events\SyncMapPoiOnEventUpdated;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\EventType;
+use Belluga\Events\Application\Events\EventAggregateWriteService;
+use Belluga\Events\Application\Transactions\EventTransactionContext;
+use Belluga\Events\Contracts\EventMapPoiDeletionContract;
+use Belluga\Events\Domain\Events\EventCreated;
+use Belluga\Events\Domain\Events\EventDeleted;
+use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use MongoDB\BSON\ObjectId;
+use RuntimeException;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -108,6 +119,13 @@ class EventMapPoiDeleteProjectionTest extends TestCaseTenant
         $this->assertNotNull($event);
 
         $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
+        $database = DB::connection('tenant')->getDatabase();
+        $database->selectCollection((new MapPoi)->getTable())->insertOne([
+            '_id' => 'event-object-id-projection-'.$eventId,
+            'ref_type' => 'event',
+            'ref_id' => new ObjectId($eventId),
+            'title' => 'ObjectId event projection',
+        ]);
         $controlResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
             'title' => 'Delete Projection Control Event',
         ]));
@@ -130,17 +148,67 @@ class EventMapPoiDeleteProjectionTest extends TestCaseTenant
 
         $deleteResponse->assertStatus(200);
         $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
-        $this->assertFalse(
-            MapPoi::query()
-                ->where('ref_type', 'event')
-                ->where('ref_id', $eventId)
-                ->exists()
-        );
+        $this->assertSame(0, $database->selectCollection((new MapPoi)->getTable())->countDocuments([
+            'ref_type' => 'event',
+            '$or' => [
+                ['ref_id' => $eventId],
+                ['ref_id' => new ObjectId($eventId)],
+            ],
+        ]));
         $this->assertTrue(
             MapPoi::query()
                 ->where('ref_type', 'event')
                 ->where('ref_id', $controlEventId)
                 ->exists()
+        );
+    }
+
+    public function test_event_delete_rolls_back_event_occurrences_and_nested_graph_when_map_poi_deletion_fails(): void
+    {
+        $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+        $created->assertCreated();
+        $eventId = (string) $created->json('data.event_id');
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $event = Event::query()->findOrFail($eventId);
+        $occurrence = EventOccurrence::query()->where('event_id', $eventId)->firstOrFail();
+        $database = DB::connection('tenant')->getDatabase();
+        $nestedId = 'rollback-event-nested-'.(string) $occurrence->_id;
+        $database->selectCollection('accounts_nested')->insertOne([
+            '_id' => $nestedId,
+            'tenant_id' => (string) Tenant::current()->getKey(),
+            'event_id' => $eventId,
+            'parent_type' => 'event_occurrence',
+            'parent_id' => (string) $occurrence->_id,
+            'group_key' => 'rollback',
+            'doc_type' => 'group_head',
+        ]);
+        $this->app->instance(EventMapPoiDeletionContract::class, new class implements EventMapPoiDeletionContract
+        {
+            public function deleteForEvent(EventTransactionContext $context, string $eventId): void
+            {
+                throw new RuntimeException('MapPoi deletion failure for rollback coverage.');
+            }
+        });
+
+        $this->expectException(RuntimeException::class);
+        try {
+            $this->app->make(EventAggregateWriteService::class)->delete($event);
+        } finally {
+            $this->assertNotNull(Event::query()->find($eventId));
+            $this->assertNotNull(EventOccurrence::query()->where('event_id', $eventId)->first());
+            $this->assertNotNull($database->selectCollection('accounts_nested')->findOne(['_id' => $nestedId]));
+        }
+    }
+
+    public function test_event_map_poi_listener_registration_excludes_deleted_events_and_keeps_create_update_handlers(): void
+    {
+        $listeners = app('events')->getRawListeners();
+
+        $this->assertContains(SyncMapPoiOnEventCreated::class, $listeners[EventCreated::class] ?? []);
+        $this->assertContains(SyncMapPoiOnEventUpdated::class, $listeners[EventUpdated::class] ?? []);
+        $this->assertNotContains(
+            'App\\Listeners\\Events\\SyncMapPoiOnEventDeleted',
+            $listeners[EventDeleted::class] ?? [],
         );
     }
 

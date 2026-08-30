@@ -6647,6 +6647,107 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame('completed', $cleanupOutbox['delivery_state'] ?? null);
     }
 
+    public function test_profile_delete_purges_its_owned_nested_graph_and_map_pois_while_preserving_siblings(): void
+    {
+        $target = $this->createNestedProfileFixture('Owned Graph Target', 'owned-graph-target');
+        $member = $this->createNestedProfileFixture('Owned Graph Member', 'owned-graph-member');
+        $sibling = $this->createNestedProfileFixture('Owned Graph Sibling', 'owned-graph-sibling');
+
+        $this->createNestedGroupHead($target, 'Owned Members')->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$target->_id}/nested_profile_groups/owned-members/members",
+            ['add_ids' => [(string) $member->_id]],
+            $this->getHeaders(),
+        )->assertOk();
+        $this->createNestedGroupHead($sibling, 'Sibling Members')->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$sibling->_id}/nested_profile_groups/sibling-members/members",
+            ['add_ids' => [(string) $member->_id]],
+            $this->getHeaders(),
+        )->assertOk();
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $database = DB::connection('tenant')->getDatabase();
+        $mapPois = $database->selectCollection((new MapPoi)->getTable());
+        $mapPois->insertMany([
+            ['_id' => 'profile-map-string-'.(string) $target->_id, 'projection_key' => 'profile-map-string-'.(string) $target->_id, 'ref_type' => 'account_profile', 'ref_id' => (string) $target->_id],
+            ['_id' => 'profile-map-object-'.(string) $target->_id, 'projection_key' => 'profile-map-object-'.(string) $target->_id, 'ref_type' => 'account_profile', 'ref_id' => new ObjectId((string) $target->_id)],
+            ['_id' => 'profile-map-sibling-'.(string) $sibling->_id, 'projection_key' => 'profile-map-sibling-'.(string) $sibling->_id, 'ref_type' => 'account_profile', 'ref_id' => (string) $sibling->_id],
+        ]);
+        $target->is_active = false;
+        $target->save();
+
+        app(AccountProfileLifecycleService::class)->delete($target, 'owned-graph-profile-delete-'.uniqid('', true));
+
+        $nested = $database->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION);
+        $projections = $database->selectCollection(AccountProfileNestedPublicMembersProjectionService::COLLECTION);
+        $this->assertSame(0, $nested->countDocuments(['parent_type' => 'account_profile', 'parent_id' => (string) $target->_id]));
+        $this->assertSame(0, $projections->countDocuments(['parent_profile_id' => (string) $target->_id]));
+        $this->assertSame(0, $mapPois->countDocuments(['ref_type' => 'account_profile', '$or' => [
+            ['ref_id' => (string) $target->_id],
+            ['ref_id' => new ObjectId((string) $target->_id)],
+        ]]));
+        $this->assertGreaterThan(0, $nested->countDocuments(['parent_type' => 'account_profile', 'parent_id' => (string) $sibling->_id]));
+        $this->assertGreaterThan(0, $projections->countDocuments(['parent_profile_id' => (string) $sibling->_id]));
+        $this->assertSame(1, $mapPois->countDocuments(['ref_type' => 'account_profile', 'ref_id' => (string) $sibling->_id]));
+    }
+
+    public function test_account_aggregate_delete_purges_owned_profile_graph_while_preserving_sibling(): void
+    {
+        $target = $this->createNestedProfileFixture('Aggregate Graph Target', 'aggregate-graph-target');
+        $member = $this->createNestedProfileFixture('Aggregate Graph Member', 'aggregate-graph-member');
+        $sibling = $this->createNestedProfileFixture('Aggregate Graph Sibling', 'aggregate-graph-sibling');
+        $this->createNestedGroupHead($target, 'Aggregate Members')->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$target->_id}/nested_profile_groups/aggregate-members/members",
+            ['add_ids' => [(string) $member->_id]],
+            $this->getHeaders(),
+        )->assertOk();
+        $this->createNestedGroupHead($sibling, 'Sibling Members')->assertCreated();
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $database = DB::connection('tenant')->getDatabase();
+        $database->selectCollection((new MapPoi)->getTable())->insertOne([
+            '_id' => 'aggregate-map-object-'.(string) $target->_id,
+            'ref_type' => 'account_profile',
+            'ref_id' => new ObjectId((string) $target->_id),
+        ]);
+        app(AccountManagementService::class)->delete($target->account()->firstOrFail(), 'aggregate-graph-delete-'.uniqid('', true));
+
+        $nested = $database->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION);
+        $projections = $database->selectCollection(AccountProfileNestedPublicMembersProjectionService::COLLECTION);
+        $this->assertSame(0, $nested->countDocuments(['parent_type' => 'account_profile', 'parent_id' => (string) $target->_id]));
+        $this->assertSame(0, $projections->countDocuments(['parent_profile_id' => (string) $target->_id]));
+        $this->assertSame(0, $database->selectCollection((new MapPoi)->getTable())->countDocuments([
+            'ref_type' => 'account_profile', 'ref_id' => new ObjectId((string) $target->_id),
+        ]));
+        $this->assertGreaterThan(0, $nested->countDocuments(['parent_type' => 'account_profile', 'parent_id' => (string) $sibling->_id]));
+    }
+
+    public function test_account_profile_group_delete_rolls_back_nested_rows_when_the_profile_mirror_is_stale(): void
+    {
+        $parent = $this->createNestedProfileFixture('Rollback Group Parent', 'rollback-group-parent');
+        $this->createNestedGroupHead($parent, 'Rollback Members')->assertCreated();
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $database = DB::connection('tenant')->getDatabase();
+        $database->selectCollection('account_profiles')->updateOne(
+            ['_id' => new ObjectId((string) $parent->_id)],
+            ['$set' => ['nested_profile_groups' => []]],
+        );
+
+        $this->expectException(ConcurrencyConflictException::class);
+        try {
+            app(AccountProfileManagementService::class)->deleteNestedGroup($parent, 'rollback-members');
+        } finally {
+            $this->assertSame(1, $database->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)->countDocuments([
+                'parent_type' => 'account_profile',
+                'parent_id' => (string) $parent->_id,
+                'group_key' => 'rollback-members',
+                'doc_type' => 'group_head',
+            ]));
+        }
+    }
+
     public function test_account_profile_admin_readback_keeps_linked_metadata_lazy_and_resolves_member_summaries_via_members_contract(): void
     {
         $this->enableContactChannelsCapability('venue');
@@ -6994,7 +7095,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function test_account_profile_delete_rejects_nested_profile_group_over_budget_member_fanout(): void
+    public function test_account_profile_group_delete_purges_unbounded_members_and_public_projection_while_preserving_sibling(): void
     {
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -7007,6 +7108,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $created = $this->createNestedGroupHead($parent, 'Budget Members');
         $created->assertCreated();
+        $this->createNestedGroupHead($parent, 'Surviving Group')->assertCreated();
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $groupId = 'budget-members';
@@ -7037,6 +7139,23 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ->getDatabase()
             ->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)
             ->insertMany($rows);
+        $projectionCollection = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection(AccountProfileNestedPublicMembersProjectionService::COLLECTION);
+        $projectionCollection->insertMany([
+            [
+                '_id' => "nested-public:{$parentId}:{$groupId}:target",
+                'tenant_id' => $tenantId,
+                'parent_profile_id' => $parentId,
+                'group_id' => $groupId,
+            ],
+            [
+                '_id' => "nested-public:{$parentId}:surviving-group:target",
+                'tenant_id' => $tenantId,
+                'parent_profile_id' => $parentId,
+                'group_id' => 'surviving-group',
+            ],
+        ]);
 
         $response = $this->deleteJson(
             "{$this->base_tenant_api_admin}account_profiles/{$parentId}/nested_profile_groups/{$groupId}",
@@ -7044,23 +7163,22 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders(),
         );
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['nested_profile_groups']);
+        $response->assertOk();
 
         $readback = $this->getJson(
             "{$this->base_tenant_api_admin}account_profiles/{$parentId}",
             $this->getHeaders(),
         );
         $readback->assertOk();
-        $readback->assertJsonPath('data.nested_profile_groups.0.id', $groupId);
+        $readback->assertJsonPath('data.nested_profile_groups.0.id', 'surviving-group');
         $readback->assertJsonPath(
             'data.nested_profile_groups.0.member_count',
-            InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX + 1,
+            0,
         );
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
-            InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX + 1,
+            0,
             DB::connection('tenant')
                 ->getDatabase()
                 ->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)
@@ -7072,6 +7190,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
                     'doc_type' => 'member_row',
                 ]),
         );
+        $this->assertSame(0, $projectionCollection->countDocuments([
+            'tenant_id' => $tenantId,
+            'parent_profile_id' => $parentId,
+            'group_id' => $groupId,
+        ]));
+        $this->assertGreaterThan(0, $projectionCollection->countDocuments([
+            'tenant_id' => $tenantId,
+            'parent_profile_id' => $parentId,
+            'group_id' => 'surviving-group',
+        ]));
     }
 
     public function test_account_profile_update_rejects_nested_profile_groups_when_type_capability_is_disabled(): void
