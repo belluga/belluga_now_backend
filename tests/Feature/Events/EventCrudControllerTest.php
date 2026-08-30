@@ -111,6 +111,8 @@ class EventCrudControllerTest extends TestCaseTenant
         TaxonomyTerm::query()->delete();
         Taxonomy::query()->delete();
         AccountProfile::withTrashed()->forceDelete();
+        DB::connection('tenant')->getDatabase()->selectCollection(EventOccurrenceNestedAccountStore::COLLECTION)
+            ->deleteMany([]);
 
         [$this->account] = $this->seedAccountWithRole(['*']);
         $this->userService = $this->app->make(AccountUserService::class);
