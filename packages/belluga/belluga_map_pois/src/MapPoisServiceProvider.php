@@ -10,7 +10,6 @@ use Belluga\MapPois\Console\Commands\RebuildMapPoisCommand;
 use Belluga\MapPois\Contracts\MapPoiRegistryContract;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
-use Belluga\MapPois\Contracts\MapPoiSourceRefreshContract;
 use Belluga\MapPois\Contracts\MapPoiTaxonomySnapshotResolverContract;
 use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
 use Illuminate\Support\ServiceProvider;
@@ -24,7 +23,6 @@ class MapPoisServiceProvider extends ServiceProvider
         $this->app->singleton(MapPoiQueryService::class);
 
         $this->ensureHostBinding(MapPoiSourceReaderContract::class);
-        $this->ensureHostBinding(MapPoiSourceRefreshContract::class);
         $this->ensureHostBinding(MapPoiRegistryContract::class);
         $this->ensureHostBinding(MapPoiSettingsContract::class);
         $this->ensureHostBinding(MapPoiTenantContextContract::class);

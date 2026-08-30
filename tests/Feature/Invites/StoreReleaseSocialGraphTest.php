@@ -1382,7 +1382,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             'is_active' => true,
         ]);
 
-        $this->syncEventOccurrencesForTest($event, [[
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [[
             'date_time_start' => Carbon::instance($event->date_time_start),
             'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
         ]], (string) ($event->content ?? ''));

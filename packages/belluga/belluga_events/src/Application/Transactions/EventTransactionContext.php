@@ -25,14 +25,4 @@ final readonly class EventTransactionContext
     {
         return ['session' => $this->session];
     }
-
-    public function database(): Database
-    {
-        return $this->database;
-    }
-
-    public function session(): Session
-    {
-        return $this->session;
-    }
 }

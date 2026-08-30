@@ -3440,7 +3440,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'is_active' => true,
         ]);
 
-        $this->syncEventOccurrencesForTest($event, [[
+        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [[
             'date_time_start' => Carbon::instance($startsAt),
             'date_time_end' => $endsAt !== null ? Carbon::instance($endsAt) : null,
             'profile_groups' => $profileGroups,
@@ -6364,9 +6364,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertGreaterThan($revisionBeforeDelta, (int) ($parent->fresh()->aggregate_revision ?? 0));
         $this->assertSame(1, (int) $contactSource->fresh()->lifecycle_fence_revision);
-        // Relation admission validates the requested member, then the physical
-        // nested-row insert takes its own liveness fence inside the transaction.
-        $this->assertSame(2, (int) $nestedMember->fresh()->lifecycle_fence_revision);
+        $this->assertSame(1, (int) $nestedMember->fresh()->lifecycle_fence_revision);
     }
 
     public function test_relation_admission_rejects_a_tenant_b_profile_id_on_a_tenant_a_admin_patch(): void

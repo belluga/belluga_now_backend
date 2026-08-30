@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
-use Belluga\Events\Application\Transactions\EventTransactionContext;
-use Belluga\Events\Application\Transactions\EventTransactionRunner;
-use Belluga\Events\Contracts\EventMapPoiProjectionPersistenceContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Models\Tenants\Event;
 use Illuminate\Http\Request;
@@ -22,8 +19,6 @@ class EventMediaService
     public function __construct(
         private readonly EventTenantContextContract $tenantContext,
         private readonly EventOccurrenceSyncService $occurrenceSyncService,
-        private readonly EventTransactionRunner $transactions,
-        private readonly EventMapPoiProjectionPersistenceContract $mapPoiProjection,
     ) {}
 
     /**
@@ -60,11 +55,8 @@ class EventMediaService
         }
 
         if ($updates !== []) {
-            $this->transactions->run(function (EventTransactionContext $context) use ($event, $updates): void {
-                $event->fill($updates);
-                $event->save();
-                $this->mapPoiProjection->persistForLiveEvent($context, $event->fresh() ?? $event);
-            });
+            $event->fill($updates);
+            $event->save();
             $event->refresh();
         }
 

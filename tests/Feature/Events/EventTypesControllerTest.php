@@ -478,7 +478,7 @@ class EventTypesControllerTest extends TestCaseTenant
             'is_event_published' => true,
         ]);
 
-        $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $event->getKey());
+        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event->fresh());
         $before = MapPoi::query()
             ->where('ref_type', 'event')
             ->where('ref_id', (string) $event->_id)
@@ -604,7 +604,7 @@ class EventTypesControllerTest extends TestCaseTenant
             'is_event_published' => true,
         ]);
 
-        $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $event->getKey());
+        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event->fresh());
 
         $response = $this->patchJson(
             "{$this->base_tenant_api_admin}event_types/{$eventType->_id}",
@@ -746,7 +746,7 @@ class EventTypesControllerTest extends TestCaseTenant
             'is_event_published' => true,
         ]);
 
-        $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $event->getKey());
+        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event->fresh());
         $before = MapPoi::query()
             ->where('ref_type', 'event')
             ->where('ref_id', (string) $event->_id)

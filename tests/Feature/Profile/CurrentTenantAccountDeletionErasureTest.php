@@ -6,8 +6,6 @@ namespace Tests\Feature\Profile;
 
 use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Profiles\CurrentTenantAccountDeletionService;
-use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
-use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
 use App\Jobs\Push\UnsubscribePushTokensFromAllTopicsJob;
 use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\Tenant;
@@ -31,7 +29,6 @@ use Belluga\Invites\Models\Tenants\InviteShareCode;
 use Belluga\PushHandler\Models\Tenants\PushDeliveryLog;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Belluga\PushHandler\Models\Tenants\PushMessageAction;
-use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -97,7 +94,6 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
             'slug' => 'delete-target-personal',
             'created_by' => $targetId,
             'created_by_type' => 'tenant',
-            'nested_profile_groups' => [['id' => 'first-owned', 'label' => 'First owned', 'order' => 0]],
         ]);
         $secondPersonalAccount = Account::create([
             'name' => 'Target Second Personal Account',
@@ -117,7 +113,6 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
             'gallery_groups' => [[
                 'items' => [['item_id' => 'delete-gallery-item']],
             ]],
-            'nested_profile_groups' => [['id' => 'second-owned', 'label' => 'Second owned', 'order' => 0]],
         ]);
         $malformedPersonalProfile = AccountProfile::create([
             'profile_type' => 'personal',
@@ -160,21 +155,6 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
         ]];
         $other->save();
 
-        $referenceSurvivorAccount = Account::create([
-            'name' => 'Reference Survivor Account',
-            'slug' => 'reference-survivor-account',
-            'document' => ['type' => 'cpf', 'number' => 'REFERENCE-SURVIVOR-'.$targetId],
-        ]);
-        $referenceSurvivor = AccountProfile::create([
-            'account_id' => (string) $referenceSurvivorAccount->_id,
-            'profile_type' => 'artist',
-            'display_name' => 'Reference Survivor',
-            'slug' => 'reference-survivor-profile',
-            'created_by' => $otherId,
-            'created_by_type' => 'tenant',
-            'nested_profile_groups' => [['id' => 'shared-incoming', 'label' => 'Shared incoming', 'order' => 0]],
-        ]);
-
         FavoriteEdge::create(['owner_user_id' => $targetId, 'registry_key' => 'account_profile', 'target_type' => 'account_profile', 'target_id' => (string) $sharedProfile->_id]);
         FavoriteEdge::create(['owner_user_id' => $otherId, 'registry_key' => 'account_profile', 'target_type' => 'account_profile', 'target_id' => (string) $sharedProfile->_id]);
         ContactGroup::create(['owner_user_id' => $targetId, 'name' => 'Target group']);
@@ -197,29 +177,6 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
         InviteOutboxEvent::create(['receiver_user_id' => $targetId, 'topic' => 'delete-test', 'status' => 'pending', 'dedupe_key' => 'delete-test']);
         InviteCommandIdempotency::create(['command' => 'delete-test', 'actor_user_id' => $targetId, 'idempotency_key' => 'delete-test-key', 'command_fingerprint' => 'fingerprint']);
         InviteablePeopleProjection::create(['owner_user_id' => $otherId, 'receiver_user_id' => $targetId, 'receiver_account_profile_id' => (string) $personalProfile->_id, 'display_name' => 'Delete Target']);
-
-        $tenantDatabase = DB::connection('tenant')->getDatabase();
-        $tenantId = (string) Tenant::current()?->getKey();
-        $profileIds = [(string) $personalProfile->_id, (string) $secondPersonalProfile->_id];
-        $tenantDatabase->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)->insertMany([
-            ['_id' => 'current-delete-owned-head', 'tenant_id' => $tenantId, 'parent_type' => 'account_profile', 'parent_id' => (string) $personalProfile->_id, 'group_key' => 'owned', 'doc_type' => 'group_head'],
-            ['_id' => 'current-delete-incoming-member', 'tenant_id' => $tenantId, 'parent_type' => 'event_occurrence', 'parent_id' => 'surviving-occurrence', 'group_key' => 'incoming', 'doc_type' => 'member_row', 'nested_profile' => ['id' => (string) $personalProfile->_id]],
-            ['_id' => 'current-delete-control', 'tenant_id' => $tenantId, 'parent_type' => 'event_occurrence', 'parent_id' => 'control-occurrence', 'group_key' => 'control', 'doc_type' => 'group_head'],
-            ['_id' => 'current-delete-second-owned-head', 'tenant_id' => $tenantId, 'parent_type' => 'account_profile', 'parent_id' => (string) $secondPersonalProfile->_id, 'group_key' => 'second-owned', 'doc_type' => 'group_head'],
-            ['_id' => 'current-delete-second-incoming-member', 'tenant_id' => $tenantId, 'parent_type' => 'event_occurrence', 'parent_id' => 'surviving-occurrence-two', 'group_key' => 'incoming-two', 'doc_type' => 'member_row', 'nested_profile' => ['id' => (string) $secondPersonalProfile->_id]],
-            ['_id' => 'current-delete-shared-head', 'tenant_id' => $tenantId, 'parent_type' => 'account_profile', 'parent_id' => (string) $referenceSurvivor->_id, 'group_key' => 'shared-incoming', 'group_label' => 'Shared incoming', 'group_order' => 0, 'doc_type' => 'group_head'],
-            ['_id' => 'current-delete-shared-member', 'tenant_id' => $tenantId, 'parent_type' => 'account_profile', 'parent_id' => (string) $referenceSurvivor->_id, 'group_key' => 'shared-incoming', 'doc_type' => 'member_row', 'nested_profile' => ['id' => (string) $personalProfile->_id]],
-        ]);
-        $tenantDatabase->selectCollection(AccountProfileNestedPublicMembersProjectionService::COLLECTION)->insertMany([
-            ['_id' => 'current-delete-owned-projection', 'tenant_id' => $tenantId, 'parent_profile_id' => (string) $personalProfile->_id],
-            ['_id' => 'current-delete-incoming-projection', 'tenant_id' => $tenantId, 'parent_profile_id' => 'surviving-profile', 'member_profile_id' => (string) $personalProfile->_id],
-            ['_id' => 'current-delete-control-projection', 'tenant_id' => $tenantId, 'parent_profile_id' => 'control-profile'],
-            ['_id' => 'current-delete-second-owned-projection', 'tenant_id' => $tenantId, 'parent_profile_id' => (string) $secondPersonalProfile->_id],
-            ['_id' => 'current-delete-second-incoming-projection', 'tenant_id' => $tenantId, 'parent_profile_id' => 'surviving-profile-two', 'member_profile_id' => (string) $secondPersonalProfile->_id],
-        ]);
-        MapPoi::create(['ref_type' => 'account_profile', 'ref_id' => (string) $personalProfile->_id, 'projection_key' => 'current-delete-owned', 'name' => 'Owned']);
-        MapPoi::create(['ref_type' => 'account_profile', 'ref_id' => (string) $secondPersonalProfile->_id, 'projection_key' => 'current-delete-second-owned', 'name' => 'Second owned']);
-        MapPoi::create(['ref_type' => 'account_profile', 'ref_id' => 'control-profile', 'projection_key' => 'current-delete-control', 'name' => 'Control']);
 
         $device = PushDevice::create([
             'account_user_id' => $targetId,
@@ -278,7 +235,6 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
         $this->assertNull(Account::withTrashed()->find((string) $secondPersonalAccount->_id));
         $this->assertNull(AccountProfile::withTrashed()->find((string) $malformedPersonalProfile->_id));
         $this->assertNull(AccountProfile::withTrashed()->find((string) $sharedProfile->_id));
-        $this->assertNotNull(AccountProfile::query()->find((string) $referenceSurvivor->_id));
         $this->assertNotNull(Account::query()->find((string) $sharedAccount->_id));
         $this->assertTrue(FavoriteEdge::query()->where('owner_user_id', $otherId)->exists());
 
@@ -300,20 +256,7 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
         $this->assertFalse(PushDeliveryLog::query()->where('token_hash', hash('sha256', $device->push_token))->exists());
         $this->assertFalse(PushMessageAction::query()->where('user_id', $targetId)->exists());
         $this->assertFalse(PersonalAccessToken::query()->where('tokenable_id', $targetId)->exists());
-        $this->assertSame(0, $tenantDatabase->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)->countDocuments(['$or' => [['parent_id' => ['$in' => $profileIds]], ['nested_profile.id' => ['$in' => $profileIds]]]]));
-        $this->assertSame(1, $tenantDatabase->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)->countDocuments(['_id' => 'current-delete-control']));
-        $this->assertSame(0, $tenantDatabase->selectCollection(AccountProfileNestedPublicMembersProjectionService::COLLECTION)->countDocuments(['$or' => [['parent_profile_id' => ['$in' => $profileIds]], ['member_profile_id' => ['$in' => $profileIds]]]]));
-        $this->assertSame(1, $tenantDatabase->selectCollection(AccountProfileNestedPublicMembersProjectionService::COLLECTION)->countDocuments(['_id' => 'current-delete-control-projection']));
-        $this->assertFalse(MapPoi::query()->where('ref_type', 'account_profile')->whereIn('ref_id', $profileIds)->exists());
-        $this->assertTrue(MapPoi::query()->where('ref_type', 'account_profile')->where('ref_id', 'control-profile')->exists());
-
-        $cleanupOutbox = $tenantDatabase->selectCollection('account_profile_outbox')->findOne([
-            'command_id' => "current-account-delete:{$targetId}:reference-cleanup:".(string) $referenceSurvivor->_id,
-        ]);
-        $this->assertNotNull($cleanupOutbox);
-        $this->assertSame('completed', (string) ($cleanupOutbox['delivery_state'] ?? ''));
-        $this->assertNotNull($cleanupOutbox['delivered_at'] ?? null);
-        $this->assertSame(1, (int) ($cleanupOutbox['delivery_attempts'] ?? 0));
+        $tenantDatabase = DB::connection('tenant')->getDatabase();
 
         $this->assertNull($tenantDatabase->selectCollection('push_devices')->findOne([
             'account_user_id' => $targetId,

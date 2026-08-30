@@ -679,7 +679,7 @@ class AttendanceCommitmentServiceTest extends TestCaseTenant
         }
         unset($occurrence);
 
-        $this->syncEventOccurrencesForTest(
+        app(EventOccurrenceSyncService::class)->syncFromEvent(
             $event,
             $occurrences,
             (string) ($event->content ?? ''),

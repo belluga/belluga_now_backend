@@ -131,9 +131,14 @@ class RebuildMapPoisCommand extends Command
 
         foreach ($sourceReader->allEventIds() as $eventId) {
             $processed++;
-            if ($projectionService->refreshEvent($eventId)) {
-                $upserted++;
+
+            $event = $sourceReader->findEventById($eventId);
+            if (! $event) {
+                continue;
             }
+
+            $projectionService->upsertFromEvent($event);
+            $upserted++;
 
             if ($processed % $batchSize === 0) {
                 $this->line(sprintf('Progress: processed=%d upserted=%d', $processed, $upserted));
@@ -157,9 +162,14 @@ class RebuildMapPoisCommand extends Command
 
         foreach ($sourceReader->allAccountProfileIds() as $profileId) {
             $processed++;
-            if ($projectionService->refreshAccountProfile($profileId)) {
-                $upserted++;
+
+            $profile = $sourceReader->findAccountProfileById($profileId);
+            if (! $profile) {
+                continue;
             }
+
+            $projectionService->upsertFromAccountProfile($profile);
+            $upserted++;
 
             if ($processed % $batchSize === 0) {
                 $this->line(sprintf('Progress: processed=%d upserted=%d', $processed, $upserted));

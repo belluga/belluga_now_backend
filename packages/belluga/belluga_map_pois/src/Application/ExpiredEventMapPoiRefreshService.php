@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\MapPois\Application;
 
+use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
 
@@ -11,6 +12,7 @@ class ExpiredEventMapPoiRefreshService
 {
     public function __construct(
         private readonly MapPoiProjectionService $projectionService,
+        private readonly MapPoiSourceReaderContract $sourceReader,
     ) {}
 
     public function refreshExpired(?Carbon $now = null): void
@@ -31,7 +33,14 @@ class ExpiredEventMapPoiRefreshService
                     return;
                 }
 
-                $this->projectionService->refreshEvent($eventId);
+                $event = $this->sourceReader->findEventById($eventId);
+                if (! $event) {
+                    $this->projectionService->deleteByRef('event', $eventId);
+
+                    return;
+                }
+
+                $this->projectionService->upsertFromEvent($event);
             });
     }
 }

@@ -7,13 +7,11 @@ namespace App\Providers\PackageIntegration;
 use App\Integration\MapPois\MapPoiRegistryAdapter;
 use App\Integration\MapPois\MapPoiSettingsAdapter;
 use App\Integration\MapPois\MapPoiSourceReaderAdapter;
-use App\Integration\MapPois\MapPoiSourceRefreshAdapter;
 use App\Integration\MapPois\MapPoiTaxonomySnapshotResolverAdapter;
 use App\Integration\MapPois\MapPoiTenantContextAdapter;
 use Belluga\MapPois\Contracts\MapPoiRegistryContract;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
-use Belluga\MapPois\Contracts\MapPoiSourceRefreshContract;
 use Belluga\MapPois\Contracts\MapPoiTaxonomySnapshotResolverContract;
 use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
@@ -27,11 +25,6 @@ class MapPoisIntegrationServiceProvider extends ServiceProvider
         $this->app->bind(
             MapPoiSourceReaderContract::class,
             MapPoiSourceReaderAdapter::class
-        );
-
-        $this->app->bind(
-            MapPoiSourceRefreshContract::class,
-            MapPoiSourceRefreshAdapter::class
         );
 
         $this->app->bind(

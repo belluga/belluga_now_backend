@@ -7,7 +7,6 @@ namespace Belluga\Events\Application\Events;
 use Belluga\Events\Application\Transactions\EventTransactionContext;
 use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Contracts\EventContentSanitizerContract;
-use Belluga\Events\Contracts\EventMapPoiProjectionPersistenceContract;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\Validation\InputConstraints;
@@ -29,7 +28,6 @@ class EventAggregateWriteService
         private readonly EventOccurrenceSyncService $occurrenceSyncService,
         private readonly EventOccurrencePayloadSnapshotService $occurrencePayloadSnapshots,
         private readonly EventContentSanitizerContract $contentSanitizer,
-        private readonly EventMapPoiProjectionPersistenceContract $mapPoiProjection,
     ) {}
 
     /**
@@ -39,7 +37,7 @@ class EventAggregateWriteService
     public function create(array $payload, array $occurrences): Event
     {
         /** @var Event $event */
-        $event = $this->transactions->run(function (EventTransactionContext $context) use ($payload, $occurrences): Event {
+        $event = $this->transactions->run(function () use ($payload, $occurrences): Event {
             $canonicalPayload = $payload;
             $canonicalPayload['profile_groups'] = [];
             $canonicalContent = $this->canonicalEventContent(
@@ -53,9 +51,7 @@ class EventAggregateWriteService
                 $created,
                 $occurrences,
                 $canonicalContent,
-                $context,
             );
-            $this->mapPoiProjection->persistForLiveEvent($context, $created);
 
             return $created->fresh() ?? $created;
         });
@@ -70,7 +66,7 @@ class EventAggregateWriteService
     public function update(Event $event, array $payload, array $occurrences): Event
     {
         /** @var Event $updated */
-        $updated = $this->transactions->run(function (EventTransactionContext $context) use ($event, $payload, $occurrences): Event {
+        $updated = $this->transactions->run(function () use ($event, $payload, $occurrences): Event {
             $canonicalPayload = $payload;
             $canonicalPayload['profile_groups'] = [];
             $canonicalContent = $this->canonicalEventContent(
@@ -90,9 +86,7 @@ class EventAggregateWriteService
                 $fresh,
                 $occurrences,
                 $canonicalContent,
-                $context,
             );
-            $this->mapPoiProjection->persistForLiveEvent($context, $fresh);
 
             return $fresh;
         });
@@ -104,11 +98,9 @@ class EventAggregateWriteService
     {
         $eventId = (string) $event->_id;
 
-        $this->transactions->run(function (EventTransactionContext $context) use ($event, $eventId): null {
-            $this->occurrenceNestedAccountStore->purgeByEventIdWithinContext($context, $eventId);
-            $this->mapPoiProjection->deleteForEvent($context, $eventId);
+        $this->transactions->run(function () use ($event, $eventId): null {
             $event->delete();
-            $this->occurrenceSyncService->softDeleteByEventId($context, $eventId);
+            $this->occurrenceSyncService->softDeleteByEventId($eventId);
 
             return null;
         });
@@ -127,7 +119,7 @@ class EventAggregateWriteService
         array $removeIds,
     ): array {
         /** @var array<string, mixed> $result */
-        $result = $this->transactions->run(function (EventTransactionContext $context) use ($event, $occurrence, $groupId, $addIds, $removeIds): array {
+        $result = $this->transactions->run(function () use ($event, $occurrence, $groupId, $addIds, $removeIds): array {
             $eventId = trim((string) $event->getKey());
             $occurrenceId = trim((string) $occurrence->getKey());
             if ($eventId === '' || $occurrenceId === '' || trim((string) ($occurrence->event_id ?? '')) !== $eventId) {
@@ -153,7 +145,6 @@ class EventAggregateWriteService
             }
 
             $memberCount = $this->occurrenceNestedAccountStore->replaceOccurrenceGroupMembers(
-                $context,
                 $occurrence,
                 $groupId,
                 $nextIds,
@@ -191,7 +182,7 @@ class EventAggregateWriteService
         string $label,
     ): array {
         /** @var array<string, mixed> $result */
-        $result = $this->transactions->run(function (EventTransactionContext $context) use ($event, $occurrence, $label): array {
+        $result = $this->transactions->run(function () use ($event, $occurrence, $label): array {
             $eventId = trim((string) $event->getKey());
             $occurrenceId = trim((string) $occurrence->getKey());
             if ($eventId === '' || $occurrenceId === '' || trim((string) ($occurrence->event_id ?? '')) !== $eventId) {
@@ -232,12 +223,10 @@ class EventAggregateWriteService
             $occurrence->save();
 
             $freshOccurrence = $occurrence->fresh() ?? $occurrence;
-            $createdGroup = $metadataOnly[array_key_last($metadataOnly)];
-            $this->occurrenceNestedAccountStore->createOccurrenceGroupMetadataWithinContext(
-                $context,
+            $this->occurrenceNestedAccountStore->syncOccurrenceGroupMetadata(
                 $eventId,
                 $freshOccurrence,
-                $createdGroup,
+                $metadataOnly,
             );
 
             $event->touch();
@@ -264,7 +253,7 @@ class EventAggregateWriteService
         string $groupId,
     ): array {
         /** @var array<string, mixed> $result */
-        $result = $this->transactions->run(function (EventTransactionContext $context) use ($event, $occurrence, $groupId): array {
+        $result = $this->transactions->run(function () use ($event, $occurrence, $groupId): array {
             $eventId = trim((string) $event->getKey());
             $occurrenceId = trim((string) $occurrence->getKey());
             if ($eventId === '' || $occurrenceId === '' || trim((string) ($occurrence->event_id ?? '')) !== $eventId) {
@@ -276,15 +265,45 @@ class EventAggregateWriteService
                 $eventId,
             );
             $group = $this->findOccurrenceGroupOrFail($existingGroups, $groupId);
-            $this->occurrenceNestedAccountStore->deleteOccurrenceGroupWithinContext($context, $eventId, $occurrenceId, (string) $group['id']);
-            $context->collection('event_occurrences')->updateOne(
-                ['_id' => new ObjectId($occurrenceId), 'event_id' => $eventId, 'deleted_at' => null],
-                ['$pull' => ['own_profile_groups' => ['_id' => (string) $group['id']], 'profile_groups' => ['_id' => (string) $group['id']]]],
-                $context->rawOptions(),
+            $memberIds = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMemberIds(
+                $occurrence,
+                (string) $group['id'],
+            );
+            if (count($memberIds) > InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX) {
+                throw ValidationException::withMessages([
+                    'profile_groups' => ['Related-account group delete exceeds the approved member budget.'],
+                ]);
+            }
+
+            $nextGroups = [];
+            foreach ($existingGroups as $candidate) {
+                if (trim((string) ($candidate['id'] ?? '')) === (string) $group['id']) {
+                    continue;
+                }
+
+                $nextGroups[] = [
+                    'id' => trim((string) ($candidate['id'] ?? '')),
+                    'label' => trim((string) ($candidate['label'] ?? '')),
+                    'order' => count($nextGroups),
+                ];
+            }
+
+            $metadataOnly = $this->profileGroupMemberStore->metadataOnly($nextGroups);
+            $occurrence->forceFill([
+                'own_profile_groups' => $metadataOnly,
+                'profile_groups' => $metadataOnly,
+            ]);
+            $occurrence->save();
+
+            $freshOccurrence = $occurrence->fresh() ?? $occurrence;
+            $this->occurrenceNestedAccountStore->syncOccurrenceGroupMetadata(
+                $eventId,
+                $freshOccurrence,
+                $metadataOnly,
             );
 
             $event->touch();
-            $freshOccurrence = $occurrence->fresh() ?? $occurrence;
+            $freshOccurrence = $freshOccurrence->fresh() ?? $freshOccurrence;
 
             return [
                 'occurrence_id' => (string) $freshOccurrence->getKey(),
@@ -381,9 +400,17 @@ class EventAggregateWriteService
         if ($event->trashed()) {
             $deletedAt = $event->deleted_at;
 
-            $this->transactions->run(function (EventTransactionContext $context) use ($eventId, $deletedAt): null {
-                $this->occurrenceNestedAccountStore->purgeByEventIdWithinContext($context, $eventId);
-                $this->occurrenceSyncService->softDeleteByEventId($context, $eventId, $deletedAt);
+            $this->transactions->run(function () use ($event, $eventId, $occurrences, $deletedAt, $canonicalContent): null {
+                $this->profileGroupMemberStore->materializeLegacyIfNeeded($event, includeTrashedOccurrences: true);
+                if ($occurrences !== []) {
+                    $this->occurrenceSyncService->syncFromEvent(
+                        $event,
+                        $occurrences,
+                        $canonicalContent,
+                    );
+                }
+
+                $this->occurrenceSyncService->softDeleteByEventId($eventId, $deletedAt);
 
                 return null;
             });
@@ -399,7 +426,7 @@ class EventAggregateWriteService
             return;
         }
 
-        $this->transactions->run(function (EventTransactionContext $context) use ($event, $occurrences, $canonicalContent): null {
+        $this->transactions->run(function () use ($event, $occurrences, $canonicalContent): null {
             $this->profileGroupMemberStore->materializeLegacyIfNeeded($event);
             if ((string) ($event->content ?? '') !== $canonicalContent) {
                 $event->forceFill(['content' => $canonicalContent])->saveQuietly();
@@ -408,7 +435,6 @@ class EventAggregateWriteService
                 $event,
                 $occurrences,
                 $canonicalContent,
-                $context,
             );
 
             return null;
@@ -436,7 +462,7 @@ class EventAggregateWriteService
     public function publishScheduledEventIfDue(string $eventId, Carbon $now): array
     {
         /** @var array{published: bool, from_status?: string, to_status?: string, publish_at?: mixed, mirrored_occurrences?: int} $result */
-        $result = $this->transactions->run(function (EventTransactionContext $context) use ($eventId, $now): array {
+        $result = $this->transactions->run(function () use ($eventId, $now): array {
             $event = Event::query()->where('_id', $eventId)->first();
             if (! $event) {
                 return ['published' => false];
@@ -465,7 +491,6 @@ class EventAggregateWriteService
             $event->save();
 
             $mirrored = $this->occurrenceSyncService->mirrorPublicationByEventId($eventId, $publication, $now);
-            $this->mapPoiProjection->persistForLiveEvent($context, $event->fresh() ?? $event);
 
             return [
                 'published' => true,

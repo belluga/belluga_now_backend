@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use Belluga\MapPois\Application\MapPoiProjectionService;
-use MongoDB\BSON\ObjectId;
-use MongoDB\BSON\UTCDateTime;
 use RuntimeException;
 
 final class AccountProfileMapPoiOutboxConsumer implements AccountProfileOutboxConsumer
@@ -35,33 +33,17 @@ final class AccountProfileMapPoiOutboxConsumer implements AccountProfileOutboxCo
             throw new RuntimeException('Account Profile Map POI outbox event requires a profile id.');
         }
 
-        if ((string) ($event['operation'] ?? '') !== 'tombstone') {
+        if ((string) ($event['operation'] ?? '') === 'tombstone') {
+            $this->mapPois->deleteByRef('account_profile', $profileId);
+        } else {
             $projection = $event['projection'] ?? null;
             if (! is_array($projection)) {
                 throw new RuntimeException('Account Profile Map POI upsert event requires an immutable projection.');
             }
             $projection['_id'] = $profileId;
 
-            try {
-                $profileObjectId = new ObjectId($profileId);
-            } catch (\Throwable) {
-                throw new RuntimeException('Account Profile Map POI upsert event has an invalid profile id.');
-            }
-            $touched = $context->collection('account_profiles')->updateOne(
-                ['_id' => $profileObjectId, 'deleted_at' => null],
-                ['$set' => ['updated_at' => new UTCDateTime((int) now()->getTimestampMs())]],
-                $context->rawOptions(),
-            );
-            if ($touched->getMatchedCount() !== 1) {
-                $this->checkpoints->advance($context, $this->consumerId(), $event);
-
-                return;
-            }
-
-            $this->mapPois->upsertFromAccountProfileWithinTransaction(
+            $this->mapPois->upsertFromAccountProfile(
                 (object) $projection,
-                $context->database(),
-                $context->session(),
                 (int) ($projection['source_checkpoint'] ?? 0),
             );
         }

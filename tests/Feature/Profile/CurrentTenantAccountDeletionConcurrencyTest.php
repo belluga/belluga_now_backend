@@ -1,0 +1,600 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature\Profile;
+
+use App\Application\Auth\TenantScopedAccessTokenService;
+use App\Application\Profiles\CurrentTenantAccountDeletionAccountGuard;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use App\Models\Landlord\Tenant;
+use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\AccountUser;
+use App\Models\Tenants\PhoneOtpChallenge;
+use App\Models\Tenants\TenantSettings;
+use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\Process\Process;
+use Tests\Helpers\TenantLabels;
+use Tests\TestCaseTenant;
+use Tests\Traits\RefreshLandlordAndTenantDatabases;
+
+class CurrentTenantAccountDeletionConcurrencyTest extends TestCaseTenant
+{
+    use RefreshLandlordAndTenantDatabases;
+
+    private const int SUBPROCESS_TIMEOUT_SECONDS = 120;
+
+    private const int LEADER_LEASE_WAIT_TIMEOUT_MS = 15000;
+
+    protected TenantLabels $tenant {
+        get {
+            return $this->landlord->tenant_primary;
+        }
+    }
+
+    protected static bool $bootstrapped = false;
+
+    private Tenant $tenantModel;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->tenantModel = Tenant::query()->firstOrFail();
+        $this->tenantModel->makeCurrent();
+    }
+
+    private function initializeSystem(): void
+    {
+        $this->ensureSystemInitialized();
+    }
+
+    public function test_deleted_phone_can_verify_into_a_clean_unrelated_identity_after_direct_delete(): void
+    {
+        $phone = '+5527999990304';
+        $deletedUser = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Deleted Identity',
+            'phones' => [$phone],
+            'credentials' => [],
+        ]);
+        $deletedUserId = (string) $deletedUser->_id;
+
+        $token = $this->app->make(TenantScopedAccessTokenService::class)->issueForAccountUser(
+            $deletedUser,
+            'current-tenant-account-deletion',
+            [],
+            tenantId: (string) $this->tenantModel->_id,
+        );
+        $this->withToken($token->plainTextToken)->deleteJson("{$this->base_api_tenant}profile", [
+            'confirmation' => 'remove_account',
+        ])->assertNoContent();
+        $this->app['auth']->forgetGuards();
+        $this->withoutHeader('Authorization');
+        $this->tenantModel->makeCurrent();
+
+        $this->configurePhoneOtpReviewAccess($phone);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => $phone,
+            'device_name' => 'u05-clean-reregistration',
+        ])->assertStatus(202);
+
+        $verify = $this->postJson("{$this->base_api_tenant}auth/otp/verify", [
+            'challenge_id' => $challenge->json('data.challenge_id'),
+            'phone' => $phone,
+            'code' => '123456',
+            'device_name' => 'u05-clean-reregistration',
+        ])->assertOk();
+
+        $this->assertNotSame($deletedUserId, (string) $verify->json('data.user_id'));
+        $this->tenantModel->makeCurrent();
+        $this->assertNull(AccountUser::withTrashed()->find($deletedUserId));
+        $this->assertSame(PhoneOtpChallenge::STATUS_VERIFIED, (string) PhoneOtpChallenge::query()
+            ->findOrFail($challenge->json('data.challenge_id'))
+            ->status);
+    }
+
+    public function test_delete_first_blocks_phone_otp_verify_until_direct_delete_finishes(): void
+    {
+        $phone = '+5527999990314';
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Delete First Target',
+            'phones' => [$phone],
+            'credentials' => [],
+        ]);
+        $this->configurePhoneOtpReviewAccess($phone);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => $phone,
+            'device_name' => 'delete-first-seed',
+        ])->assertStatus(202);
+
+        $this->tenantModel->makeCurrent();
+        $results = $this->runLeaderWithFollowers(
+            $this->deleteProcess((string) $target->_id, [
+                'BELLUGA_TEST_CURRENT_ACCOUNT_DELETE_BEFORE_MUTATION_SLEEP_MS' => '2500',
+            ]),
+            [
+                $this->verifyProcess(
+                    (string) $challenge->json('data.challenge_id'),
+                    $phone,
+                    '123456',
+                    'delete-first-verify',
+                ),
+            ],
+            0,
+            fn (): bool => $this->waitForPhoneLeaseAcquired($phone, 'current_account_delete'),
+        );
+
+        $deleteResult = $results[0];
+        $verifyResult = $results[1];
+
+        $this->assertTrue($deleteResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertFalse($verifyResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertGreaterThanOrEqual(600, (int) ($verifyResult['duration_ms'] ?? 0), json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertSame('The OTP challenge could not be verified.', $verifyResult['errors']['code'][0] ?? null);
+        $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
+    }
+
+    public function test_verify_first_blocks_direct_delete_until_phone_otp_verify_finishes(): void
+    {
+        $phone = '+5527999990315';
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Verify First Target',
+            'phones' => [$phone],
+            'credentials' => [],
+        ]);
+        $this->configurePhoneOtpReviewAccess($phone);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => $phone,
+            'device_name' => 'verify-first-seed',
+        ])->assertStatus(202);
+
+        $this->tenantModel->makeCurrent();
+        $results = $this->runLeaderWithFollowers(
+            $this->verifyProcess(
+                (string) $challenge->json('data.challenge_id'),
+                $phone,
+                '123456',
+                'verify-first-verify',
+                [
+                    'BELLUGA_TEST_PHONE_IDENTITY_LEASE_TTL_SECONDS' => '15',
+                    'BELLUGA_TEST_PHONE_OTP_VERIFY_BEFORE_MUTATION_SLEEP_MS' => '1200',
+                ],
+            ),
+            [
+                $this->deleteProcess((string) $target->_id, [
+                    'BELLUGA_TEST_PHONE_IDENTITY_ACQUIRE_TIMEOUT_SECONDS' => '15',
+                ]),
+            ],
+            0,
+            fn (): bool => $this->waitForPhoneLeaseAcquired($phone, 'phone_otp_verify'),
+        );
+
+        $verifyResult = $results[0];
+        $deleteResult = $results[1];
+
+        $this->assertTrue($verifyResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertTrue($deleteResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertSame((string) $target->_id, (string) ($verifyResult['user_id'] ?? ''), json_encode($results, JSON_PRETTY_PRINT));
+        $this->tenantModel->makeCurrent();
+        $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
+    }
+
+    public function test_lease_loss_aborts_stale_phone_otp_verify_before_it_can_mutate_the_identity_slice(): void
+    {
+        $phone = '+5527999990316';
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Lease Loss Target',
+            'phones' => [$phone],
+            'credentials' => [],
+        ]);
+        $this->configurePhoneOtpReviewAccess($phone);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => $phone,
+            'device_name' => 'lease-loss-seed',
+        ])->assertStatus(202);
+
+        $this->tenantModel->makeCurrent();
+        $results = $this->runLeaderWithFollowers(
+            $this->verifyProcess(
+                (string) $challenge->json('data.challenge_id'),
+                $phone,
+                '123456',
+                'lease-loss-verify',
+                [
+                    'BELLUGA_TEST_PHONE_IDENTITY_LEASE_TTL_SECONDS' => '1',
+                    'BELLUGA_TEST_PHONE_OTP_VERIFY_BEFORE_MUTATION_SLEEP_MS' => '1500',
+                ],
+            ),
+            [
+                $this->deleteProcess((string) $target->_id, [
+                    'BELLUGA_TEST_PHONE_IDENTITY_LEASE_TTL_SECONDS' => '1',
+                ]),
+            ],
+            0,
+            fn (): bool => $this->waitForPhoneLeaseAcquired($phone, 'phone_otp_verify'),
+        );
+
+        $verifyResult = $results[0];
+        $deleteResult = $results[1];
+
+        $this->assertFalse($verifyResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
+        $this->assertSame(ConcurrencyConflictException::class, $verifyResult['exception'] ?? null);
+        $this->assertTrue($deleteResult['ok'], json_encode($results, JSON_PRETTY_PRINT));
+        $this->tenantModel->makeCurrent();
+        $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
+    }
+
+    #[DataProvider('overlapProfileProvider')]
+    public function test_mixed_overlap_profiles_of_five_ten_and_twenty_never_mutate_same_phone_slice_concurrently(int $followers): void
+    {
+        $phone = sprintf('+55279999904%02d', $followers);
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => "Overlap {$followers} Target",
+            'phones' => [$phone],
+            'credentials' => [],
+        ]);
+        $this->configurePhoneOtpReviewAccess($phone);
+
+        $challenge = $this->postJson("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => $phone,
+            'device_name' => "overlap-{$followers}-seed",
+        ])->assertStatus(202);
+
+        $processes = [];
+        foreach (range(1, $followers) as $index) {
+            $processes[] = $this->verifyProcess(
+                (string) $challenge->json('data.challenge_id'),
+                $phone,
+                '123456',
+                "overlap-{$followers}-verify-{$index}",
+            );
+        }
+
+        $this->tenantModel->makeCurrent();
+        $results = $this->runLeaderWithFollowers(
+            $this->deleteProcess((string) $target->_id, [
+                'BELLUGA_TEST_CURRENT_ACCOUNT_DELETE_BEFORE_MUTATION_SLEEP_MS' => '2500',
+            ]),
+            $processes,
+            0,
+            fn (): bool => $this->waitForPhoneLeaseAcquired($phone, 'current_account_delete'),
+        );
+
+        $leadDelete = array_shift($results);
+        $this->assertIsArray($leadDelete);
+        $this->assertTrue($leadDelete['ok'], json_encode([$leadDelete, ...$results], JSON_PRETTY_PRINT));
+
+        foreach ($results as $result) {
+            $this->assertFalse($result['ok'], json_encode($results, JSON_PRETTY_PRINT));
+            $this->assertTrue(
+                $this->isAcceptedDeleteFirstOverlapFollowerFailure($result),
+                json_encode($results, JSON_PRETTY_PRINT),
+            );
+        }
+
+        $this->tenantModel->makeCurrent();
+        $this->assertNull(AccountUser::withTrashed()->find((string) $target->_id));
+    }
+
+    public function test_stale_personal_account_snapshot_cannot_hard_delete_an_account_that_gained_a_member(): void
+    {
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Deletion target',
+            'phones' => ['+5527999990311'],
+        ]);
+        $other = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Concurrent member',
+            'phones' => ['+5527999990312'],
+        ]);
+        $targetId = (string) $target->_id;
+        $account = Account::create([
+            'name' => 'Stale delete candidate',
+            'slug' => 'stale-delete-candidate',
+            'document' => ['type' => 'cpf', 'number' => 'STALE-'.$targetId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $targetId,
+            'created_by_type' => 'tenant',
+        ]);
+        $profile = AccountProfile::create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Deletion target',
+            'slug' => 'stale-delete-profile',
+            'created_by' => $targetId,
+            'created_by_type' => 'tenant',
+        ]);
+
+        $staleProfileIds = [(string) $profile->_id];
+        $staleAccountIds = [(string) $account->_id];
+        $other->account_roles = [[
+            'account_id' => (string) $account->_id,
+            'name' => 'Member',
+            'slug' => 'member',
+            'permissions' => [],
+        ]];
+        $other->save();
+
+        app(CurrentTenantAccountDeletionAccountGuard::class)->eraseRevalidatedPersonalGraph(
+            $targetId,
+            $staleProfileIds,
+            $staleAccountIds,
+        );
+
+        $this->assertNotNull(Account::query()->find((string) $account->_id));
+        $this->assertNull(AccountProfile::withTrashed()->find((string) $profile->_id));
+    }
+
+    public function test_stale_personal_account_snapshot_cannot_hard_delete_an_account_that_gained_a_profile(): void
+    {
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Deletion target profile',
+            'phones' => ['+5527999990313'],
+        ]);
+        $targetId = (string) $target->_id;
+        $account = Account::create([
+            'name' => 'Stale profile candidate',
+            'slug' => 'stale-profile-candidate',
+            'document' => ['type' => 'cpf', 'number' => 'STALE-PROFILE-'.$targetId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $targetId,
+            'created_by_type' => 'tenant',
+        ]);
+        $profile = AccountProfile::create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Deletion target profile',
+            'slug' => 'stale-profile-delete-profile',
+            'created_by' => $targetId,
+            'created_by_type' => 'tenant',
+        ]);
+
+        $profile->account_id = 'concurrently-reassigned-account';
+        $profile->save();
+
+        app(CurrentTenantAccountDeletionAccountGuard::class)->eraseRevalidatedPersonalGraph(
+            $targetId,
+            [(string) $profile->_id],
+            [(string) $account->_id],
+        );
+
+        $this->assertNotNull(Account::query()->find((string) $account->_id));
+        $this->assertNull(AccountProfile::withTrashed()->find((string) $profile->_id));
+    }
+
+    private function configurePhoneOtpReviewAccess(string $phone): void
+    {
+        $settings = TenantSettings::current() ?? new TenantSettings;
+        $settings->setAttribute('_id', TenantSettings::ROOT_ID);
+        $settings->tenant_public_auth = ['enabled_methods' => ['phone_otp']];
+        $settings->phone_otp_review_access = [
+            'phone_e164' => $phone,
+            'code_hash' => app(\App\Application\Auth\PhoneOtpReviewAccessCodeHasher::class)->make('123456'),
+        ];
+        $settings->outbound_integrations = [
+            'otp' => [
+                'ttl_minutes' => 30,
+                'resend_cooldown_seconds' => 1,
+                'max_attempts' => 5,
+            ],
+        ];
+        $settings->save();
+    }
+
+    /**
+     * @param  list<Process>  $followers
+     * @return list<array<string, mixed>>
+     */
+    private function runLeaderWithFollowers(
+        Process $leader,
+        array $followers,
+        int $followerDelayMilliseconds,
+        ?callable $beforeFollowers = null,
+    ): array {
+        $leader->start();
+
+        if ($beforeFollowers !== null) {
+            $beforeFollowers();
+        }
+
+        if ($followerDelayMilliseconds > 0) {
+            usleep($followerDelayMilliseconds * 1000);
+        }
+
+        foreach ($followers as $follower) {
+            $follower->start();
+        }
+
+        return $this->collectProcessResults([$leader, ...$followers]);
+    }
+
+    private function waitForPhoneLeaseAcquired(
+        string $phone,
+        string $operation,
+        int $timeoutMilliseconds = self::LEADER_LEASE_WAIT_TIMEOUT_MS,
+    ): bool {
+        $phoneHash = hash('sha256', preg_replace('/\D+/', '', $phone) ?? '');
+        $collection = DB::connection('tenant')
+            ->getMongoDB()
+            ->selectCollection('phone_identity_coordination_leases');
+        $deadline = microtime(true) + ($timeoutMilliseconds / 1000);
+
+        do {
+            $lease = $collection->findOne([
+                '_id' => $phoneHash,
+                'operation' => $operation,
+            ]);
+            if ($lease !== null) {
+                return true;
+            }
+
+            usleep(50 * 1000);
+        } while (microtime(true) < $deadline);
+
+        $this->fail(sprintf(
+            'Timed out after %dms waiting for %s to acquire the phone lease for %s.',
+            $timeoutMilliseconds,
+            $operation,
+            $phone,
+        ));
+    }
+
+    /**
+     * In the high-fanout delete-first overlap, every follower must fail, but
+     * the terminal shape is allowed to be either:
+     * - post-delete OTP invalidation once the follower acquires the lease; or
+     * - coordination-busy when another follower wins the lease first.
+     *
+     * The single-follower delete-first test already proves the exact
+     * post-delete invalidation contract, so this overlap harness stays focused
+     * on rejecting concurrent mutation success.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    private function isAcceptedDeleteFirstOverlapFollowerFailure(array $result): bool
+    {
+        if (($result['errors']['code'][0] ?? null) === 'The OTP challenge could not be verified.') {
+            return true;
+        }
+
+        return ($result['exception'] ?? null) === ConcurrencyConflictException::class
+            && ($result['message'] ?? null) === 'Phone identity coordination is busy.';
+    }
+
+    /**
+     * @param  list<Process>  $processes
+     * @return list<array<string, mixed>>
+     */
+    private function collectProcessResults(array $processes): array
+    {
+        $results = [];
+
+        foreach ($processes as $process) {
+            $process->wait();
+            $this->assertTrue($process->isSuccessful(), $process->getErrorOutput().$process->getOutput());
+            $outputLines = array_values(array_filter(array_map('trim', preg_split('/\R+/', $process->getOutput()) ?: [])));
+            $jsonLine = end($outputLines);
+            $this->assertIsString($jsonLine, $process->getOutput());
+            $results[] = json_decode($jsonLine, true, flags: JSON_THROW_ON_ERROR);
+        }
+
+        return $results;
+    }
+
+    /**
+     * @param  array<string, string>  $env
+     */
+    private function deleteProcess(string $userId, array $env = []): Process
+    {
+        $tenantSlug = var_export($this->tenantModel->slug, true);
+        $userIdValue = var_export($userId, true);
+
+        $code = <<<PHP
+\$started = microtime(true);
+try {
+    \$tenantModel = 'App\\\\Models\\\\Landlord\\\\Tenant';
+    \$tenant = \$tenantModel::query()->where('slug', {$tenantSlug})->firstOrFail();
+    \$tenant->makeCurrent();
+    \$user = app('App\\\\Models\\\\Tenants\\\\AccountUser')::query()->findOrFail({$userIdValue});
+    app('App\\\\Application\\\\Profiles\\\\CurrentTenantAccountDeletionService')->delete(\$tenant, \$user);
+    echo json_encode([
+        'ok' => true,
+        'duration_ms' => (int) round((microtime(true) - \$started) * 1000),
+    ], JSON_THROW_ON_ERROR);
+} catch (\\Throwable \$exception) {
+    \$errors = method_exists(\$exception, 'errors') ? \$exception->errors() : null;
+    echo json_encode([
+        'ok' => false,
+        'exception' => \$exception::class,
+        'message' => \$exception->getMessage(),
+        'errors' => \$errors,
+        'duration_ms' => (int) round((microtime(true) - \$started) * 1000),
+    ], JSON_THROW_ON_ERROR);
+}
+PHP;
+
+        return new Process(
+            [PHP_BINARY, 'artisan', 'tinker', '--execute', $code],
+            base_path(),
+            $env,
+            null,
+            self::SUBPROCESS_TIMEOUT_SECONDS,
+        );
+    }
+
+    /**
+     * @param  array<string, string>  $env
+     */
+    private function verifyProcess(
+        string $challengeId,
+        string $phone,
+        string $codeValue,
+        string $deviceName,
+        array $env = [],
+    ): Process {
+        $payload = var_export([
+            'challenge_id' => $challengeId,
+            'phone' => $phone,
+            'code' => $codeValue,
+            'device_name' => $deviceName,
+        ], true);
+        $tenantSlug = var_export($this->tenantModel->slug, true);
+
+        $code = <<<PHP
+\$started = microtime(true);
+try {
+    \$tenantModel = 'App\\\\Models\\\\Landlord\\\\Tenant';
+    \$tenant = \$tenantModel::query()->where('slug', {$tenantSlug})->firstOrFail();
+    \$tenant->makeCurrent();
+    \$result = app('App\\\\Application\\\\Auth\\\\TenantPhoneOtpAuthService')->verify(\$tenant, {$payload});
+    echo json_encode([
+        'ok' => true,
+        'user_id' => (string) (\$result->user->_id ?? ''),
+        'duration_ms' => (int) round((microtime(true) - \$started) * 1000),
+    ], JSON_THROW_ON_ERROR);
+} catch (\\Throwable \$exception) {
+    \$errors = method_exists(\$exception, 'errors') ? \$exception->errors() : null;
+    echo json_encode([
+        'ok' => false,
+        'exception' => \$exception::class,
+        'message' => \$exception->getMessage(),
+        'errors' => \$errors,
+        'duration_ms' => (int) round((microtime(true) - \$started) * 1000),
+    ], JSON_THROW_ON_ERROR);
+}
+PHP;
+
+        return new Process(
+            [PHP_BINARY, 'artisan', 'tinker', '--execute', $code],
+            base_path(),
+            $env,
+            null,
+            self::SUBPROCESS_TIMEOUT_SECONDS,
+        );
+    }
+
+    /**
+     * @return array<string, array{0: int}>
+     */
+    public static function overlapProfileProvider(): array
+    {
+        return [
+            'five-followers' => [5],
+            'ten-followers' => [10],
+            'twenty-followers' => [20],
+        ];
+    }
+}

@@ -425,7 +425,9 @@ class MapPoisControllerTest extends TestCaseTenant
             'is_active' => true,
         ]);
 
-        $this->app->make(MapPoiProjectionService::class)->refreshAccountProfile((string) $profile->getKey());
+        $this->app->make(MapPoiProjectionService::class)->upsertFromAccountProfile(
+            $profile->fresh()
+        );
 
         $response = $this->getJson("{$this->base_api_tenant}map/pois?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
         $response->assertStatus(200);
@@ -484,7 +486,9 @@ class MapPoisControllerTest extends TestCaseTenant
             'is_active' => true,
         ]);
 
-        $this->app->make(MapPoiProjectionService::class)->refreshAccountProfile((string) $profile->getKey());
+        $this->app->make(MapPoiProjectionService::class)->upsertFromAccountProfile(
+            $profile->fresh()
+        );
 
         $this->getJson("{$this->base_api_tenant}map/pois?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0")
             ->assertStatus(200)

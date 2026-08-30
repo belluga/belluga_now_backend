@@ -14,7 +14,6 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\UTCDateTime;
 use MongoDB\Laravel\Connection;
 use MongoDB\Model\BSONArray;
@@ -46,12 +45,7 @@ final class EventOccurrenceNestedAccountStore
     /**
      * @param  array<int, array<string, mixed>>  $groups
      */
-    public function syncOccurrenceGroups(
-        string $eventId,
-        EventOccurrence $occurrence,
-        array $groups,
-        ?EventTransactionContext $context = null,
-    ): void
+    public function syncOccurrenceGroups(string $eventId, EventOccurrence $occurrence, array $groups): void
     {
         $eventId = trim($eventId);
         $occurrenceId = trim((string) $occurrence->getKey());
@@ -66,29 +60,18 @@ final class EventOccurrenceNestedAccountStore
             'parent_id' => $occurrenceId,
         ];
 
-        if ($context !== null) {
-            $this->assertOccurrenceSyncLiveness($context, $eventId, $occurrenceId, $groups);
-        }
-
-        $collection = $context?->collection(self::COLLECTION) ?? $this->collection();
-        $options = $context?->rawOptions() ?? [];
-        $collection->deleteMany($filter, $options);
+        $this->collection()->deleteMany($filter);
 
         $rows = $this->rowsForOccurrence($eventId, $occurrenceId, $groups);
         if ($rows !== []) {
-            $collection->insertMany($rows, $options);
+            $this->collection()->insertMany($rows);
         }
     }
 
     /**
      * @param  array<int, array<string, mixed>>  $groups
      */
-    public function syncOccurrenceGroupMetadata(
-        string $eventId,
-        EventOccurrence $occurrence,
-        array $groups,
-        ?EventTransactionContext $context = null,
-    ): void
+    public function syncOccurrenceGroupMetadata(string $eventId, EventOccurrence $occurrence, array $groups): void
     {
         $eventId = trim($eventId);
         $occurrenceId = trim((string) $occurrence->getKey());
@@ -120,14 +103,8 @@ final class EventOccurrenceNestedAccountStore
             $groups,
         )));
 
-        if ($context !== null) {
-            $this->assertOccurrenceSyncLiveness($context, $eventId, $occurrenceId, []);
-        }
-        $collection = $context?->collection(self::COLLECTION) ?? $this->collection();
-        $options = $context?->rawOptions() ?? [];
-
         if ($normalizedGroups === []) {
-            $collection->deleteMany($filter, $options);
+            $this->collection()->deleteMany($filter);
 
             return;
         }
@@ -139,15 +116,9 @@ final class EventOccurrenceNestedAccountStore
             $groupId = (string) $group['id'];
             $keepGroupIds[] = $groupId;
 
-            $result = $collection->updateOne(
+            $this->collection()->updateOne(
                 [
                     '_id' => $this->headId($occurrenceId, $groupId),
-                    'tenant_id' => $filter['tenant_id'],
-                    'event_id' => $eventId,
-                    'parent_type' => self::PARENT_TYPE,
-                    'parent_id' => $occurrenceId,
-                    'group_key' => $groupId,
-                    'doc_type' => self::DOC_TYPE_HEAD,
                 ],
                 [
                     '$set' => [
@@ -162,13 +133,10 @@ final class EventOccurrenceNestedAccountStore
                         'updated_at' => $now,
                     ],
                 ],
-                $options,
+                ['upsert' => true],
             );
-            if ($result->getMatchedCount() !== 1) {
-                throw new NotFoundHttpException;
-            }
 
-            $collection->updateMany(
+            $this->collection()->updateMany(
                 [
                     'tenant_id' => $filter['tenant_id'],
                     'event_id' => $eventId,
@@ -183,36 +151,13 @@ final class EventOccurrenceNestedAccountStore
                         'updated_at' => $now,
                     ],
                 ],
-                $options,
             );
         }
 
-        $collection->deleteMany([
+        $this->collection()->deleteMany([
             ...$filter,
             'group_key' => ['$nin' => array_values(array_unique($keepGroupIds))],
-        ], $options);
-    }
-
-    /** @param array<string, mixed> $group */
-    public function createOccurrenceGroupMetadataWithinContext(
-        EventTransactionContext $context,
-        string $eventId,
-        EventOccurrence $occurrence,
-        array $group,
-    ): void {
-        $eventId = trim($eventId);
-        $occurrenceId = trim((string) $occurrence->getKey());
-        if ($eventId === '' || $occurrenceId === '') {
-            throw new NotFoundHttpException;
-        }
-
-        $this->assertOccurrenceSyncLiveness($context, $eventId, $occurrenceId, []);
-        $rows = $this->rowsForOccurrence($eventId, $occurrenceId, [$group]);
-        if (count($rows) !== 1) {
-            throw new NotFoundHttpException;
-        }
-
-        $context->collection(self::COLLECTION)->insertOne($rows[0], $context->rawOptions());
+        ]);
     }
 
     /**
@@ -246,19 +191,6 @@ final class EventOccurrenceNestedAccountStore
         $this->collection()->deleteMany($filter);
     }
 
-    /** @param array<int, string> $activeOccurrenceIds */
-    public function purgeMissingOccurrencesWithinContext(EventTransactionContext $context, string $eventId, array $activeOccurrenceIds): void
-    {
-        $eventId = trim($eventId);
-        if ($eventId === '') {
-            return;
-        }
-        $ids = array_values(array_filter(array_map(static fn (mixed $id): string => trim((string) $id), $activeOccurrenceIds)));
-        $filter = ['tenant_id' => $this->tenantId(), 'event_id' => $eventId, 'parent_type' => self::PARENT_TYPE];
-        $filter['parent_id'] = $ids === [] ? ['$exists' => true] : ['$nin' => $ids];
-        $context->collection(self::COLLECTION)->deleteMany($filter, $context->rawOptions());
-    }
-
     public function purgeByEventId(string $eventId): void
     {
         $eventId = trim($eventId);
@@ -271,36 +203,6 @@ final class EventOccurrenceNestedAccountStore
             'event_id' => $eventId,
             'parent_type' => self::PARENT_TYPE,
         ]);
-    }
-
-    public function purgeByEventIdWithinContext(EventTransactionContext $context, string $eventId): void
-    {
-        $eventId = trim($eventId);
-        if ($eventId === '') {
-            return;
-        }
-
-        $context->collection(self::COLLECTION)->deleteMany([
-            'tenant_id' => $this->tenantId(),
-            'event_id' => $eventId,
-            'parent_type' => self::PARENT_TYPE,
-        ], $context->rawOptions());
-    }
-
-    public function deleteOccurrenceGroupWithinContext(
-        EventTransactionContext $context,
-        string $eventId,
-        string $occurrenceId,
-        string $groupId,
-    ): void {
-        $head = $this->findOccurrenceGroupHeadOrFail($eventId, $occurrenceId, $groupId, $context);
-        $context->collection(self::COLLECTION)->deleteMany([
-            'tenant_id' => $this->tenantId(),
-            'event_id' => $eventId,
-            'parent_type' => self::PARENT_TYPE,
-            'parent_id' => $occurrenceId,
-            'group_key' => (string) $head['group_key'],
-        ], $context->rawOptions());
     }
 
     /**
@@ -599,7 +501,6 @@ final class EventOccurrenceNestedAccountStore
      * @param  array<int, string>  $memberIds
      */
     public function replaceOccurrenceGroupMembers(
-        EventTransactionContext $context,
         EventOccurrence $occurrence,
         string $groupId,
         array $memberIds,
@@ -610,7 +511,7 @@ final class EventOccurrenceNestedAccountStore
             throw new NotFoundHttpException;
         }
 
-        $group = $this->findOccurrenceGroupHeadOrFail($eventId, $occurrenceId, $groupId, $context);
+        $group = $this->findOccurrenceGroupHeadOrFail($eventId, $occurrenceId, $groupId);
         $normalizedIds = array_values(array_unique(array_filter(array_map(
             static fn (mixed $memberId): string => trim((string) $memberId),
             $memberIds,
@@ -620,53 +521,16 @@ final class EventOccurrenceNestedAccountStore
         $now = new UTCDateTime((int) now()->getTimestampMs());
         $groupKey = (string) ($group['group_key'] ?? '');
 
-        $eventTouch = $context->collection('events')->updateOne(
-            ['_id' => new ObjectId($eventId), 'deleted_at' => null],
-            ['$set' => ['updated_at' => $now]],
-            $context->rawOptions(),
-        );
-        $occurrenceTouch = $context->collection('event_occurrences')->updateOne(
-            ['_id' => new ObjectId($occurrenceId), 'event_id' => $eventId, 'deleted_at' => null],
-            ['$set' => ['updated_at' => $now]],
-            $context->rawOptions(),
-        );
-        $headTouch = $context->collection(self::COLLECTION)->updateOne(
-            ['_id' => $this->headId($occurrenceId, $groupKey), 'tenant_id' => $this->tenantId(), 'event_id' => $eventId, 'parent_id' => $occurrenceId, 'group_key' => $groupKey, 'doc_type' => self::DOC_TYPE_HEAD],
-            ['$set' => ['updated_at' => $now]],
-            $context->rawOptions(),
-        );
-        if ($eventTouch->getMatchedCount() !== 1 || $occurrenceTouch->getMatchedCount() !== 1 || $headTouch->getMatchedCount() !== 1) {
-            throw new NotFoundHttpException;
-        }
-        $memberObjectIds = [];
-        foreach ($normalizedIds as $memberId) {
-            try {
-                $memberObjectIds[] = new ObjectId($memberId);
-            } catch (\Throwable) {
-                throw new NotFoundHttpException;
-            }
-        }
-        if ($memberObjectIds !== []) {
-            $touched = $context->collection('account_profiles')->updateMany(
-                ['_id' => ['$in' => $memberObjectIds], 'deleted_at' => null, 'is_active' => true],
-                ['$inc' => ['lifecycle_fence_revision' => 1]],
-                $context->rawOptions(),
-            );
-            if ($touched->getMatchedCount() !== count($memberObjectIds)) {
-                throw new NotFoundHttpException;
-            }
-        }
-
-        $context->collection(self::COLLECTION)->deleteMany([
+        $this->collection()->deleteMany([
             'tenant_id' => $this->tenantId(),
             'event_id' => $eventId,
             'parent_type' => self::PARENT_TYPE,
             'parent_id' => $occurrenceId,
             'group_key' => $groupKey,
             'doc_type' => self::DOC_TYPE_MEMBER,
-        ], $context->rawOptions());
+        ]);
 
-        $context->collection(self::COLLECTION)->updateOne(
+        $this->collection()->updateOne(
             [
                 '_id' => $group['_id'] ?? $this->headId($occurrenceId, $groupKey),
             ],
@@ -682,7 +546,7 @@ final class EventOccurrenceNestedAccountStore
                     'updated_at' => $now,
                 ],
             ],
-            $context->rawOptions(),
+            ['upsert' => true],
         );
 
         if ($normalizedIds !== []) {
@@ -705,7 +569,7 @@ final class EventOccurrenceNestedAccountStore
                     'updated_at' => $now,
                 ];
             }
-            $context->collection(self::COLLECTION)->insertMany($rows, $context->rawOptions());
+            $this->collection()->insertMany($rows);
         }
 
         return count($normalizedIds);
@@ -1217,29 +1081,21 @@ final class EventOccurrenceNestedAccountStore
     /**
      * @return array<string, mixed>
      */
-    private function findOccurrenceGroupHeadOrFail(
-        string $eventId,
-        string $occurrenceId,
-        string $groupId,
-        ?EventTransactionContext $context = null,
-    ): array
+    private function findOccurrenceGroupHeadOrFail(string $eventId, string $occurrenceId, string $groupId): array
     {
         $groupId = trim($groupId);
         if ($groupId === '') {
             throw new NotFoundHttpException;
         }
 
-        $filter = [
+        $row = $this->collection()->findOne([
             'tenant_id' => $this->tenantId(),
             'event_id' => $eventId,
             'parent_type' => self::PARENT_TYPE,
             'parent_id' => $occurrenceId,
             'group_key' => $groupId,
             'doc_type' => self::DOC_TYPE_HEAD,
-        ];
-        $row = $context === null
-            ? $this->collection()->findOne($filter)
-            : $context->collection(self::COLLECTION)->findOne($filter, $context->rawOptions());
+        ]);
 
         $document = $this->documentToArray($row);
         if ($document === []) {
@@ -1531,63 +1387,6 @@ final class EventOccurrenceNestedAccountStore
         }
 
         return $rows;
-    }
-
-    /** @param array<int, array<string, mixed>> $groups */
-    private function assertOccurrenceSyncLiveness(
-        EventTransactionContext $context,
-        string $eventId,
-        string $occurrenceId,
-        array $groups,
-    ): void {
-        try {
-            $eventObjectId = new ObjectId($eventId);
-            $occurrenceObjectId = new ObjectId($occurrenceId);
-        } catch (\Throwable) {
-            throw new NotFoundHttpException;
-        }
-
-        $now = new UTCDateTime((int) now()->getTimestampMs());
-        $eventTouch = $context->collection('events')->updateOne(
-            ['_id' => $eventObjectId, 'deleted_at' => null],
-            ['$set' => ['updated_at' => $now]],
-            $context->rawOptions(),
-        );
-        $occurrenceTouch = $context->collection('event_occurrences')->updateOne(
-            ['_id' => $occurrenceObjectId, 'event_id' => $eventId, 'deleted_at' => null],
-            ['$set' => ['updated_at' => $now]],
-            $context->rawOptions(),
-        );
-        if ($eventTouch->getMatchedCount() !== 1 || $occurrenceTouch->getMatchedCount() !== 1) {
-            throw new NotFoundHttpException;
-        }
-
-        $memberIds = [];
-        foreach ($groups as $group) {
-            foreach ($this->normalizeArray($group['account_profile_ids'] ?? []) as $memberId) {
-                $memberId = trim((string) $memberId);
-                if ($memberId !== '') {
-                    $memberIds[$memberId] = true;
-                }
-            }
-        }
-        if ($memberIds === []) {
-            return;
-        }
-
-        try {
-            $memberObjectIds = array_map(static fn (string $id): ObjectId => new ObjectId($id), array_keys($memberIds));
-        } catch (\Throwable) {
-            throw new NotFoundHttpException;
-        }
-        $memberTouch = $context->collection('account_profiles')->updateMany(
-            ['_id' => ['$in' => $memberObjectIds], 'deleted_at' => null, 'is_active' => true],
-            ['$inc' => ['lifecycle_fence_revision' => 1]],
-            $context->rawOptions(),
-        );
-        if ($memberTouch->getMatchedCount() !== count($memberObjectIds)) {
-            throw new NotFoundHttpException;
-        }
     }
 
     /**

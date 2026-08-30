@@ -21,6 +21,7 @@ use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\UpdateResult;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
+use Symfony\Component\Process\Process;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -438,6 +439,63 @@ class AccountProfileRegistrySyncCommandTest extends TestCaseTenant
         $this->assertArrayHasKey('has_gallery', $artist['capabilities']);
     }
 
+    #[DataProvider('syncConcurrencyLevels')]
+    public function test_real_synchronized_sync_processes_converge_without_duplicate_defaults(
+        int $concurrency,
+        int $batches,
+    ): void {
+        $tenantSlug = (string) Tenant::current()?->slug;
+
+        for ($batch = 1; $batch <= $batches; $batch++) {
+            TenantProfileType::query()->delete();
+            $barrier = sys_get_temp_dir().'/registry-sync-barrier-'.bin2hex(random_bytes(8));
+
+            try {
+                $processes = array_map(
+                    fn (): Process => $this->synchronizedSyncProcess($tenantSlug, $barrier, $concurrency),
+                    range(1, $concurrency),
+                );
+
+                foreach ($processes as $process) {
+                    $process->start();
+                }
+
+                $results = [];
+                foreach ($processes as $process) {
+                    $process->wait();
+                    $this->assertTrue($process->isSuccessful(), $process->getErrorOutput().$process->getOutput());
+                    $results[] = $this->lastJsonLine($process);
+                }
+
+                $this->assertSame(
+                    array_fill(0, $concurrency, 0),
+                    array_column($results, 'exit_code'),
+                    "batch {$batch}: ".json_encode($results, JSON_THROW_ON_ERROR),
+                );
+                $this->makePrimaryTenantCurrent();
+                foreach (['personal', 'artist', 'venue'] as $type) {
+                    $this->assertSame(1, TenantProfileType::query()->where('type', $type)->count());
+                }
+            } finally {
+                foreach (glob($barrier.'.ready.*') ?: [] as $path) {
+                    @unlink($path);
+                }
+            }
+        }
+    }
+
+    /**
+     * @return array<string, array{int, int}>
+     */
+    public static function syncConcurrencyLevels(): array
+    {
+        return [
+            'five concurrent commands across two batches' => [5, 2],
+            'ten concurrent commands across three batches' => [10, 3],
+            'twenty concurrent commands across five batches' => [20, 5],
+        ];
+    }
+
     private function createCustomReferencedProfile(): AccountProfile
     {
         TenantProfileType::query()->delete();
@@ -502,6 +560,68 @@ class AccountProfileRegistrySyncCommandTest extends TestCaseTenant
         $this->assertInstanceOf(UTCDateTime::class, $timestamp);
 
         return $timestamp->toDateTime()->format('U.u');
+    }
+
+    private function synchronizedSyncProcess(string $tenantSlug, string $barrier, int $concurrency): Process
+    {
+        $tenantSlugValue = var_export($tenantSlug, true);
+        $barrierValue = var_export($barrier, true);
+        $concurrencyValue = var_export($concurrency, true);
+        $barrierTimeoutValue = var_export(self::SYNC_BARRIER_TIMEOUT_SECONDS, true);
+        $code = <<<PHP
+try {
+    \$barrier = {$barrierValue};
+    \$concurrency = {$concurrencyValue};
+    \$barrierTimeoutSeconds = {$barrierTimeoutValue};
+    file_put_contents(\$barrier.'.ready.'.getmypid(), 'ready');
+    // Laravel boots before this code runs. The finite budget detects a stuck
+    // worker without mistaking concurrent container bootstrap for sync failure.
+    \$deadline = microtime(true) + \$barrierTimeoutSeconds;
+    while (count(glob(\$barrier.'.ready.*')) < \$concurrency) {
+        if (microtime(true) >= \$deadline) {
+            throw new \\RuntimeException('registry sync barrier timed out');
+        }
+        usleep(10_000);
+    }
+    \$exitCode = \\Illuminate\\Support\\Facades\\Artisan::call(
+        'tenant:profile-registry:sync-v1',
+        ['tenant_slug' => {$tenantSlugValue}],
+    );
+    echo json_encode([
+        'exit_code' => \$exitCode,
+        'command_output' => \\Illuminate\\Support\\Facades\\Artisan::output(),
+    ], JSON_THROW_ON_ERROR);
+} catch (\\Throwable \$exception) {
+    echo json_encode([
+        'exit_code' => 1,
+        'exception' => \$exception::class,
+        'message' => \$exception->getMessage(),
+    ], JSON_THROW_ON_ERROR);
+}
+PHP;
+
+        return new Process(
+            [PHP_BINARY, 'artisan', 'tinker', '--execute', $code],
+            base_path(),
+            null,
+            null,
+            self::SYNC_PROCESS_TIMEOUT_SECONDS,
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function lastJsonLine(Process $process): array
+    {
+        $lines = array_values(array_filter(array_map(
+            'trim',
+            preg_split('/\\R+/', $process->getOutput()) ?: [],
+        )));
+        $jsonLine = end($lines);
+        $this->assertIsString($jsonLine, $process->getOutput());
+
+        return json_decode($jsonLine, true, flags: JSON_THROW_ON_ERROR);
     }
 
     private function initializeSystem(): void

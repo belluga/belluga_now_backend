@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
-use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
-use Belluga\MapPois\Application\MapPoiProjectionService;
+use Illuminate\Support\Facades\DB;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
 
@@ -22,7 +21,6 @@ final class AccountProfileReferenceCleanupService
         private readonly AccountProfileOutboxPublisher $outboxPublisher,
         private readonly AccountProfileOutboxDispatcher $outboxDispatcher,
         private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
-        private readonly MapPoiProjectionService $mapPois,
     ) {}
 
     /** @param list<string> $deletedProfileIds */
@@ -34,14 +32,10 @@ final class AccountProfileReferenceCleanupService
             return;
         }
 
-        $profileIds = $this->transactionRunner->run(
-            fn (AccountProfileTransactionContext $context): array => $this->survivingProfiles($context, $deletedProfileIds)
-                ->map(static fn (AccountProfile $profile): string => (string) $profile->getKey())
-                ->all(),
-        );
+        $profiles = $this->survivingProfiles($deletedProfileIds);
 
-        foreach ($profileIds as $profileId) {
-            $profileId = trim($profileId);
+        foreach ($profiles as $profile) {
+            $profileId = trim((string) $profile->getKey());
             if ($profileId === '') {
                 continue;
             }
@@ -55,7 +49,6 @@ final class AccountProfileReferenceCleanupService
                     $context,
                     $commandId,
                     $fingerprint,
-                    $this->nestedGroupMemberStore->metadataGroupsForProfilesWithinContext($context, [$profileId])[$profileId] ?? [],
                 ),
                 fn (): ?string => $this->reconcileCommittedCleanup($commandId, $fingerprint),
             );
@@ -85,14 +78,8 @@ final class AccountProfileReferenceCleanupService
             return [];
         }
 
-        $profiles = $this->survivingProfiles($context, $deletedProfileIds);
-        $groupsByProfileId = $this->nestedGroupMemberStore->metadataGroupsForProfilesWithinContext(
-            $context,
-            $profiles->map(static fn (AccountProfile $profile): string => (string) $profile->getKey())->all(),
-        );
-
         $eventIds = [];
-        foreach ($profiles as $profile) {
+        foreach ($this->survivingProfiles($deletedProfileIds) as $profile) {
             $profileId = trim((string) $profile->getKey());
             if ($profileId === '') {
                 continue;
@@ -105,7 +92,6 @@ final class AccountProfileReferenceCleanupService
                 $context,
                 $commandId,
                 $this->cleanupFingerprint($profileId, $deletedProfileIds, $operationCommandId),
-                $groupsByProfileId[$profileId] ?? [],
             );
             if ($eventId !== null) {
                 $eventIds[] = $eventId;
@@ -113,53 +99,6 @@ final class AccountProfileReferenceCleanupService
         }
 
         return array_values(array_unique($eventIds));
-    }
-
-    /** @param list<string> $profileIds */
-    public function purgeProfileGraphWithinTransaction(
-        AccountProfileTransactionContext $context,
-        array $profileIds,
-    ): void {
-        $profileIds = $this->normalizedIds($profileIds);
-        if ($profileIds === []) {
-            return;
-        }
-
-        $tenantId = trim((string) (Tenant::current()?->getKey() ?? ''));
-        $nestedFilter = [
-            '$or' => [
-                ['parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE, 'parent_id' => ['$in' => $profileIds]],
-                ['doc_type' => 'member_row', 'nested_profile.id' => ['$in' => $profileIds]],
-            ],
-        ];
-        if ($tenantId !== '') {
-            $nestedFilter['tenant_id'] = $tenantId;
-        }
-        $context->collection(AccountProfileNestedGroupMemberStore::COLLECTION)->deleteMany(
-            $nestedFilter,
-            $context->rawOptions(),
-        );
-
-        $projectionFilter = [
-            '$or' => [
-                ['parent_profile_id' => ['$in' => $profileIds]],
-                ['member_profile_id' => ['$in' => $profileIds]],
-            ],
-        ];
-        if ($tenantId !== '') {
-            $projectionFilter['tenant_id'] = $tenantId;
-        }
-        $context->collection(AccountProfileNestedPublicMembersProjectionService::COLLECTION)->deleteMany(
-            $projectionFilter,
-            $context->rawOptions(),
-        );
-
-        $this->mapPois->deleteByRefsWithinTransaction(
-            $context->database(),
-            $context->session(),
-            'account_profile',
-            $profileIds,
-        );
     }
 
     /**
@@ -171,7 +110,6 @@ final class AccountProfileReferenceCleanupService
         AccountProfileTransactionContext $context,
         string $commandId,
         string $fingerprint,
-        array $groups,
     ): ?string {
         $receipt = $this->outboxPublisher->receipt($context, $commandId);
         if ($receipt !== null) {
@@ -186,7 +124,7 @@ final class AccountProfileReferenceCleanupService
         }
 
         $this->mutationGate->assertProfileMutationAllowed($profile, $context);
-        $attributes = $this->cleanupAttributes($profile, $deletedProfileIds, $groups);
+        $attributes = $this->cleanupAttributes($profile, $deletedProfileIds, $context);
         if ($attributes === []) {
             return null;
         }
@@ -208,7 +146,7 @@ final class AccountProfileReferenceCleanupService
     private function cleanupAttributes(
         AccountProfile $profile,
         array $deletedProfileIds,
-        array $groups,
+        AccountProfileTransactionContext $context,
     ): array {
         $attributes = [];
         $sourceProfileId = trim((string) ($profile->contact_source_account_profile_id ?? ''));
@@ -218,26 +156,40 @@ final class AccountProfileReferenceCleanupService
             $attributes['contact_bubble_channel_id'] = null;
         }
 
+        $groups = $this->nestedGroupMemberStore->metadataGroupsWithinContext($context, $profile);
         $cleanedGroups = [];
+        $groupsChanged = false;
         foreach ($groups as $group) {
             if (! is_array($group)) {
+                $cleanedGroups[] = $group;
+
                 continue;
             }
 
-            $memberIds = $this->normalizedIds((array) ($group['member_ids'] ?? []));
+            $groupId = trim((string) ($group['id'] ?? ''));
+            $memberIds = $groupId === ''
+                ? []
+                : $this->nestedGroupMemberStore->groupMemberIdsWithinContext($context, $profile, $groupId);
             $cleanedMemberIds = array_values(array_filter(
                 $memberIds,
                 fn (mixed $memberId): bool => ! in_array(trim((string) $memberId), $deletedProfileIds, true),
             ));
+            if ($cleanedMemberIds !== $memberIds) {
+                $groupsChanged = true;
+                if ($groupId !== '') {
+                    $this->nestedGroupMemberStore->replaceGroupMembersWithinContext(
+                        $context,
+                        $profile,
+                        $groupId,
+                        $cleanedMemberIds,
+                    );
+                }
+            }
             $group['member_count'] = count($cleanedMemberIds);
-            unset($group['member_ids']);
             $cleanedGroups[] = $group;
         }
 
-        // Group heads and member rows are canonical. Replacing the persisted
-        // mirror with their cleaned metadata also drops stale embedded-only
-        // references (including the retired account_profile_ids payload).
-        if ($this->plainArray($profile->nested_profile_groups ?? []) !== $cleanedGroups) {
+        if ($groupsChanged) {
             $attributes['nested_profile_groups'] = $cleanedGroups;
         }
 
@@ -265,22 +217,19 @@ final class AccountProfileReferenceCleanupService
     }
 
     /** @param list<string> $deletedProfileIds */
-    private function survivingProfiles(
-        AccountProfileTransactionContext $context,
-        array $deletedProfileIds,
-    ): \Illuminate\Support\Collection
+    private function survivingProfiles(array $deletedProfileIds): \Illuminate\Support\Collection
     {
         $parentIdsFromMemberRows = $this->normalizedIds(
             array_map(
                 static fn (mixed $id): string => trim((string) $id),
-                $context
-                    ->database()
+                DB::connection('tenant')
+                    ->getDatabase()
                     ->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION)
                     ->distinct('parent_id', [
                         'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
                         'doc_type' => 'member_row',
                         'nested_profile.id' => ['$in' => $deletedProfileIds],
-                    ], $context->rawOptions()),
+                    ]),
             ),
         );
 
