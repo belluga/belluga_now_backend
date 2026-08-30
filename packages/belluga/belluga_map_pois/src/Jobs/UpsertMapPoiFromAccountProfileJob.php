@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Belluga\MapPois\Jobs;
 
 use Belluga\MapPois\Application\MapPoiProjectionService;
-use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -27,16 +26,7 @@ class UpsertMapPoiFromAccountProfileJob implements ShouldQueue, TenantAware
 
     public function handle(
         MapPoiProjectionService $projectionService,
-        MapPoiSourceReaderContract $sourceReader,
     ): void {
-        $profile = $sourceReader->findAccountProfileById($this->profileId);
-
-        if (! $profile) {
-            $projectionService->deleteByRef('account_profile', $this->profileId);
-
-            return;
-        }
-
-        $projectionService->upsertFromAccountProfile($profile, $this->forcedCheckpoint);
+        $projectionService->refreshAccountProfile($this->profileId, $this->forcedCheckpoint);
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Belluga\Events\Application\Events;
 
 use Belluga\Events\Contracts\EventProfileResolverContract;
+use Belluga\Events\Application\Transactions\EventTransactionContext;
 use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
@@ -32,6 +33,7 @@ class EventOccurrenceSyncService
         Event $event,
         array $occurrences,
         string $canonicalContent,
+        EventTransactionContext $context,
     ): void {
         if (count($occurrences) > InputConstraints::EVENT_OCCURRENCES_MAX) {
             throw new RuntimeException('Event occurrence sync exceeds the configured occurrence limit.');
@@ -135,12 +137,14 @@ class EventOccurrenceSyncService
                         $eventId,
                         $document,
                         $ownProfileGroups,
+                        $context,
                     );
                 } elseif ($profileGroupsExplicit) {
                     $this->occurrenceNestedAccountStore->syncOccurrenceGroupMetadata(
                         $eventId,
                         $document,
                         $ownProfileGroups,
+                        $context,
                     );
                 }
                 $documentId = (string) $document->_id;
@@ -165,12 +169,14 @@ class EventOccurrenceSyncService
 
         foreach ($staleDocuments->cursor() as $document) {
             $document->unset('occurrence_index');
+            $document->own_profile_groups = [];
+            $document->profile_groups = [];
             $document->deleted_at = $now;
             $document->updated_at = $now;
             $document->save();
         }
 
-        $this->occurrenceNestedAccountStore->purgeMissingOccurrences($eventId, $activeDocumentIds);
+        $this->occurrenceNestedAccountStore->purgeMissingOccurrencesWithinContext($context, $eventId, $activeDocumentIds);
     }
 
     private function assertIdentitySafeForExistingDocuments(array $occurrences, array $existingDocuments): void
@@ -474,15 +480,22 @@ class EventOccurrenceSyncService
         ]);
     }
 
-    public function softDeleteByEventId(string $eventId, mixed $deletedAt = null): void
+    public function softDeleteByEventId(EventTransactionContext $context, string $eventId, mixed $deletedAt = null): void
     {
         $now = $this->toCarbon($deletedAt) ?? Carbon::now();
+        $timestamp = new UTCDateTime((int) $now->getTimestampMs());
 
-        EventOccurrence::query()->where('event_id', $eventId)->update([
-            'deleted_at' => $now,
-            'updated_at' => $now,
-            'updated_from_event_at' => $now,
-        ]);
+        $context->collection('event_occurrences')->updateMany(
+            ['event_id' => $eventId],
+            ['$set' => [
+                'own_profile_groups' => [],
+                'profile_groups' => [],
+                'deleted_at' => $timestamp,
+                'updated_at' => $timestamp,
+                'updated_from_event_at' => $timestamp,
+            ]],
+            $context->rawOptions(),
+        );
     }
 
     /**

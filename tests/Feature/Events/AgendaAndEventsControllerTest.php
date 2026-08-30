@@ -2720,7 +2720,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         }
         unset($occurrence);
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent(
+        $this->syncEventOccurrencesForTest(
             $event,
             $occurrences,
             (string) ($event->content ?? ''),

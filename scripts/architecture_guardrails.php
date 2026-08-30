@@ -49,6 +49,7 @@ final class ArchitectureGuardrailRunner
         $this->checkTenantMigrationPathRegistration();
         $this->checkFavoritesRegistryGuardrails();
         $this->checkCiLocalTestRuntimeGuardrails();
+        $this->checkAutomatedTestsDoNotInvokeTinker();
         $this->checkApiSecurityHardeningBaseline();
         $this->checkAccountUserTokenIssuerGuardrails();
         $this->checkAccountRouteAbilityBindingGuardrails();
@@ -1284,6 +1285,55 @@ final class ArchitectureGuardrailRunner
                     $line,
                     "{$key}: {$issue}"
                 );
+            }
+        }
+    }
+
+    private function checkAutomatedTestsDoNotInvokeTinker(): void
+    {
+        $testsDirectory = $this->repoRoot.'/tests';
+        if (! is_dir($testsDirectory)) {
+            $this->addViolation(
+                'LAR-TEST-NO-TINKER',
+                'tests',
+                1,
+                'Missing Laravel tests directory; cannot enforce the isolated-test-runtime boundary.'
+            );
+
+            return;
+        }
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($testsDirectory, FilesystemIterator::SKIP_DOTS)
+        );
+
+        foreach ($iterator as $file) {
+            if (! $file instanceof SplFileInfo || $file->getExtension() !== 'php') {
+                continue;
+            }
+
+            $content = @file_get_contents($file->getPathname());
+            if (! is_string($content)) {
+                $this->addViolation(
+                    'LAR-TEST-NO-TINKER',
+                    $this->relativePath($file->getPathname()),
+                    1,
+                    'Cannot read automated test source while enforcing the isolated-test-runtime boundary.'
+                );
+
+                continue;
+            }
+
+            if (preg_match_all('/(?:[\'\"]artisan[\'\"]\s*,\s*)?[\'\"]tinker[\'\"]|artisan\s+tinker/i', $content, $matches, PREG_OFFSET_CAPTURE) !== false) {
+                foreach ($matches[0] as $match) {
+                    $offset = (int) $match[1];
+                    $this->addViolation(
+                        'LAR-TEST-NO-TINKER',
+                        $this->relativePath($file->getPathname()),
+                        substr_count(substr($content, 0, $offset), "\n") + 1,
+                        'Automated tests must not invoke `artisan tinker`; it can bypass the canonical isolated test runtime. Use the booted PHPUnit process or an explicitly isolated harness.'
+                    );
+                }
             }
         }
     }

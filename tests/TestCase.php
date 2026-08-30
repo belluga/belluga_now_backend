@@ -49,6 +49,19 @@ abstract class TestCase extends BaseTestCase
         parent::tearDown();
     }
 
+    /** @param array<int, array<string, mixed>> $occurrences */
+    protected function syncEventOccurrencesForTest(
+        \Belluga\Events\Models\Tenants\Event $event,
+        array $occurrences,
+        string $canonicalContent,
+    ): void {
+        app(\Belluga\Events\Application\Transactions\EventTransactionRunner::class)->run(
+            fn (\Belluga\Events\Application\Transactions\EventTransactionContext $context) => app(
+                \Belluga\Events\Application\Events\EventOccurrenceSyncService::class,
+            )->syncFromEvent($event, $occurrences, $canonicalContent, $context),
+        );
+    }
+
     protected function normalizeTestUri(string $uri, ?string $hostOverride = null): string
     {
         if (str_starts_with($uri, 'http://') || str_starts_with($uri, 'https://')) {

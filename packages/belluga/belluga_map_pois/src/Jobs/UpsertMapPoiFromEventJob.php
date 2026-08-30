@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Belluga\MapPois\Jobs;
 
 use Belluga\MapPois\Application\MapPoiProjectionService;
-use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -37,16 +36,7 @@ class UpsertMapPoiFromEventJob implements ShouldQueue, TenantAware
 
     public function handle(
         MapPoiProjectionService $projectionService,
-        MapPoiSourceReaderContract $sourceReader,
     ): void {
-        $event = $sourceReader->findEventById($this->eventId);
-
-        if (! $event) {
-            $projectionService->deleteByRef('event', $this->eventId);
-
-            return;
-        }
-
-        $projectionService->upsertFromEvent($event, $this->forcedCheckpoint);
+        $projectionService->refreshEvent($this->eventId, $this->forcedCheckpoint);
     }
 }

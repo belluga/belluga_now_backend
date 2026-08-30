@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Profiles;
 
 use App\Application\AccountProfiles\AccountProfileMediaService;
-use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
+use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
 use App\Application\Auth\PhoneIdentityCoordinationStore;
 use App\Application\Push\PushTopicMembershipService;
 use App\Models\Landlord\Tenant;
@@ -39,6 +39,7 @@ final class CurrentTenantAccountDeletionService
 {
     public function __construct(
         private readonly AccountProfileMediaService $profileMedia,
+        private readonly AccountProfileOutboxDispatcher $outboxDispatcher,
         private readonly PushTopicMembershipService $pushTopicMemberships,
         private readonly CurrentTenantAccountDeletionAccountGuard $accountGuard,
         private readonly PhoneIdentityCoordinationStore $phoneIdentityCoordination,
@@ -64,14 +65,16 @@ final class CurrentTenantAccountDeletionService
 
             $this->phoneIdentityCoordination->assertStillOwned($lease);
             $this->eraseProfileMedia($personalProfiles);
-            $this->eraseExternalProfileReferences($personalProfileIds);
             $this->eraseUserOwnedTenantData($userId, $phoneHashes, $personalProfileIds);
             $this->eraseAuthenticationState($user, $userId);
-            $this->accountGuard->eraseRevalidatedPersonalGraph(
+            $outboxEventIds = $this->accountGuard->eraseRevalidatedPersonalGraph(
                 $userId,
                 $personalProfileIds,
                 $deletableAccountIds,
             );
+            foreach ($outboxEventIds as $outboxEventId) {
+                $this->outboxDispatcher->dispatchEvent($outboxEventId);
+            }
 
             $this->phoneIdentityCoordination->assertStillOwned($lease);
             AccountUser::withoutEvents(static function () use ($userId): void {
@@ -200,129 +203,6 @@ final class CurrentTenantAccountDeletionService
     {
         foreach ($profiles as $profile) {
             $this->profileMedia->removeAllUploads($profile);
-        }
-    }
-
-    /**
-     * @param  array<int, string>  $profileIds
-     */
-    private function eraseExternalProfileReferences(array $profileIds): void
-    {
-        if ($profileIds === []) {
-            return;
-        }
-
-        $profiles = $this->tenantCollection('account_profiles');
-        $profiles->updateMany(
-            ['contact_source_account_profile_id' => ['$in' => $profileIds]],
-            [
-                '$set' => [
-                    'contact_mode' => 'own',
-                    'contact_source_account_profile_id' => null,
-                ],
-            ],
-        );
-
-        $profiles->updateMany(
-            ['nested_profile_groups.account_profile_ids' => ['$in' => $profileIds]],
-            [[
-                '$set' => [
-                    'nested_profile_groups' => [
-                        '$map' => [
-                            'input' => ['$ifNull' => ['$nested_profile_groups', []]],
-                            'as' => 'group',
-                            'in' => [
-                                '$mergeObjects' => [
-                                    '$$group',
-                                    [
-                                        'account_profile_ids' => [
-                                            '$filter' => [
-                                                'input' => ['$ifNull' => ['$$group.account_profile_ids', []]],
-                                                'as' => 'profile_id',
-                                                'cond' => [
-                                                    '$not' => [[
-                                                        '$in' => ['$$profile_id', $profileIds],
-                                                    ]],
-                                                ],
-                                            ],
-                                        ],
-                                    ],
-                                ],
-                            ],
-                        ],
-                    ],
-                ],
-            ]],
-        );
-
-        $memberRows = $this->tenantCollection(AccountProfileNestedGroupMemberStore::COLLECTION);
-        $affectedParentIds = $this->normalizedStrings(array_map(
-            static fn (mixed $value): string => trim((string) $value),
-            $memberRows->distinct('parent_id', [
-                'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
-                'doc_type' => 'member_row',
-                'nested_profile.id' => ['$in' => $profileIds],
-            ]),
-        ));
-
-        if ($affectedParentIds === []) {
-            return;
-        }
-
-        $memberRows->deleteMany([
-            'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
-            'doc_type' => 'member_row',
-            'nested_profile.id' => ['$in' => $profileIds],
-        ]);
-
-        $groupCountsByParent = [];
-        foreach ($memberRows->find(
-            [
-                'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
-                'doc_type' => 'member_row',
-                'parent_id' => ['$in' => $affectedParentIds],
-            ],
-            ['projection' => ['parent_id' => 1, 'group_key' => 1]],
-        ) as $row) {
-            $parentProfileId = trim((string) ($row['parent_id'] ?? ''));
-            $groupId = trim((string) ($row['group_key'] ?? ''));
-            if ($parentProfileId === '' || $groupId === '') {
-                continue;
-            }
-
-            $groupCountsByParent[$parentProfileId][$groupId] = ($groupCountsByParent[$parentProfileId][$groupId] ?? 0) + 1;
-        }
-
-        foreach (AccountProfile::withTrashed()->whereIn('_id', $affectedParentIds)->get() as $parentProfile) {
-            if (! $parentProfile instanceof AccountProfile) {
-                continue;
-            }
-
-            $nestedGroups = [];
-            foreach ((array) ($parentProfile->nested_profile_groups ?? []) as $index => $group) {
-                if (! is_array($group)) {
-                    $nestedGroups[] = $group;
-
-                    continue;
-                }
-
-                $groupId = trim((string) ($group['id'] ?? $group['key'] ?? ''));
-                if ($groupId === '') {
-                    $nestedGroups[] = $group;
-
-                    continue;
-                }
-
-                unset($group['account_profile_ids']);
-                $group['order'] = isset($group['order']) ? (int) $group['order'] : $index;
-                $group['member_count'] = (int) ($groupCountsByParent[(string) $parentProfile->getKey()][$groupId] ?? 0);
-                $nestedGroups[] = $group;
-            }
-
-            $profiles->updateOne(
-                ['_id' => $parentProfile->getKey()],
-                ['$set' => ['nested_profile_groups' => $nestedGroups]],
-            );
         }
     }
 

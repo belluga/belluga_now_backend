@@ -64,6 +64,74 @@ final class AccountProfileNestedGroupMemberStore
         return $groups;
     }
 
+    /**
+     * @param  list<string>  $profileIds
+     * @return array<string, list<array{id:string,label:string,order:int,member_count:int,member_ids:list<string>}>>
+     */
+    public function metadataGroupsForProfilesWithinContext(
+        AccountProfileTransactionContext $context,
+        array $profileIds,
+    ): array {
+        $profileIds = $this->normalizedStrings($profileIds);
+        if ($profileIds === []) {
+            return [];
+        }
+
+        $options = $context->rawOptions();
+        $filter = [
+            'tenant_id' => $this->tenantId(),
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => ['$in' => $profileIds],
+        ];
+        $collection = $context->collection(self::COLLECTION);
+        $heads = iterator_to_array($collection->find([
+            ...$filter,
+            'doc_type' => self::DOC_TYPE_HEAD,
+        ], [
+            'sort' => ['parent_id' => 1, 'group_order' => 1, '_id' => 1],
+            ...$options,
+        ]));
+        $memberRows = iterator_to_array($collection->find([
+            ...$filter,
+            'doc_type' => self::DOC_TYPE_MEMBER,
+        ], [
+            'sort' => ['parent_id' => 1, 'group_key' => 1, 'item_order' => 1, '_id' => 1],
+            ...$options,
+        ]));
+
+        $memberIdsByParentAndGroup = [];
+        foreach ($memberRows as $row) {
+            $document = $this->documentToArray($row) ?? [];
+            $parentId = trim((string) ($document['parent_id'] ?? ''));
+            $groupId = trim((string) ($document['group_key'] ?? ''));
+            $memberId = trim((string) (($document['nested_profile']['id'] ?? null) ?: ''));
+            if ($parentId === '' || $groupId === '' || $memberId === '') {
+                continue;
+            }
+            $memberIdsByParentAndGroup[$parentId][$groupId][] = $memberId;
+        }
+
+        $groupsByProfileId = [];
+        foreach ($heads as $row) {
+            $document = $this->documentToArray($row) ?? [];
+            $parentId = trim((string) ($document['parent_id'] ?? ''));
+            $groupId = trim((string) ($document['group_key'] ?? ''));
+            if ($parentId === '' || $groupId === '') {
+                continue;
+            }
+            $memberIds = $this->normalizedStrings($memberIdsByParentAndGroup[$parentId][$groupId] ?? []);
+            $groupsByProfileId[$parentId][] = [
+                'id' => $groupId,
+                'label' => (string) ($document['group_label'] ?? ''),
+                'order' => (int) ($document['group_order'] ?? 0),
+                'member_count' => count($memberIds),
+                'member_ids' => $memberIds,
+            ];
+        }
+
+        return $groupsByProfileId;
+    }
+
     /** @return array{id:string,label:string,_changed:bool} */
     public function renameGroupLabelWithinContext(
         AccountProfileTransactionContext $context,
@@ -111,6 +179,36 @@ final class AccountProfileNestedGroupMemberStore
             'label' => $label,
             '_changed' => $result->getModifiedCount() === 1,
         ];
+    }
+
+    public function deleteGroupWithinContext(
+        AccountProfileTransactionContext $context,
+        AccountProfile $profile,
+        string $groupId,
+    ): void {
+        $parentProfileId = trim((string) $profile->getKey());
+        $groupId = trim($groupId);
+        if ($parentProfileId === '' || $groupId === '') {
+            throw new NotFoundHttpException;
+        }
+
+        $filter = [
+            '_id' => $this->headId($parentProfileId, $groupId),
+            'tenant_id' => $this->tenantId(),
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $parentProfileId,
+            'group_key' => $groupId,
+            'doc_type' => self::DOC_TYPE_HEAD,
+        ];
+        if ($context->collection(self::COLLECTION)->findOne($filter, $context->rawOptions()) === null) {
+            throw new NotFoundHttpException;
+        }
+        $context->collection(self::COLLECTION)->deleteMany([
+            'tenant_id' => $this->tenantId(),
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $parentProfileId,
+            'group_key' => $groupId,
+        ], $context->rawOptions());
     }
 
     /**
@@ -441,28 +539,34 @@ final class AccountProfileNestedGroupMemberStore
         }
 
         $profilesById = $this->profilesByIdForIds($memberIds, $profilesById);
-        $groupLabel = trim((string) ($group['label'] ?? ''));
         $groupOrder = (int) ($group['order'] ?? 0);
         $now = new UTCDateTime((int) now()->getTimestampMs());
 
-        $context->collection(self::COLLECTION)->updateOne(
-            ['_id' => $this->headId($parentProfileId, $groupId)],
-            [
-                '$setOnInsert' => [
-                    'tenant_id' => $tenantId,
-                    'parent_type' => self::PARENT_TYPE,
-                    'parent_id' => $parentProfileId,
-                    'group_key' => $groupId,
-                    'group_label' => $groupLabel,
-                    'group_order' => $groupOrder,
-                    'doc_type' => self::DOC_TYPE_HEAD,
-                ],
-                '$set' => [
-                    'updated_at' => $now,
-                ],
-            ],
-            [...$context->rawOptions(), 'upsert' => true],
+        try {
+            $parentObjectId = new \MongoDB\BSON\ObjectId($parentProfileId);
+        } catch (\Throwable) {
+            throw new \App\Exceptions\FoundationControlPlane\ConcurrencyConflictException('Account Profile nested parent id is invalid.');
+        }
+        $parentTouch = $context->collection('account_profiles')->updateOne(
+            ['_id' => $parentObjectId, 'deleted_at' => null, 'is_active' => true],
+            ['$inc' => ['lifecycle_fence_revision' => 1]],
+            $context->rawOptions(),
         );
+        $headTouch = $context->collection(self::COLLECTION)->updateOne(
+            [
+                '_id' => $this->headId($parentProfileId, $groupId),
+                'tenant_id' => $tenantId,
+                'parent_type' => self::PARENT_TYPE,
+                'parent_id' => $parentProfileId,
+                'group_key' => $groupId,
+                'doc_type' => self::DOC_TYPE_HEAD,
+            ],
+            ['$set' => ['updated_at' => $now]],
+            $context->rawOptions(),
+        );
+        if ($parentTouch->getMatchedCount() !== 1 || $headTouch->getMatchedCount() !== 1) {
+            throw new \App\Exceptions\FoundationControlPlane\ConcurrencyConflictException('Account Profile nested parent or group changed during replacement.');
+        }
 
         $context->collection(self::COLLECTION)->deleteMany(
             [
@@ -479,13 +583,28 @@ final class AccountProfileNestedGroupMemberStore
             return;
         }
 
-        $rows = [];
-        foreach (array_values($memberIds) as $position => $memberId) {
-            $memberId = trim($memberId);
-            if ($memberId === '') {
-                continue;
+        $normalizedMemberIds = $this->normalizedStrings($memberIds);
+        $memberObjectIds = [];
+        foreach ($normalizedMemberIds as $memberId) {
+            try {
+                $memberObjectIds[] = new \MongoDB\BSON\ObjectId($memberId);
+            } catch (\Throwable) {
+                throw new \App\Exceptions\FoundationControlPlane\ConcurrencyConflictException('Account Profile nested member id is invalid.');
             }
+        }
+        if ($memberObjectIds !== []) {
+            $touched = $context->collection('account_profiles')->updateMany(
+                ['_id' => ['$in' => $memberObjectIds], 'deleted_at' => null, 'is_active' => true],
+                ['$inc' => ['lifecycle_fence_revision' => 1]],
+                $context->rawOptions(),
+            );
+            if ($touched->getMatchedCount() !== count($memberObjectIds)) {
+                throw new \App\Exceptions\FoundationControlPlane\ConcurrencyConflictException('Account Profile nested member changed during replacement.');
+            }
+        }
 
+        $rows = [];
+        foreach ($normalizedMemberIds as $position => $memberId) {
             $rows[] = [
                 '_id' => $this->memberId($parentProfileId, $groupId, $memberId),
                 'tenant_id' => $tenantId,

@@ -14,7 +14,6 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
-use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -29,7 +28,6 @@ class AccountManagementService
         private readonly AccountQueryService $accountQueryService,
         private readonly AccountOwnershipStateService $ownershipStateService,
         private readonly AccountPublicationStateService $accountPublicationStateService,
-        private readonly MapPoiProjectionService $mapPoiProjectionService,
         private readonly PushUserGatewayContract $pushUsers,
         private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly AccountProfileLifecycleService $accountProfileLifecycleService,
@@ -249,17 +247,19 @@ class AccountManagementService
 
         $baseCommandId = $this->normalizeAggregateDeleteCommandId($account, $commandId, 'soft_delete');
         $outboxEventIds = [];
-        $profileIds = [];
-
-        $tenantConnection->transaction(function () use ($account, $tenantConnection, $baseCommandId, &$outboxEventIds, &$profileIds): void {
-            $profileIds = $this->allAccountProfileIds($account);
+        $tenantConnection->transaction(function () use ($account, $tenantConnection, $baseCommandId, &$outboxEventIds): void {
             $context = $this->profileTransactionContext($tenantConnection);
-
-            $outboxEventIds = $this->deleteProfilesInsideAccountAggregateDeletionBoundary(
-                $account,
+            $profiles = $this->accountProfilesForAggregateDeletion($account);
+            $profileIds = $this->profileIds($profiles);
+            $outboxEventIds = $this->accountProfileLifecycleService->purgeTerminalProfileGraphWithinTransaction(
                 $context,
                 $baseCommandId,
+                $profileIds,
             );
+            $outboxEventIds = array_values(array_unique([
+                ...$outboxEventIds,
+                ...$this->deleteProfilesUsingLifecyclePath($profiles, $context, $baseCommandId, false, true),
+            ]));
             $account->roleTemplates()->delete();
             $account->delete();
         });
@@ -268,7 +268,6 @@ class AccountManagementService
             $this->accountProfileOutboxDispatcher->dispatchEvent($eventId);
         }
 
-        $this->deleteMapPoiProjections($profileIds);
     }
 
     private function forceDeleteInsideAccountAggregateDeletionBoundary(Account $account, ?string $commandId = null): void
@@ -280,17 +279,19 @@ class AccountManagementService
 
         $baseCommandId = $this->normalizeAggregateDeleteCommandId($account, $commandId, 'force_delete');
         $outboxEventIds = [];
-        $profileIds = [];
-
-        $tenantConnection->transaction(function () use ($account, $tenantConnection, $baseCommandId, &$outboxEventIds, &$profileIds): void {
-            $profileIds = $this->allAccountProfileIds($account);
+        $tenantConnection->transaction(function () use ($account, $tenantConnection, $baseCommandId, &$outboxEventIds): void {
             $context = $this->profileTransactionContext($tenantConnection);
-
-            $outboxEventIds = $this->forceDeleteProfilesInsideAccountAggregateDeletionBoundary(
-                $account,
+            $profiles = $this->accountProfilesForAggregateDeletion($account);
+            $profileIds = $this->profileIds($profiles);
+            $outboxEventIds = $this->accountProfileLifecycleService->purgeTerminalProfileGraphWithinTransaction(
                 $context,
                 $baseCommandId,
+                $profileIds,
             );
+            $outboxEventIds = array_values(array_unique([
+                ...$outboxEventIds,
+                ...$this->deleteProfilesUsingLifecyclePath($profiles, $context, $baseCommandId, true, true),
+            ]));
             $account->roleTemplates()->withTrashed()->forceDelete();
             $account->forceDelete();
         });
@@ -299,7 +300,6 @@ class AccountManagementService
             $this->accountProfileOutboxDispatcher->dispatchEvent($eventId);
         }
 
-        $this->deleteMapPoiProjections($profileIds);
     }
 
     private function assertUnmanagedAccountForDelete(Account $account): void
@@ -317,39 +317,13 @@ class AccountManagementService
     /**
      * @return array<int, string>
      */
-    private function deleteProfilesInsideAccountAggregateDeletionBoundary(
-        Account $account,
-        AccountProfileTransactionContext $context,
-        string $baseCommandId,
-    ): array {
-        return $this->deleteProfilesUsingLifecyclePath(
-            AccountProfile::query()
-                ->where('account_id', (string) $account->_id)
-                ->orderBy('_id')
-                ->get(),
-            $context,
-            $baseCommandId,
-            false,
-        );
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function forceDeleteProfilesInsideAccountAggregateDeletionBoundary(
-        Account $account,
-        AccountProfileTransactionContext $context,
-        string $baseCommandId,
-    ): array {
-        return $this->deleteProfilesUsingLifecyclePath(
-            AccountProfile::withTrashed()
-                ->where('account_id', (string) $account->_id)
-                ->orderBy('_id')
-                ->get(),
-            $context,
-            $baseCommandId,
-            true,
-        );
+    private function accountProfilesForAggregateDeletion(Account $account): array
+    {
+        return AccountProfile::withTrashed()
+            ->where('account_id', (string) $account->_id)
+            ->orderBy('_id')
+            ->get()
+            ->all();
     }
 
     /**
@@ -361,6 +335,7 @@ class AccountManagementService
         AccountProfileTransactionContext $context,
         string $baseCommandId,
         bool $forceDelete,
+        bool $graphAlreadyPurged = false,
     ): array {
         $profiles = array_values(array_filter(
             is_array($profiles) ? $profiles : iterator_to_array($profiles, false),
@@ -385,12 +360,18 @@ class AccountManagementService
                     $context,
                     $profileCommandId,
                     false,
+                    cleanSurvivingReferences: ! $graphAlreadyPurged,
+                    purgeGraph: ! $graphAlreadyPurged,
+                    useProvidedPersistedProfile: $graphAlreadyPurged,
                 )
                 : $this->accountProfileLifecycleService->deleteWithinTransaction(
                     $profile,
                     $context,
                     $profileCommandId,
                     false,
+                    cleanSurvivingReferences: ! $graphAlreadyPurged,
+                    purgeGraph: ! $graphAlreadyPurged,
+                    useProvidedPersistedProfile: $graphAlreadyPurged,
                 );
 
             foreach ($profileEventIds as $eventId) {
@@ -466,14 +447,12 @@ class AccountManagementService
     /**
      * @return array<int, string>
      */
-    private function allAccountProfileIds(Account $account): array
+    private function profileIds(array $profiles): array
     {
-        return $this->accountProfileQueryService
-            ->findWithTrashedByAccountId((string) $account->_id)
-            ->map(static fn (AccountProfile $profile): string => trim((string) $profile->_id))
-            ->filter(static fn (string $id): bool => $id !== '')
-            ->values()
-            ->all();
+        return array_values(array_filter(array_map(
+            static fn (AccountProfile $profile): string => trim((string) $profile->getKey()),
+            $profiles,
+        ), static fn (string $id): bool => $id !== ''));
     }
 
     private function syncNestedPublicMembersProjectionForAccount(Connection $connection, Account $account): void
@@ -528,13 +507,4 @@ class AccountManagementService
         );
     }
 
-    /**
-     * @param  array<int, string>  $profileIds
-     */
-    private function deleteMapPoiProjections(array $profileIds): bool
-    {
-        $this->mapPoiProjectionService->deleteByRefs('account_profile', $profileIds);
-
-        return true;
-    }
 }

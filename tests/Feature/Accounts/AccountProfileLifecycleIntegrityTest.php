@@ -10,7 +10,6 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
-use Symfony\Component\Process\Process;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -129,31 +128,6 @@ class AccountProfileLifecycleIntegrityTest extends TestCaseTenant
         );
     }
 
-    public function test_concurrent_direct_profile_deletes_cannot_orphan_live_account(): void
-    {
-        [$account, $profile] = $this->createLiveAccountWithProfile('Concurrent Delete');
-        $profileId = (string) $profile->_id;
-
-        $first = $this->profileDeleteProcess($profileId);
-        $second = $this->profileDeleteProcess($profileId);
-
-        $first->start();
-        $second->start();
-        $first->wait();
-        $second->wait();
-
-        Tenant::query()->where('slug', 'tenant-zeta')->firstOrFail()->makeCurrent();
-
-        $this->assertNotNull(AccountProfile::query()->find($profileId));
-        $this->assertSame(
-            1,
-            AccountProfile::query()
-                ->where('account_id', (string) $account->_id)
-                ->where('is_active', true)
-                ->count()
-        );
-    }
-
     /**
      * @return array{Account, AccountProfile}
      */
@@ -173,18 +147,6 @@ class AccountProfileLifecycleIntegrityTest extends TestCaseTenant
         ])->fresh();
 
         return [$account, $profile];
-    }
-
-    private function profileDeleteProcess(string $profileId): Process
-    {
-        $code = str_replace('__PROFILE_ID__', addslashes($profileId), <<<'PHP'
-$tenant = \App\Models\Landlord\Tenant::query()->where('slug', 'tenant-zeta')->firstOrFail();
-$tenant->makeCurrent();
-$profile = \App\Models\Tenants\AccountProfile::query()->findOrFail('__PROFILE_ID__');
-app(\App\Application\AccountProfiles\AccountProfileManagementService::class)->delete($profile);
-PHP);
-
-        return new Process([PHP_BINARY, 'artisan', 'tinker', '--execute', $code], base_path(), null, null, 30);
     }
 
     private function initializeSystem(): void

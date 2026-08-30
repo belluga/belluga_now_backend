@@ -545,6 +545,11 @@ class EventCrudControllerTest extends TestCaseTenant
         $thumbUrl = (string) $response->json('data.thumb.data.url');
         $this->assertNotSame('', $thumbUrl);
         $this->assertStringContainsString("/api/v1/media/events/{$eventId}/cover", $thumbUrl);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $this->assertSame(
+            $thumbUrl,
+            MapPoi::query()->where('ref_type', 'event')->where('ref_id', $eventId)->firstOrFail()->cover_url,
+        );
         $freshOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
         $this->assertNull(data_get($freshOccurrence, 'thumb'));
 
@@ -566,6 +571,10 @@ class EventCrudControllerTest extends TestCaseTenant
         );
         $created->assertStatus(201);
         $eventId = (string) $created->json('data.event_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $this->assertNotNull(
+            MapPoi::query()->where('ref_type', 'event')->where('ref_id', $eventId)->firstOrFail()->cover_url,
+        );
 
         $response = $this->patchJson(
             "{$this->accountEventsBase}/{$eventId}",
@@ -574,6 +583,10 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $this->assertNull($response->json('data.thumb'));
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $this->assertNull(
+            MapPoi::query()->where('ref_type', 'event')->where('ref_id', $eventId)->firstOrFail()->cover_url,
+        );
         $coverPaths = collect(Storage::disk('public')->allFiles())
             ->filter(static fn (string $path): bool => str_contains($path, "/events/{$eventId}/cover."));
         $this->assertTrue($coverPaths->isEmpty());
@@ -2776,7 +2789,7 @@ class EventCrudControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_event_create_dispatches_map_projection_sync_job_via_lifecycle_event(): void
+    public function test_event_create_persists_map_projection_without_redundant_sync_job(): void
     {
         Queue::fake();
 
@@ -2784,9 +2797,9 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response->assertStatus(201);
         $eventId = (string) $response->json('data.event_id');
-        Queue::assertPushed(UpsertMapPoiFromEventJob::class, function (UpsertMapPoiFromEventJob $job) use ($eventId): bool {
-            return (string) $this->readPrivateProperty($job, 'eventId') === $eventId;
-        });
+        Queue::assertNotPushed(UpsertMapPoiFromEventJob::class);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $this->assertTrue(MapPoi::query()->where('ref_type', 'event')->where('ref_id', $eventId)->exists());
     }
 
     public function test_event_create_rejects_unknown_taxonomy(): void
@@ -3602,7 +3615,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('occurrence_id or occurrence_slug is required when syncing an event that already has persisted occurrences.');
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [
+        $this->syncEventOccurrencesForTest($event, [
             [
                 'date_time_start' => $occurrences[0]['date_time_start'],
                 'date_time_end' => $occurrences[0]['date_time_end'],
@@ -3857,7 +3870,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $storedItems[1],
         ]);
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent(
+        $this->syncEventOccurrencesForTest(
             $event->fresh(),
             $syncOccurrences,
             (string) ($event->content ?? ''),
@@ -6139,7 +6152,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $reloaded->assertJsonPath('data.occurrences.0.programming_items.0.place_ref.id', (string) $this->venue->_id);
     }
 
-    public function test_event_update_dispatches_map_projection_sync_job_via_lifecycle_event(): void
+    public function test_event_update_persists_map_projection_without_redundant_sync_job(): void
     {
         Queue::fake();
         $event = $this->createEvent();
@@ -6150,9 +6163,9 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
 
         $response->assertStatus(200);
-        Queue::assertPushed(UpsertMapPoiFromEventJob::class, function (UpsertMapPoiFromEventJob $job) use ($eventId): bool {
-            return (string) $this->readPrivateProperty($job, 'eventId') === $eventId;
-        });
+        Queue::assertNotPushed(UpsertMapPoiFromEventJob::class);
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $this->assertTrue(MapPoi::query()->where('ref_type', 'event')->where('ref_id', $eventId)->exists());
     }
 
     public function test_event_create_allows_multiple_occurrences_without_tenant_or_event_capability(): void
@@ -6211,7 +6224,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $event = Event::query()->find($eventId);
         $this->assertNotNull($event);
 
-        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
+        $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $event->getKey());
 
         $projection = MapPoi::query()
             ->where('ref_type', 'event')
@@ -6259,7 +6272,7 @@ class EventCrudControllerTest extends TestCaseTenant
             data_get($event->type, 'visual.image_url')
         );
 
-        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
+        $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $event->getKey());
 
         $projection = MapPoi::query()
             ->where('ref_type', 'event')
@@ -6314,7 +6327,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $event = Event::query()->find($eventId);
         $this->assertNotNull($event);
-        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
+        $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $event->getKey());
 
         $poi = MapPoi::query()
             ->where('ref_type', 'event')
@@ -6414,7 +6427,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
             $event = Event::query()->find($eventId);
             $this->assertNotNull($event);
-            $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
+            $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $event->getKey());
             $this->assertTrue(
                 MapPoi::query()
                     ->where('ref_type', 'event')
@@ -6434,7 +6447,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
             $updated = Event::query()->find($eventId);
             $this->assertNotNull($updated);
-            $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($updated);
+            $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $updated->getKey());
 
             $poi = MapPoi::query()
                 ->where('ref_type', 'event')
@@ -6466,7 +6479,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
             $event = Event::query()->find($eventId);
             $this->assertNotNull($event);
-            $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($event);
+            $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $event->getKey());
 
             $activePoi = MapPoi::query()
                 ->where('ref_type', 'event')
@@ -6511,7 +6524,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
             $activeEvent = Event::query()->find($activeEventId);
             $this->assertNotNull($activeEvent);
-            $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($activeEvent);
+            $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $activeEvent->getKey());
 
             $inactiveResponse = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
                 'occurrences' => [[
@@ -6525,7 +6538,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
             $inactiveEvent = Event::query()->find($inactiveEventId);
             $this->assertNotNull($inactiveEvent);
-            $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($inactiveEvent);
+            $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $inactiveEvent->getKey());
 
             $inactivePoi = MapPoi::query()
                 ->where('ref_type', 'event')
@@ -6565,7 +6578,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $created = Event::query()->find($eventId);
         $this->assertNotNull($created);
-        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($created);
+        $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $created->getKey());
 
         $this->assertTrue(
             MapPoi::query()
@@ -6586,7 +6599,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $disabledEvent = Event::query()->find($eventId);
         $this->assertNotNull($disabledEvent);
-        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($disabledEvent);
+        $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $disabledEvent->getKey());
 
         $disabledPoi = MapPoi::query()
             ->where('ref_type', 'event')
@@ -6606,7 +6619,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $enabledEvent = Event::query()->find($eventId);
         $this->assertNotNull($enabledEvent);
-        $this->app->make(MapPoiProjectionService::class)->upsertFromEvent($enabledEvent);
+        $this->app->make(MapPoiProjectionService::class)->refreshEvent((string) $enabledEvent->getKey());
 
         $reenabledPoi = MapPoi::query()
             ->where('ref_type', 'event')
@@ -6627,7 +6640,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertNotNull($event);
 
         $projectionService = $this->app->make(MapPoiProjectionService::class);
-        $projectionService->upsertFromEvent($event);
+        $projectionService->refreshEvent((string) $event->getKey());
 
         $poi = MapPoi::query()
             ->where('ref_type', 'event')
@@ -6642,7 +6655,7 @@ class EventCrudControllerTest extends TestCaseTenant
         ]);
         $poi->save();
 
-        $projectionService->upsertFromEvent($event->fresh());
+        $projectionService->refreshEvent((string) $event->getKey());
 
         $freshPoi = MapPoi::query()
             ->where('ref_type', 'event')
@@ -9476,7 +9489,7 @@ class EventCrudControllerTest extends TestCaseTenant
         });
     }
 
-    public function test_publish_scheduled_events_job_promotes_ready_events_and_dispatches_projection_sync(): void
+    public function test_publish_scheduled_events_job_promotes_ready_events_and_persists_projection_without_sync_job(): void
     {
         $ready = $this->createEvent([
             'title' => 'Ready Event',
@@ -9514,12 +9527,9 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertTrue((bool) ($readyOccurrence->is_event_published ?? false));
         $this->assertFalse((bool) ($futureOccurrence->is_event_published ?? false));
 
-        Queue::assertPushed(UpsertMapPoiFromEventJob::class, function (UpsertMapPoiFromEventJob $job) use ($ready): bool {
-            return (string) $this->readPrivateProperty($job, 'eventId') === (string) $ready->_id;
-        });
-        Queue::assertNotPushed(UpsertMapPoiFromEventJob::class, function (UpsertMapPoiFromEventJob $job) use ($future): bool {
-            return (string) $this->readPrivateProperty($job, 'eventId') === (string) $future->_id;
-        });
+        Queue::assertNotPushed(UpsertMapPoiFromEventJob::class);
+        $this->assertTrue(MapPoi::query()->where('ref_type', 'event')->where('ref_id', (string) $ready->_id)->exists());
+        $this->assertFalse(MapPoi::query()->where('ref_type', 'event')->where('ref_id', (string) $future->_id)->exists());
     }
 
     public function test_publish_scheduled_events_job_emits_stream_delta_after_publication_transition(): void
@@ -10245,7 +10255,7 @@ class EventCrudControllerTest extends TestCaseTenant
             'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
         ]];
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent(
+        $this->syncEventOccurrencesForTest(
             $event,
             $occurrences,
             (string) ($event->content ?? ''),

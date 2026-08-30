@@ -120,6 +120,8 @@ final class AccountProfileLifecycleService
         bool $enforceLastProfileInvariant = true,
         ?AccountProfileDeletionTerminalization $terminalization = null,
         bool $cleanSurvivingReferences = true,
+        bool $purgeGraph = true,
+        bool $useProvidedPersistedProfile = false,
     ): array {
         $profileId = (string) $profile->getKey();
         $fingerprint = $this->outboxPublisher->fingerprintForLifecycle($profileId, 'soft_delete');
@@ -132,7 +134,9 @@ final class AccountProfileLifecycleService
             return $eventId === null ? [] : [$eventId];
         }
 
-        $persistedProfile = AccountProfile::withTrashed()->findOrFail($profileId);
+        $persistedProfile = $useProvidedPersistedProfile
+            ? $profile
+            : AccountProfile::withTrashed()->findOrFail($profileId);
         $this->assertLifecycleMutationAllowed($persistedProfile, $context, $terminalization);
         if ($enforceLastProfileInvariant && $persistedProfile->deleted_at === null) {
             $this->assertProfileMayBeSoftDeleted($persistedProfile);
@@ -144,7 +148,13 @@ final class AccountProfileLifecycleService
             $terminalization,
             $cleanSurvivingReferences,
         );
+        if ($purgeGraph) {
+            $this->referenceCleanup->purgeProfileGraphWithinTransaction($context, [$profileId]);
+        }
         if ($persistedProfile->deleted_at === null) {
+            // A soft-deleted Profile must not retain its own embedded group
+            // mirror: restoring the Profile must not resurrect deleted rows.
+            $persistedProfile->nested_profile_groups = [];
             $persistedProfile->setAttribute(
                 'aggregate_revision',
                 max(0, (int) $persistedProfile->getAttribute('aggregate_revision')) + 1,
@@ -202,6 +212,8 @@ final class AccountProfileLifecycleService
         bool $enforceLastProfileInvariant = true,
         ?AccountProfileDeletionTerminalization $terminalization = null,
         bool $cleanSurvivingReferences = true,
+        bool $purgeGraph = true,
+        bool $useProvidedPersistedProfile = false,
     ): array {
         $profileId = (string) $profile->getKey();
         $fingerprint = $this->outboxPublisher->fingerprintForLifecycle($profileId, 'force_delete');
@@ -214,7 +226,9 @@ final class AccountProfileLifecycleService
             return $eventId === null ? [] : [$eventId];
         }
 
-        $persistedProfile = AccountProfile::withTrashed()->findOrFail($profileId);
+        $persistedProfile = $useProvidedPersistedProfile
+            ? $profile
+            : AccountProfile::withTrashed()->findOrFail($profileId);
         $this->assertLifecycleMutationAllowed($persistedProfile, $context, $terminalization);
         if ($enforceLastProfileInvariant) {
             $this->assertProfileMayBeForceDeleted($persistedProfile);
@@ -226,6 +240,10 @@ final class AccountProfileLifecycleService
             $terminalization,
             $cleanSurvivingReferences,
         );
+        if ($purgeGraph) {
+            $this->referenceCleanup->purgeProfileGraphWithinTransaction($context, [$profileId]);
+        }
+        $persistedProfile->nested_profile_groups = [];
         $eventIds[] = $this->outboxPublisher->recordTombstone(
             $context,
             $persistedProfile,
@@ -328,6 +346,30 @@ final class AccountProfileLifecycleService
             $operationCommandId,
             $deletedProfileIds,
         );
+    }
+
+    /** @param list<string> $profileIds */
+    public function purgeTerminalProfileGraphWithinTransaction(
+        AccountProfileTransactionContext $context,
+        string $operationCommandId,
+        array $profileIds,
+    ): array {
+        $profileIds = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $profileId): string => trim((string) $profileId),
+            $profileIds,
+        ), static fn (string $profileId): bool => $profileId !== '')));
+        if ($profileIds === []) {
+            return [];
+        }
+
+        $eventIds = $this->cleanSurvivingReferencesWithinTransaction(
+            $context,
+            $operationCommandId,
+            $profileIds,
+        );
+        $this->referenceCleanup->purgeProfileGraphWithinTransaction($context, $profileIds);
+
+        return $eventIds;
     }
 
     /** @return list<string> */

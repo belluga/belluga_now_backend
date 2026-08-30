@@ -14,6 +14,8 @@ class EventAggregateWriteOwnershipTest extends TestCase
         $publicationSource = $this->readSource('packages/belluga/belluga_events/src/Application/Events/EventPublicationManagementService.php');
         $reconciliationSource = $this->readSource('packages/belluga/belluga_events/src/Application/Events/EventOccurrenceReconciliationService.php');
         $aggregateSource = $this->readSource('packages/belluga/belluga_events/src/Application/Events/EventAggregateWriteService.php');
+        $projectionContract = $this->readSource('packages/belluga/belluga_events/src/Contracts/EventMapPoiProjectionPersistenceContract.php');
+        $mapProjectionSource = $this->readSource('packages/belluga/belluga_map_pois/src/Application/MapPoiProjectionService.php');
         $snapshotSource = $this->readSource('packages/belluga/belluga_events/src/Application/Events/EventOccurrencePayloadSnapshotService.php');
         $transactionSource = $this->readSource('packages/belluga/belluga_events/src/Application/Transactions/EventTransactionRunner.php');
 
@@ -34,6 +36,11 @@ class EventAggregateWriteOwnershipTest extends TestCase
         $this->assertStringContainsString('EventOccurrencePayloadSnapshotService', $aggregateSource);
         $this->assertStringContainsString('syncFromEvent', $aggregateSource);
         $this->assertStringContainsString('mirrorPublicationByEventId', $aggregateSource);
+        $this->assertStringContainsString('EventMapPoiProjectionPersistenceContract', $aggregateSource);
+        $this->assertStringContainsString('persistForLiveEvent', $projectionContract);
+        $this->assertStringContainsString('deleteForEvent', $projectionContract);
+        $this->assertStringContainsString('MapPoiSourceRefreshContract', $mapProjectionSource);
+        $this->assertStringContainsString('refreshLiveEvent', $mapProjectionSource);
 
         $this->assertStringContainsString('own_event_parties', $snapshotSource);
         $this->assertStringContainsString('programming_items', $snapshotSource);

@@ -7,15 +7,19 @@ namespace Belluga\MapPois\Application;
 use Belluga\MapPois\Contracts\MapPoiRegistryContract;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
+use Belluga\MapPois\Contracts\MapPoiSourceRefreshContract;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
 use MongoDB\BSON\ObjectId;
+use MongoDB\Database;
+use MongoDB\Driver\Session;
 
 class MapPoiProjectionService
 {
     public function __construct(
         private readonly MapPoiRegistryContract $registry,
         private readonly MapPoiSourceReaderContract $sourceReader,
+        private readonly MapPoiSourceRefreshContract $sourceRefresh,
         private readonly MapPoiSettingsContract $settings,
     ) {}
 
@@ -43,23 +47,73 @@ class MapPoiProjectionService
         $query->delete();
     }
 
-    public function upsertFromAccountProfile(object $profile, ?int $forcedCheckpoint = null): void
+    /** @param array<int, string> $refIds */
+    public function deleteByRefsWithinTransaction(
+        Database $database,
+        Session $session,
+        string $refType,
+        array $refIds,
+    ): void {
+        [$stringRefIds, $objectRefIds] = $this->buildRefIdAlternativeSets($refIds);
+        if ($stringRefIds === [] && $objectRefIds === []) {
+            return;
+        }
+
+        $alternatives = [];
+        if ($stringRefIds !== []) {
+            $alternatives[] = ['ref_id' => ['$in' => $stringRefIds]];
+        }
+        if ($objectRefIds !== []) {
+            $alternatives[] = ['ref_id' => ['$in' => $objectRefIds]];
+        }
+
+        $database->selectCollection((new MapPoi)->getTable())->deleteMany(
+            ['ref_type' => $refType, '$or' => $alternatives],
+            ['session' => $session],
+        );
+    }
+
+    public function upsertFromAccountProfileWithinTransaction(
+        object $profile,
+        Database $database,
+        Session $session,
+        ?int $forcedCheckpoint = null,
+    ): void {
+        $this->upsertFromAccountProfileUsing($profile, $forcedCheckpoint, $database, $session);
+    }
+
+    public function refreshAccountProfile(string $profileId, ?int $forcedCheckpoint = null): bool
+    {
+        return $this->sourceRefresh->refreshLiveAccountProfile(
+            $profileId,
+            function (object $profile, Database $database, Session $session) use ($forcedCheckpoint): void {
+                $this->upsertFromAccountProfileWithinTransaction($profile, $database, $session, $forcedCheckpoint);
+            },
+        );
+    }
+
+    private function upsertFromAccountProfileUsing(
+        object $profile,
+        ?int $forcedCheckpoint = null,
+        ?Database $database = null,
+        ?Session $session = null,
+    ): void
     {
         if (! $profile->profile_type) {
-            $this->deleteByRef('account_profile', (string) $profile->_id);
+            $this->deleteByRefUsing('account_profile', (string) $profile->_id, $database, $session);
 
             return;
         }
 
         if (! $this->registry->isAccountProfilePoiEnabled((string) $profile->profile_type)) {
-            $this->deleteByRef('account_profile', (string) $profile->_id);
+            $this->deleteByRefUsing('account_profile', (string) $profile->_id, $database, $session);
 
             return;
         }
 
         $location = $this->normalizePoint($profile->location ?? null);
         if (! $location) {
-            $this->deleteByRef('account_profile', (string) $profile->_id);
+            $this->deleteByRefUsing('account_profile', (string) $profile->_id, $database, $session);
 
             return;
         }
@@ -100,7 +154,7 @@ class MapPoiProjectionService
             'exact_key' => $this->exactKey($location),
         ];
 
-        $this->upsertIdempotent($payload);
+        $this->upsertIdempotent($payload, $database, $session);
     }
 
     public function upsertFromStaticAsset(object $asset, ?int $forcedCheckpoint = null): void
@@ -167,7 +221,31 @@ class MapPoiProjectionService
         $this->upsertIdempotent($payload);
     }
 
-    public function upsertFromEvent(object $event, ?int $forcedCheckpoint = null): void
+    public function upsertFromEventWithinTransaction(
+        object $event,
+        Database $database,
+        Session $session,
+        ?int $forcedCheckpoint = null,
+    ): void {
+        $this->upsertFromEventUsing($event, $forcedCheckpoint, $database, $session);
+    }
+
+    public function refreshEvent(string $eventId, ?int $forcedCheckpoint = null): bool
+    {
+        return $this->sourceRefresh->refreshLiveEvent(
+            $eventId,
+            function (object $event, Database $database, Session $session) use ($forcedCheckpoint): void {
+                $this->upsertFromEventWithinTransaction($event, $database, $session, $forcedCheckpoint);
+            },
+        );
+    }
+
+    private function upsertFromEventUsing(
+        object $event,
+        ?int $forcedCheckpoint = null,
+        ?Database $database = null,
+        ?Session $session = null,
+    ): void
     {
         $eventId = (string) $event->_id;
 
@@ -183,20 +261,20 @@ class MapPoiProjectionService
         }
 
         if (! ($eventCapability['effective_enabled'] ?? false)) {
-            $this->deactivateByRef('event', $eventId, $checkpoint);
+            $this->deactivateByRef('event', $eventId, $checkpoint, $database, $session);
 
             return;
         }
 
         if (! ($occurrenceProjection['has_active_facets'] ?? false)) {
-            $this->deactivateByRef('event', $eventId, $checkpoint);
+            $this->deactivateByRef('event', $eventId, $checkpoint, $database, $session);
 
             return;
         }
 
         $geometry = $this->resolveEventGeometry($event, $eventCapability['discovery_scope'] ?? null);
         if ($geometry === null) {
-            $this->deactivateByRef('event', $eventId, $checkpoint);
+            $this->deactivateByRef('event', $eventId, $checkpoint, $database, $session);
 
             return;
         }
@@ -244,11 +322,35 @@ class MapPoiProjectionService
             'exact_key' => $this->exactKey($geometry['location']),
         ];
 
-        $this->upsertIdempotent($payload);
+        $this->upsertIdempotent($payload, $database, $session);
     }
 
-    private function deactivateByRef(string $refType, string $refId, int $checkpoint): void
+    private function deactivateByRef(
+        string $refType,
+        string $refId,
+        int $checkpoint,
+        ?Database $database = null,
+        ?Session $session = null,
+    ): void
     {
+        if ($database !== null && $session !== null) {
+            $this->updatePayloadWithinTransaction($database, $session, [
+                'ref_type' => $refType,
+                'ref_id' => $refId,
+                'projection_key' => $this->projectionKey($refType, $refId),
+                'source_checkpoint' => $checkpoint,
+                'is_active' => false,
+                'occurrence_facets' => [],
+                'is_happening_now' => false,
+                'active_window_start_at' => null,
+                'active_window_end_at' => null,
+                'time_start' => null,
+                'time_end' => null,
+            ]);
+
+            return;
+        }
+
         /** @var MapPoi|null $existing */
         $query = MapPoi::query()
             ->where('ref_type', $refType);
@@ -281,8 +383,18 @@ class MapPoiProjectionService
     /**
      * @param  array<string, mixed>  $payload
      */
-    private function upsertIdempotent(array $payload): void
+    private function upsertIdempotent(
+        array $payload,
+        ?Database $database = null,
+        ?Session $session = null,
+    ): void
     {
+        if ($database !== null && $session !== null) {
+            $this->updatePayloadWithinTransaction($database, $session, $payload);
+
+            return;
+        }
+
         $refType = (string) ($payload['ref_type'] ?? '');
         $refId = (string) ($payload['ref_id'] ?? '');
         $incomingCheckpoint = (int) ($payload['source_checkpoint'] ?? 0);
@@ -306,6 +418,70 @@ class MapPoiProjectionService
         }
 
         MapPoi::query()->create($payload);
+    }
+
+    private function deleteByRefUsing(
+        string $refType,
+        string $refId,
+        ?Database $database,
+        ?Session $session,
+    ): void {
+        if ($database === null || $session === null) {
+            $this->deleteByRef($refType, $refId);
+
+            return;
+        }
+
+        $database->selectCollection((new MapPoi)->getTable())->deleteMany(
+            $this->rawRefFilter($refType, $refId),
+            ['session' => $session],
+        );
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function updatePayloadWithinTransaction(Database $database, Session $session, array $payload): void
+    {
+        $refType = trim((string) ($payload['ref_type'] ?? ''));
+        $refId = trim((string) ($payload['ref_id'] ?? ''));
+        if ($refType === '' || $refId === '') {
+            return;
+        }
+
+        $collection = $database->selectCollection((new MapPoi)->getTable());
+        $existing = $collection->findOne($this->rawRefFilter($refType, $refId), ['session' => $session]);
+        if ($existing !== null) {
+            $currentCheckpoint = (int) ($existing['source_checkpoint'] ?? 0);
+            if ($currentCheckpoint > (int) ($payload['source_checkpoint'] ?? 0)) {
+                return;
+            }
+
+            $collection->updateOne(
+                ['_id' => $existing['_id']],
+                ['$set' => $payload],
+                ['session' => $session],
+            );
+
+            return;
+        }
+
+        $collection->insertOne($payload, ['session' => $session]);
+    }
+
+    /** @return array<string, mixed> */
+    private function rawRefFilter(string $refType, string $refId): array
+    {
+        [$stringRefId, $objectRefId] = $this->buildRefIdAlternatives($refId);
+        $alternatives = [];
+        if ($stringRefId !== '') {
+            $alternatives[] = ['ref_id' => $stringRefId];
+        }
+        if ($objectRefId !== null) {
+            $alternatives[] = ['ref_id' => $objectRefId];
+        }
+
+        return count($alternatives) === 1
+            ? ['ref_type' => $refType, ...$alternatives[0]]
+            : ['ref_type' => $refType, '$or' => $alternatives];
     }
 
     /**

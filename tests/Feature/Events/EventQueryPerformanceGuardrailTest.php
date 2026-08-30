@@ -967,7 +967,7 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             'is_active' => true,
         ]);
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [
+        $this->syncEventOccurrencesForTest($event, [
             [
                 'date_time_start' => $start,
                 'date_time_end' => $start->copy()->addHours(2),

@@ -1491,7 +1491,7 @@ class InvitesFlowTest extends TestCaseTenant
             'is_active' => true,
         ]);
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [[
+        $this->syncEventOccurrencesForTest($event, [[
             'date_time_start' => Carbon::instance($event->date_time_start),
             'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
         ]], (string) ($event->content ?? ''));
@@ -2798,7 +2798,7 @@ class InvitesFlowTest extends TestCaseTenant
             'is_active' => true,
         ]);
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent($event, [[
+        $this->syncEventOccurrencesForTest($event, [[
             'date_time_start' => Carbon::instance($event->date_time_start),
             'date_time_end' => $event->date_time_end ? Carbon::instance($event->date_time_end) : null,
         ]], (string) ($event->content ?? ''));
@@ -2921,7 +2921,7 @@ class InvitesFlowTest extends TestCaseTenant
         }
         unset($occurrence);
 
-        app(EventOccurrenceSyncService::class)->syncFromEvent(
+        $this->syncEventOccurrencesForTest(
             $event,
             $occurrences,
             (string) ($event->content ?? ''),
