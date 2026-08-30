@@ -113,6 +113,36 @@ final class AccountProfileNestedGroupMemberStore
         ];
     }
 
+    public function deleteGroupWithinContext(
+        AccountProfileTransactionContext $context,
+        AccountProfile $profile,
+        string $groupId,
+    ): void {
+        $parentProfileId = trim((string) $profile->getKey());
+        $groupId = trim($groupId);
+        if ($parentProfileId === '' || $groupId === '') {
+            throw new NotFoundHttpException;
+        }
+
+        $filter = [
+            '_id' => $this->headId($parentProfileId, $groupId),
+            'tenant_id' => $this->tenantId(),
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $parentProfileId,
+            'group_key' => $groupId,
+            'doc_type' => self::DOC_TYPE_HEAD,
+        ];
+        if ($context->collection(self::COLLECTION)->findOne($filter, $context->rawOptions()) === null) {
+            throw new NotFoundHttpException;
+        }
+        $context->collection(self::COLLECTION)->deleteMany([
+            'tenant_id' => $this->tenantId(),
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $parentProfileId,
+            'group_key' => $groupId,
+        ], $context->rawOptions());
+    }
+
     /**
      * @return array{data: array<int, array<string, mixed>>,next_cursor:?string}
      */

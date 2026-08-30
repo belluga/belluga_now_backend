@@ -7,6 +7,7 @@ namespace App\Application\AccountProfiles;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Support\Validation\InputConstraints;
@@ -723,40 +724,36 @@ class AccountProfileManagementService
         string $groupId,
         ?string $commandId = null,
     ): array {
-        $existingGroups = $this->nestedGroupMemberStore->metadataGroups($profile);
-        $group = $this->nestedGroupService->findGroupOrFail($existingGroups, $groupId);
-        $memberIds = $this->nestedGroupMemberStore->groupMemberIds($profile, (string) $group['id']);
-        if (count($memberIds) > InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX) {
-            throw ValidationException::withMessages([
-                'nested_profile_groups' => ['Nested profile group delete exceeds the approved member budget.'],
-            ]);
-        }
-
-        $nextGroups = [];
-        foreach ($existingGroups as $candidate) {
-            if (trim((string) ($candidate['id'] ?? '')) === (string) $group['id']) {
-                continue;
+        $profileId = (string) $profile->getKey();
+        $result = $this->transactionRunner->run(function (AccountProfileTransactionContext $context) use ($profileId, $groupId): array {
+            $persisted = AccountProfile::query()->findOrFail($profileId);
+            $this->lifecycleService->assertProfileMutationAllowed($persisted, $context);
+            $groups = $this->nestedGroupMemberStore->metadataGroupsWithinContext($context, $persisted);
+            $group = $this->nestedGroupService->findGroupOrFail($groups, $groupId);
+            $this->nestedGroupMemberStore->deleteGroupWithinContext($context, $persisted, (string) $group['id']);
+            $updated = $context->collection('account_profiles')->updateOne(
+                ['_id' => new ObjectId($profileId), 'deleted_at' => null, 'nested_profile_groups.id' => (string) $group['id']],
+                ['$pull' => ['nested_profile_groups' => ['id' => (string) $group['id']]], '$inc' => ['aggregate_revision' => 1]],
+                $context->rawOptions(),
+            );
+            if ($updated->getMatchedCount() !== 1) {
+                throw new ConcurrencyConflictException('Account Profile nested group mirror changed during delete.');
             }
+            $context->collection(AccountProfileNestedPublicMembersProjectionService::COLLECTION)->deleteMany(
+                [
+                    'tenant_id' => (string) Tenant::current()?->getKey(),
+                    'parent_profile_id' => $profileId,
+                    'group_id' => (string) $group['id'],
+                ],
+                $context->rawOptions(),
+            );
 
-            $nextGroups[] = [
-                'id' => trim((string) ($candidate['id'] ?? '')),
-                'label' => trim((string) ($candidate['label'] ?? '')),
-                'order' => count($nextGroups),
-            ];
-        }
-
-        $updatedProfile = $this->update(
-            $profile,
-            [
-                'nested_profile_groups' => $nextGroups,
-            ],
-            $commandId,
-            useAggregateRevisionCas: false,
-        );
+            return ['group' => $group, 'profile' => $persisted->fresh() ?? $persisted];
+        });
 
         return [
-            'nested_profile_groups' => $this->nestedGroupMemberStore->metadataGroups($updatedProfile),
-            'deleted_group_id' => (string) $group['id'],
+            'nested_profile_groups' => $this->nestedGroupMemberStore->metadataGroups($result['profile']),
+            'deleted_group_id' => (string) $result['group']['id'],
         ];
     }
 
