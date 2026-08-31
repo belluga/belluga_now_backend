@@ -7,6 +7,7 @@ namespace App\Http\Api\v1\Controllers;
 use App\Application\AccountProfiles\AccountProfileGalleryMutationService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Http\Controllers\Controller;
+use App\Support\Validation\InputConstraints;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -66,7 +67,7 @@ final class AccountProfileGalleryController extends Controller
     /** @return array<string,mixed> */
     private function itemInput(Request $request, bool $create): array
     {
-        $data = $request->validate(['type' => [$create ? 'required' : 'sometimes', 'string', 'in:photo,youtube'], 'description' => ['sometimes', 'nullable', 'string', 'max:2000'], 'image' => ['sometimes', 'file', 'image'], 'youtube_url' => ['sometimes', 'nullable', 'string']]);
+        $data = $request->validate(['type' => [$create ? 'required' : 'sometimes', 'string', 'in:photo,youtube'], 'description' => ['sometimes', 'nullable', 'string', 'max:2000'], 'image' => ['sometimes', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:'.InputConstraints::IMAGE_MAX_KB], 'youtube_url' => ['sometimes', 'nullable', 'string', 'max:2048']]);
         $type = $data['type'] ?? null;
         if ($type === 'photo' && array_key_exists('youtube_url', $data)) {
             throw ValidationException::withMessages(['youtube_url' => ['Photo items cannot include a YouTube URL.']]);

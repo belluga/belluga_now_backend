@@ -13,6 +13,8 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
+use App\Support\Validation\InputConstraints;
+use Illuminate\Http\UploadedFile;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -111,6 +113,18 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         $this->assertSame('dormant', $stored->gallery_groups[0]['group_id']);
     }
 
+    public function test_gallery_mutations_require_the_account_users_update_ability(): void
+    {
+        $profile = $this->profile();
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
+
+        $this->postJson($this->url($profile).'/gallery/groups', ['subtitle' => 'Forbidden'])
+            ->assertForbidden();
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $this->assertSame([], AccountProfile::query()->findOrFail($profile->getKey())->gallery_groups ?? []);
+    }
+
     public function test_capacity_blocks_only_the_corresponding_create_with_stable_field_keys(): void
     {
         config(['gallery.max_galleries' => 1, 'gallery.max_items_per_gallery' => 1]);
@@ -162,6 +176,37 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         foreach (['https://youtube.com/watch?v=too-short', 'https://youtube.com/playlist?list=x', 'https://youtu.be/dQw4w9WgXcQ/extra'] as $url) {
             $this->postJson($this->url($profile)."/gallery/groups/{$group}/items", ['type' => 'youtube', 'youtube_url' => $url])->assertStatus(422)->assertJsonValidationErrors(['youtube_url']);
         }
+        $this->postJson($this->url($profile)."/gallery/groups/{$group}/items", [
+            'type' => 'youtube',
+            'youtube_url' => 'https://youtube.com/watch?v=dQw4w9WgXcQ&padding='.str_repeat('a', 2048),
+        ])->assertStatus(422)->assertJsonValidationErrors(['youtube_url']);
+    }
+
+    public function test_gallery_photo_uploads_enforce_the_canonical_size_and_format_bounds_on_create_and_update(): void
+    {
+        $profile = $this->profile();
+        $group = $this->postJson($this->url($profile).'/gallery/groups', ['subtitle' => 'Photos'])->json('data.gallery_groups.0.group_id');
+        $itemsUrl = $this->url($profile)."/gallery/groups/{$group}/items";
+
+        $this->withHeaders(['Accept' => 'application/json'])->post($itemsUrl, [
+            'type' => 'photo',
+            'image' => UploadedFile::fake()->image('oversized.jpg')->size(InputConstraints::IMAGE_MAX_KB + 1),
+        ])->assertStatus(422)->assertJsonValidationErrors(['image']);
+
+        $this->withHeaders(['Accept' => 'application/json'])->post($itemsUrl, [
+            'type' => 'photo',
+            'image' => UploadedFile::fake()->image('unsupported.gif'),
+        ])->assertStatus(422)->assertJsonValidationErrors(['image']);
+
+        $item = $this->withHeaders(['Accept' => 'application/json'])->post($itemsUrl, [
+            'type' => 'photo',
+            'image' => UploadedFile::fake()->image('valid.png'),
+        ])->assertOk()->json('data.gallery_groups.0.items.0.item_id');
+
+        $this->withHeaders(['Accept' => 'application/json'])->post("{$itemsUrl}/{$item}", [
+            '_method' => 'PATCH',
+            'image' => UploadedFile::fake()->image('replacement.jpg')->size(InputConstraints::IMAGE_MAX_KB + 1),
+        ])->assertStatus(422)->assertJsonValidationErrors(['image']);
     }
 
     public function test_account_store_and_patch_reject_gallery_but_an_unrelated_patch_preserves_it(): void
