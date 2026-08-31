@@ -40,6 +40,8 @@ class AccountProfileUpdateRequest extends FormRequest
             'taxonomy_terms.*.value' => 'required_with:taxonomy_terms|string|max:'.InputConstraints::NAME_MAX,
             'nested_profile_groups' => 'prohibited',
             'nested_profile_groups.*' => 'prohibited',
+            'gallery_groups' => 'missing',
+            'gallery_groups.*' => 'missing',
             'bio' => $this->optionalAccountProfileRichTextRule(),
             'content' => $this->optionalAccountProfileRichTextRule(),
             'avatar' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:'.InputConstraints::IMAGE_MAX_KB,

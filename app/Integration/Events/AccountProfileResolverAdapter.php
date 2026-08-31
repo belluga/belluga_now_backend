@@ -151,7 +151,16 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
                 'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
                     is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
                 ),
-                'gallery_groups' => $this->galleryService->formatForRead($profile, $baseUrl),
+                'gallery_groups' => array_values(array_filter(array_map(
+                    static fn (array $group): array => [
+                        ...$group,
+                        'items' => array_values(array_filter(
+                            $group['items'],
+                            static fn (array $item): bool => ($item['type'] ?? 'photo') === 'photo',
+                        )),
+                    ],
+                    $this->galleryService->formatForPublicDetail($profile, $baseUrl),
+                ), static fn (array $group): bool => $group['items'] !== [])),
             ],
             'location' => $location,
         ];

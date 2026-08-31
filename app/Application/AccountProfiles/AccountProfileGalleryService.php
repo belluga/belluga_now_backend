@@ -179,45 +179,55 @@ final class AccountProfileGalleryService
                     continue;
                 }
 
-                $version = $this->normalizeStoredVersion($rawItem['version'] ?? null);
-                $items[] = [
+                $type = trim((string) ($rawItem['type'] ?? 'photo'));
+                if (! in_array($type, ['photo', 'youtube'], true)) {
+                    continue;
+                }
+                $item = [
                     '_source_index' => $itemIndex,
                     'item_id' => $itemId,
+                    'type' => $type,
                     'description' => $this->normalizeNullableString($rawItem['description'] ?? null),
                     'order' => $this->normalizeOrder($rawItem['order'] ?? null, $itemIndex),
-                    'image_url' => $this->mediaService->buildGalleryPublicUrl(
+                ];
+                if ($type === 'youtube') {
+                    $videoId = trim((string) ($rawItem['youtube_video_id'] ?? ''));
+                    if (! preg_match('/^[A-Za-z0-9_-]{11}$/', $videoId)) {
+                        continue;
+                    }
+                    $item['youtube_video_id'] = $videoId;
+                } else {
+                    $version = $this->normalizeStoredVersion($rawItem['version'] ?? null);
+                    $item += ['image_url' => $this->mediaService->buildGalleryPublicUrl(
                         $baseUrl,
                         $profile,
                         $itemId,
                         $version,
                         $this->mediaService->defaultGalleryVariant(),
                     ),
-                    'thumb_url' => $this->mediaService->buildGalleryPublicUrl(
-                        $baseUrl,
-                        $profile,
-                        $itemId,
-                        $version,
-                        'thumb',
-                    ),
-                    'card_url' => $this->mediaService->buildGalleryPublicUrl(
-                        $baseUrl,
-                        $profile,
-                        $itemId,
-                        $version,
-                        'card',
-                    ),
-                    'modal_url' => $this->mediaService->buildGalleryPublicUrl(
-                        $baseUrl,
-                        $profile,
-                        $itemId,
-                        $version,
-                        'modal',
-                    ),
-                ];
-            }
-
-            if ($items === []) {
-                continue;
+                        'thumb_url' => $this->mediaService->buildGalleryPublicUrl(
+                            $baseUrl,
+                            $profile,
+                            $itemId,
+                            $version,
+                            'thumb',
+                        ),
+                        'card_url' => $this->mediaService->buildGalleryPublicUrl(
+                            $baseUrl,
+                            $profile,
+                            $itemId,
+                            $version,
+                            'card',
+                        ),
+                        'modal_url' => $this->mediaService->buildGalleryPublicUrl(
+                            $baseUrl,
+                            $profile,
+                            $itemId,
+                            $version,
+                            'modal',
+                        )];
+                }
+                $items[] = $item;
             }
 
             usort(
@@ -232,15 +242,9 @@ final class AccountProfileGalleryService
                 'subtitle' => $subtitle,
                 'order' => $this->normalizeOrder($rawGroup['order'] ?? null, $groupIndex),
                 'items' => array_values(array_map(
-                    static fn (array $item, int $order): array => [
-                        'item_id' => $item['item_id'],
-                        'description' => $item['description'],
-                        'order' => $order,
-                        'image_url' => $item['image_url'],
-                        'thumb_url' => $item['thumb_url'],
-                        'card_url' => $item['card_url'],
-                        'modal_url' => $item['modal_url'],
-                    ],
+                    static fn (array $item, int $order): array => $item['type'] === 'youtube'
+                        ? ['item_id' => $item['item_id'], 'type' => 'youtube', 'description' => $item['description'], 'order' => $order, 'youtube_video_id' => $item['youtube_video_id']]
+                        : ['item_id' => $item['item_id'], 'type' => 'photo', 'description' => $item['description'], 'order' => $order, 'image_url' => $item['image_url'], 'thumb_url' => $item['thumb_url'], 'card_url' => $item['card_url'], 'modal_url' => $item['modal_url']],
                     $items,
                     array_keys($items),
                 )),
@@ -274,7 +278,10 @@ final class AccountProfileGalleryService
             return [];
         }
 
-        return $this->formatForRead($profile, $baseUrl);
+        return array_values(array_filter(
+            $this->formatForRead($profile, $baseUrl),
+            static fn (array $group): bool => $group['items'] !== [],
+        ));
     }
 
     public function isExposedForProfile(AccountProfile $profile): bool

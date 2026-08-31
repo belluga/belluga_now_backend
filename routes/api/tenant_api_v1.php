@@ -226,8 +226,16 @@ Route::prefix('account_profiles')
                 Route::patch('/', [AccountProfilesController::class, 'update'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
 
-                Route::patch('/gallery', [AccountProfileGalleryController::class, 'update'])
-                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+                Route::prefix('/gallery/groups')->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update'])->group(function (): void {
+                    Route::post('/', [AccountProfileGalleryController::class, 'createGroup']);
+                    Route::patch('/reorder', [AccountProfileGalleryController::class, 'reorderGroups']);
+                    Route::patch('/{group_id}', [AccountProfileGalleryController::class, 'updateGroup']);
+                    Route::delete('/{group_id}', [AccountProfileGalleryController::class, 'deleteGroup']);
+                    Route::post('/{group_id}/items', [AccountProfileGalleryController::class, 'createItem']);
+                    Route::patch('/{group_id}/items/reorder', [AccountProfileGalleryController::class, 'reorderItems']);
+                    Route::patch('/{group_id}/items/{item_id}', [AccountProfileGalleryController::class, 'updateItem']);
+                    Route::delete('/{group_id}/items/{item_id}', [AccountProfileGalleryController::class, 'deleteItem']);
+                });
 
                 Route::delete('/', [AccountProfilesController::class, 'destroy'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);

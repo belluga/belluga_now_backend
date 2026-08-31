@@ -6,6 +6,7 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Application\AccountProfiles\AccountProfileCandidateDiscoveryService;
 use App\Application\AccountProfiles\AccountProfileFormatterService;
+use App\Application\AccountProfiles\AccountProfileGalleryMutationService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileNameSearchKey;
@@ -30,6 +31,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class AccountProfilesController extends Controller
 {
@@ -39,6 +41,7 @@ class AccountProfilesController extends Controller
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileQueryService $profileQueryService,
         private readonly AccountProfileFormatterService $formatter,
+        private readonly AccountProfileGalleryMutationService $galleryMutations,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
         private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
         private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
@@ -169,6 +172,9 @@ class AccountProfilesController extends Controller
 
     public function store(AccountProfileStoreRequest $request): JsonResponse
     {
+        if ($request->exists('gallery_groups')) {
+            throw ValidationException::withMessages(['gallery_groups' => ['Gallery must be changed through its granular endpoints.']]);
+        }
         $validated = $request->validated();
         unset($validated['avatar'], $validated['cover']);
         $actor = $request->user();
@@ -211,9 +217,10 @@ class AccountProfilesController extends Controller
     {
         $profile = $this->profileQueryService->findOrFail($account_profile_id);
 
-        return response()->json([
-            'data' => $this->formatter->format($profile),
-        ]);
+        $data = $this->formatter->format($profile);
+        $data['gallery_capabilities'] = $this->galleryMutations->capabilities();
+
+        return response()->json(['data' => $data]);
     }
 
     public function nestedGroupMembers(
@@ -307,6 +314,9 @@ class AccountProfilesController extends Controller
 
     public function update(AccountProfileUpdateRequest $request, string $tenant_domain, string $account_profile_id): JsonResponse
     {
+        if ($request->exists('gallery_groups')) {
+            throw ValidationException::withMessages(['gallery_groups' => ['Gallery must be changed through its granular endpoints.']]);
+        }
         $profile = $this->profileQueryService->findOrFail($account_profile_id);
 
         $validated = $request->validated();
