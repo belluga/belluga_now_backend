@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Application\Profiles;
 
+use App\Application\AccountProfiles\AccountProfileLifecycleService;
+use App\Application\AccountProfiles\AccountProfileTransactionContext;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use Illuminate\Support\Facades\DB;
+use MongoDB\Laravel\Connection;
 use RuntimeException;
 use Throwable;
 
@@ -18,6 +21,8 @@ use Throwable;
  */
 final class CurrentTenantAccountDeletionAccountGuard
 {
+    public function __construct(private readonly AccountProfileLifecycleService $accountProfileLifecycle) {}
+
     /**
      * @param  array<int, string>  $candidateProfileIds
      * @param  array<int, string>  $candidateAccountIds
@@ -32,12 +37,12 @@ final class CurrentTenantAccountDeletionAccountGuard
         }
 
         $connection = DB::connection('tenant');
-        if (! method_exists($connection, 'transaction')) {
+        if (! $connection instanceof Connection) {
             throw new RuntimeException('Tenant MongoDB transaction support is required for current-account deletion.');
         }
 
         try {
-            $connection->transaction(function () use ($userId, $candidateProfileIds, $candidateAccountIds): void {
+            $connection->transaction(function () use ($connection, $userId, $candidateProfileIds, $candidateAccountIds): void {
                 $profiles = AccountProfile::query()
                     ->whereIn('_id', $candidateProfileIds)
                     ->where('created_by', $userId)
@@ -67,9 +72,20 @@ final class CurrentTenantAccountDeletionAccountGuard
                 );
 
                 if ($profileIds !== []) {
-                    AccountProfile::withoutEvents(static function () use ($profileIds): void {
-                        AccountProfile::withTrashed()->whereIn('_id', $profileIds)->forceDelete();
-                    });
+                    $session = $connection->getSession();
+                    if ($session === null) {
+                        throw new RuntimeException('Tenant MongoDB transaction session is required for current-account deletion.');
+                    }
+                    $context = new AccountProfileTransactionContext($connection->getDatabase(), $session);
+                    foreach ($profiles as $profile) {
+                        $this->accountProfileLifecycle->forceDeleteWithinTransaction(
+                            $profile,
+                            $context,
+                            'current-account-delete:'.$userId.':profile:'.(string) $profile->getKey(),
+                            enforceLastProfileInvariant: false,
+                            recordLifecycleTombstone: false,
+                        );
+                    }
                 }
 
                 if ($accountIds !== []) {

@@ -7,6 +7,7 @@ namespace Belluga\Events\Application\Events;
 use Belluga\Events\Application\Transactions\EventTransactionContext;
 use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Contracts\EventContentSanitizerContract;
+use Belluga\Events\Contracts\EventMapPoiDeletionContract;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\Validation\InputConstraints;
@@ -28,6 +29,7 @@ class EventAggregateWriteService
         private readonly EventOccurrenceSyncService $occurrenceSyncService,
         private readonly EventOccurrencePayloadSnapshotService $occurrencePayloadSnapshots,
         private readonly EventContentSanitizerContract $contentSanitizer,
+        private readonly EventMapPoiDeletionContract $mapPoiDeletion,
     ) {}
 
     /**
@@ -37,7 +39,7 @@ class EventAggregateWriteService
     public function create(array $payload, array $occurrences): Event
     {
         /** @var Event $event */
-        $event = $this->transactions->run(function () use ($payload, $occurrences): Event {
+        $event = $this->transactions->run(function (EventTransactionContext $context) use ($payload, $occurrences): Event {
             $canonicalPayload = $payload;
             $canonicalPayload['profile_groups'] = [];
             $canonicalContent = $this->canonicalEventContent(
@@ -51,6 +53,7 @@ class EventAggregateWriteService
                 $created,
                 $occurrences,
                 $canonicalContent,
+                $context,
             );
 
             return $created->fresh() ?? $created;
@@ -66,7 +69,7 @@ class EventAggregateWriteService
     public function update(Event $event, array $payload, array $occurrences): Event
     {
         /** @var Event $updated */
-        $updated = $this->transactions->run(function () use ($event, $payload, $occurrences): Event {
+        $updated = $this->transactions->run(function (EventTransactionContext $context) use ($event, $payload, $occurrences): Event {
             $canonicalPayload = $payload;
             $canonicalPayload['profile_groups'] = [];
             $canonicalContent = $this->canonicalEventContent(
@@ -86,6 +89,7 @@ class EventAggregateWriteService
                 $fresh,
                 $occurrences,
                 $canonicalContent,
+                $context,
             );
 
             return $fresh;
@@ -98,7 +102,9 @@ class EventAggregateWriteService
     {
         $eventId = (string) $event->_id;
 
-        $this->transactions->run(function () use ($event, $eventId): null {
+        $this->transactions->run(function (EventTransactionContext $context) use ($event, $eventId): null {
+            $this->occurrenceNestedAccountStore->purgeByEventIdWithinContext($context, $eventId);
+            $this->mapPoiDeletion->deleteForEvent($context, $eventId);
             $event->delete();
             $this->occurrenceSyncService->softDeleteByEventId($eventId);
 
@@ -253,7 +259,7 @@ class EventAggregateWriteService
         string $groupId,
     ): array {
         /** @var array<string, mixed> $result */
-        $result = $this->transactions->run(function () use ($event, $occurrence, $groupId): array {
+        $result = $this->transactions->run(function (EventTransactionContext $context) use ($event, $occurrence, $groupId): array {
             $eventId = trim((string) $event->getKey());
             $occurrenceId = trim((string) $occurrence->getKey());
             if ($eventId === '' || $occurrenceId === '' || trim((string) ($occurrence->event_id ?? '')) !== $eventId) {
@@ -265,45 +271,19 @@ class EventAggregateWriteService
                 $eventId,
             );
             $group = $this->findOccurrenceGroupOrFail($existingGroups, $groupId);
-            $memberIds = $this->occurrenceNestedAccountStore->adminOccurrenceGroupMemberIds(
-                $occurrence,
+            $this->occurrenceNestedAccountStore->deleteOccurrenceGroupWithinContext(
+                $context,
+                $eventId,
+                $occurrenceId,
                 (string) $group['id'],
             );
-            if (count($memberIds) > InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX) {
-                throw ValidationException::withMessages([
-                    'profile_groups' => ['Related-account group delete exceeds the approved member budget.'],
-                ]);
-            }
-
-            $nextGroups = [];
-            foreach ($existingGroups as $candidate) {
-                if (trim((string) ($candidate['id'] ?? '')) === (string) $group['id']) {
-                    continue;
-                }
-
-                $nextGroups[] = [
-                    'id' => trim((string) ($candidate['id'] ?? '')),
-                    'label' => trim((string) ($candidate['label'] ?? '')),
-                    'order' => count($nextGroups),
-                ];
-            }
-
-            $metadataOnly = $this->profileGroupMemberStore->metadataOnly($nextGroups);
-            $occurrence->forceFill([
-                'own_profile_groups' => $metadataOnly,
-                'profile_groups' => $metadataOnly,
-            ]);
-            $occurrence->save();
-
-            $freshOccurrence = $occurrence->fresh() ?? $occurrence;
-            $this->occurrenceNestedAccountStore->syncOccurrenceGroupMetadata(
-                $eventId,
-                $freshOccurrence,
-                $metadataOnly,
+            $context->collection('event_occurrences')->updateOne(
+                ['_id' => new ObjectId($occurrenceId), 'event_id' => $eventId, 'deleted_at' => null],
+                ['$pull' => ['own_profile_groups' => ['_id' => (string) $group['id']], 'profile_groups' => ['_id' => (string) $group['id']]]],
+                $context->rawOptions(),
             );
 
-            $event->touch();
-            $freshOccurrence = $freshOccurrence->fresh() ?? $freshOccurrence;
+            $freshOccurrence = $occurrence->fresh() ?? $occurrence;
 
             return [
                 'occurrence_id' => (string) $freshOccurrence->getKey(),

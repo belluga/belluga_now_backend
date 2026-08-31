@@ -191,6 +191,25 @@ final class EventOccurrenceNestedAccountStore
         $this->collection()->deleteMany($filter);
     }
 
+    /** @param array<int, string> $activeOccurrenceIds */
+    public function purgeMissingOccurrencesWithinContext(
+        EventTransactionContext $context,
+        string $eventId,
+        array $activeOccurrenceIds,
+    ): void {
+        $eventId = trim($eventId);
+        if ($eventId === '') {
+            return;
+        }
+        $activeOccurrenceIds = array_values(array_filter(array_map(
+            static fn (mixed $id): string => trim((string) $id),
+            $activeOccurrenceIds,
+        ), static fn (string $id): bool => $id !== ''));
+        $filter = ['tenant_id' => $this->tenantId(), 'event_id' => $eventId, 'parent_type' => self::PARENT_TYPE];
+        $filter['parent_id'] = $activeOccurrenceIds === [] ? ['$exists' => true] : ['$nin' => $activeOccurrenceIds];
+        $context->collection(self::COLLECTION)->deleteMany($filter, $context->rawOptions());
+    }
+
     public function purgeByEventId(string $eventId): void
     {
         $eventId = trim($eventId);
@@ -203,6 +222,36 @@ final class EventOccurrenceNestedAccountStore
             'event_id' => $eventId,
             'parent_type' => self::PARENT_TYPE,
         ]);
+    }
+
+    public function purgeByEventIdWithinContext(EventTransactionContext $context, string $eventId): void
+    {
+        $eventId = trim($eventId);
+        if ($eventId === '') {
+            return;
+        }
+
+        $context->collection(self::COLLECTION)->deleteMany([
+            'tenant_id' => $this->tenantId(),
+            'event_id' => $eventId,
+            'parent_type' => self::PARENT_TYPE,
+        ], $context->rawOptions());
+    }
+
+    public function deleteOccurrenceGroupWithinContext(
+        EventTransactionContext $context,
+        string $eventId,
+        string $occurrenceId,
+        string $groupId,
+    ): void {
+        $head = $this->findOccurrenceGroupHeadOrFail($eventId, $occurrenceId, $groupId, $context);
+        $context->collection(self::COLLECTION)->deleteMany([
+            'tenant_id' => $this->tenantId(),
+            'event_id' => $eventId,
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $occurrenceId,
+            'group_key' => (string) $head['group_key'],
+        ], $context->rawOptions());
     }
 
     /**
@@ -664,8 +713,12 @@ final class EventOccurrenceNestedAccountStore
      *
      * @return array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>
      */
-    public function legacyGroupsForOwner(string $eventId, string $parentType, string $parentId): array
-    {
+    public function legacyGroupsForOwner(
+        string $eventId,
+        string $parentType,
+        string $parentId,
+        bool $includeEmptyGroups = false,
+    ): array {
         $eventId = trim($eventId);
         $parentType = trim($parentType);
         $parentId = trim($parentId);
@@ -743,10 +796,12 @@ final class EventOccurrenceNestedAccountStore
             }
         }
 
-        $groups = array_values(array_filter(
-            $groupsByKey,
-            static fn (array $group): bool => $group['account_profile_ids'] !== [],
-        ));
+        $groups = array_values($includeEmptyGroups
+            ? $groupsByKey
+            : array_filter(
+                $groupsByKey,
+                static fn (array $group): bool => $group['account_profile_ids'] !== [],
+            ));
 
         usort(
             $groups,
@@ -1075,21 +1130,28 @@ final class EventOccurrenceNestedAccountStore
     /**
      * @return array<string, mixed>
      */
-    private function findOccurrenceGroupHeadOrFail(string $eventId, string $occurrenceId, string $groupId): array
-    {
+    private function findOccurrenceGroupHeadOrFail(
+        string $eventId,
+        string $occurrenceId,
+        string $groupId,
+        ?EventTransactionContext $context = null,
+    ): array {
         $groupId = trim($groupId);
         if ($groupId === '') {
             throw new NotFoundHttpException;
         }
 
-        $row = $this->collection()->findOne([
+        $filter = [
             'tenant_id' => $this->tenantId(),
             'event_id' => $eventId,
             'parent_type' => self::PARENT_TYPE,
             'parent_id' => $occurrenceId,
             'group_key' => $groupId,
             'doc_type' => self::DOC_TYPE_HEAD,
-        ]);
+        ];
+        $row = $context === null
+            ? $this->collection()->findOne($filter)
+            : $context->collection(self::COLLECTION)->findOne($filter, $context->rawOptions());
 
         $document = $this->documentToArray($row);
         if ($document === []) {
