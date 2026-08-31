@@ -144,7 +144,9 @@ final class AccountProfileLifecycleService
             $terminalization,
             $cleanSurvivingReferences,
         );
+        $this->referenceCleanup->purgeProfileGraphWithinTransaction($context, [$profileId]);
         if ($persistedProfile->deleted_at === null) {
+            $persistedProfile->nested_profile_groups = [];
             $persistedProfile->setAttribute(
                 'aggregate_revision',
                 max(0, (int) $persistedProfile->getAttribute('aggregate_revision')) + 1,
@@ -202,16 +204,19 @@ final class AccountProfileLifecycleService
         bool $enforceLastProfileInvariant = true,
         ?AccountProfileDeletionTerminalization $terminalization = null,
         bool $cleanSurvivingReferences = true,
+        bool $recordLifecycleTombstone = true,
     ): array {
         $profileId = (string) $profile->getKey();
         $fingerprint = $this->outboxPublisher->fingerprintForLifecycle($profileId, 'force_delete');
-        $receipt = $this->outboxPublisher->receipt($context, $commandId);
-        if ($receipt !== null) {
-            $this->outboxPublisher->assertReceiptMatches($receipt, $fingerprint);
+        if ($recordLifecycleTombstone) {
+            $receipt = $this->outboxPublisher->receipt($context, $commandId);
+            if ($receipt !== null) {
+                $this->outboxPublisher->assertReceiptMatches($receipt, $fingerprint);
 
-            $eventId = $this->outboxEventId($receipt);
+                $eventId = $this->outboxEventId($receipt);
 
-            return $eventId === null ? [] : [$eventId];
+                return $eventId === null ? [] : [$eventId];
+            }
         }
 
         $persistedProfile = AccountProfile::withTrashed()->findOrFail($profileId);
@@ -226,12 +231,16 @@ final class AccountProfileLifecycleService
             $terminalization,
             $cleanSurvivingReferences,
         );
-        $eventIds[] = $this->outboxPublisher->recordTombstone(
-            $context,
-            $persistedProfile,
-            $commandId,
-            $fingerprint,
-        );
+        $this->referenceCleanup->purgeProfileGraphWithinTransaction($context, [$profileId]);
+        $persistedProfile->nested_profile_groups = [];
+        if ($recordLifecycleTombstone) {
+            $eventIds[] = $this->outboxPublisher->recordTombstone(
+                $context,
+                $persistedProfile,
+                $commandId,
+                $fingerprint,
+            );
+        }
         $persistedProfile->forceDelete();
 
         return array_values(array_unique($eventIds));

@@ -25,4 +25,14 @@ final readonly class AccountProfileTransactionContext
     {
         return ['session' => $this->session];
     }
+
+    public function database(): Database
+    {
+        return $this->database;
+    }
+
+    public function session(): Session
+    {
+        return $this->session;
+    }
 }

@@ -10,6 +10,8 @@ use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
 use MongoDB\BSON\ObjectId;
+use MongoDB\Database;
+use MongoDB\Driver\Session;
 
 class MapPoiProjectionService
 {
@@ -41,6 +43,32 @@ class MapPoiProjectionService
             ->where('ref_type', $refType);
         $this->applyRefIdAlternativesConstraint($query, $stringRefIds, $objectRefIds);
         $query->delete();
+    }
+
+    /** @param array<int, string> $refIds */
+    public function deleteByRefsWithinTransaction(
+        Database $database,
+        Session $session,
+        string $refType,
+        array $refIds,
+    ): void {
+        [$stringRefIds, $objectRefIds] = $this->buildRefIdAlternativeSets($refIds);
+        if ($stringRefIds === [] && $objectRefIds === []) {
+            return;
+        }
+
+        $alternatives = [];
+        if ($stringRefIds !== []) {
+            $alternatives[] = ['ref_id' => ['$in' => $stringRefIds]];
+        }
+        if ($objectRefIds !== []) {
+            $alternatives[] = ['ref_id' => ['$in' => $objectRefIds]];
+        }
+
+        $database->selectCollection((new MapPoi)->getTable())->deleteMany(
+            ['ref_type' => $refType, '$or' => $alternatives],
+            ['session' => $session],
+        );
     }
 
     public function upsertFromAccountProfile(object $profile, ?int $forcedCheckpoint = null): void

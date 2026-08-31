@@ -9,41 +9,41 @@ use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Integration\Events\AccountSlugResolverAdapter;
 use App\Integration\Events\AttendanceCommitmentReadAdapter;
-use App\Integration\Events\EventContentSanitizerAdapter;
 use App\Integration\Events\EventContentReadCanonicalizerAdapter;
+use App\Integration\Events\EventContentSanitizerAdapter;
 use App\Integration\Events\EventDiscoveryFilterCatalogAdapter;
-use App\Integration\Events\EventRequestLifecycleTraceAdapter;
 use App\Integration\Events\EventParties\AccountProfileEventPartyMapper;
+use App\Integration\Events\EventRequestLifecycleTraceAdapter;
 use App\Integration\Events\EventTaxonomySnapshotResolverAdapter;
 use App\Integration\Events\EventTaxonomyValidationAdapter;
 use App\Integration\Events\EventTypeResolverAdapter;
 use App\Integration\Events\MapPoiEventAsyncJobSignaturesAdapter;
+use App\Integration\Events\MapPoiEventDeletionAdapter;
 use App\Integration\Events\TenantCapabilitySettingsAdapter;
 use App\Integration\Events\TenantContextAdapter;
 use App\Integration\Events\TenantExecutionContextAdapter;
 use App\Integration\Events\TenantRadiusSettingsAdapter;
 use App\Listeners\Events\SyncMapPoiOnEventCreated;
-use App\Listeners\Events\SyncMapPoiOnEventDeleted;
 use App\Listeners\Events\SyncMapPoiOnEventUpdated;
 use Belluga\Events\Contracts\AccountProfileHeroImageResolverContract;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventAsyncJobSignaturesContract;
 use Belluga\Events\Contracts\EventAttendanceReadContract;
 use Belluga\Events\Contracts\EventCapabilitySettingsContract;
-use Belluga\Events\Contracts\EventContentSanitizerContract;
 use Belluga\Events\Contracts\EventContentReadCanonicalizerContract;
+use Belluga\Events\Contracts\EventContentSanitizerContract;
 use Belluga\Events\Contracts\EventDiscoveryFilterCatalogContract;
+use Belluga\Events\Contracts\EventMapPoiDeletionContract;
 use Belluga\Events\Contracts\EventPartyMapperRegistryContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
-use Belluga\Events\Contracts\EventRequestLifecycleTraceContract;
 use Belluga\Events\Contracts\EventRadiusSettingsContract;
+use Belluga\Events\Contracts\EventRequestLifecycleTraceContract;
 use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Contracts\EventTaxonomyValidationContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Contracts\EventTypeResolverContract;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Domain\Events\EventCreated;
-use Belluga\Events\Domain\Events\EventDeleted;
 use Belluga\Events\Domain\Events\EventUpdated;
 use Belluga\Events\Parties\InMemoryEventPartyMapperRegistry;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
@@ -116,6 +116,8 @@ class EventsIntegrationServiceProvider extends ServiceProvider
             MapPoiEventAsyncJobSignaturesAdapter::class
         );
 
+        $this->app->bind(EventMapPoiDeletionContract::class, MapPoiEventDeletionAdapter::class);
+
         $this->app->singleton(
             EventPartyMapperRegistryContract::class,
             function ($app) {
@@ -150,7 +152,6 @@ class EventsIntegrationServiceProvider extends ServiceProvider
     {
         Event::listen(EventCreated::class, SyncMapPoiOnEventCreated::class);
         Event::listen(EventUpdated::class, SyncMapPoiOnEventUpdated::class);
-        Event::listen(EventDeleted::class, SyncMapPoiOnEventDeleted::class);
 
         /** @var SettingsRegistryContract $registry */
         $registry = $this->app->make(SettingsRegistryContract::class);

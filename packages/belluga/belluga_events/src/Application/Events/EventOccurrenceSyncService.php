@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Application\Events;
 
+use Belluga\Events\Application\Transactions\EventTransactionContext;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventTaxonomySnapshotResolverContract;
 use Belluga\Events\Models\Tenants\Event;
@@ -32,6 +33,7 @@ class EventOccurrenceSyncService
         Event $event,
         array $occurrences,
         string $canonicalContent,
+        ?EventTransactionContext $context = null,
     ): void {
         if (count($occurrences) > InputConstraints::EVENT_OCCURRENCES_MAX) {
             throw new RuntimeException('Event occurrence sync exceeds the configured occurrence limit.');
@@ -170,7 +172,11 @@ class EventOccurrenceSyncService
             $document->save();
         }
 
-        $this->occurrenceNestedAccountStore->purgeMissingOccurrences($eventId, $activeDocumentIds);
+        if ($context !== null) {
+            $this->occurrenceNestedAccountStore->purgeMissingOccurrencesWithinContext($context, $eventId, $activeDocumentIds);
+        } else {
+            $this->occurrenceNestedAccountStore->purgeMissingOccurrences($eventId, $activeDocumentIds);
+        }
     }
 
     private function assertIdentitySafeForExistingDocuments(array $occurrences, array $existingDocuments): void

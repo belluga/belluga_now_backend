@@ -22,6 +22,7 @@ use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
+use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
 use Belluga\Events\Application\Transactions\EventTransactionContext;
 use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Contracts\EventContentSanitizerContract;
@@ -110,6 +111,8 @@ class EventCrudControllerTest extends TestCaseTenant
         TaxonomyTerm::query()->delete();
         Taxonomy::query()->delete();
         AccountProfile::withTrashed()->forceDelete();
+        DB::connection('tenant')->getDatabase()->selectCollection(EventOccurrenceNestedAccountStore::COLLECTION)
+            ->deleteMany([]);
 
         [$this->account] = $this->seedAccountWithRole(['*']);
         $this->userService = $this->app->make(AccountUserService::class);
@@ -2277,6 +2280,221 @@ class EventCrudControllerTest extends TestCaseTenant
             $futureLegacy->fresh()->getAttributes(),
             'Future legacy event after live/future repair',
         );
+    }
+
+    public function test_legacy_event_parties_all_history_repair_backfills_past_occurrence_heads_members_and_mirrors_idempotently(): void
+    {
+        $past = Carbon::now()->subDays(3);
+        $legacy = $this->createEvent([
+            'title' => 'Past embedded occurrence groups requiring historical backfill',
+            'artists' => null,
+            'event_parties' => [],
+            'profile_groups' => [],
+            'date_time_start' => $past,
+            'date_time_end' => $past->copy()->addHours(2),
+        ]);
+        $eventId = (string) $legacy->_id;
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $occurrence->starts_at = $past;
+        $occurrence->ends_at = $past->copy()->addHours(2);
+        $occurrence->effective_ends_at = $past->copy()->addHours(2);
+        $occurrence->own_profile_groups = [[
+            'id' => 'historical-artists',
+            'label' => 'Historical Artists',
+            'order' => 0,
+            'account_profile_ids' => [(string) $this->artist->_id],
+        ]];
+        $occurrence->profile_groups = $occurrence->own_profile_groups;
+        $occurrence->save();
+
+        $this->assertSame([], $this->eventNestedAccountRows([
+            'event_id' => $eventId,
+            'parent_type' => EventOccurrenceNestedAccountStore::PARENT_TYPE,
+            'parent_id' => (string) $occurrence->_id,
+        ]));
+
+        $summary = app(LegacyEventPartiesCanonicalizationService::class)
+            ->repairNestedGroupsForCutover(failOnError: true);
+
+        $this->assertSame([
+            'scanned' => 1,
+            'invalid' => 1,
+            'repaired' => 1,
+            'unchanged' => 0,
+            'failed' => 0,
+        ], $summary);
+
+        $freshOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->assertSame($freshOccurrence->own_profile_groups, $freshOccurrence->profile_groups);
+        $this->assertSame('Historical Artists', data_get($freshOccurrence, 'own_profile_groups.0.label'));
+
+        $rows = $this->eventNestedAccountRows([
+            'event_id' => $eventId,
+            'parent_type' => EventOccurrenceNestedAccountStore::PARENT_TYPE,
+            'parent_id' => (string) $freshOccurrence->_id,
+        ]);
+        $this->assertCount(2, $rows);
+        $this->assertSame(1, collect($rows)->where('doc_type', 'group_head')->count());
+        $this->assertSame(1, collect($rows)->where('doc_type', 'member_row')->count());
+        $this->assertSame(
+            [(string) $this->artist->_id],
+            collect($rows)
+                ->where('doc_type', 'member_row')
+                ->pluck('nested_profile.id')
+                ->values()
+                ->all(),
+        );
+
+        $secondSummary = app(LegacyEventPartiesCanonicalizationService::class)
+            ->repairNestedGroupsForCutover(failOnError: true);
+
+        $this->assertSame([
+            'scanned' => 1,
+            'invalid' => 0,
+            'repaired' => 0,
+            'unchanged' => 1,
+            'failed' => 0,
+        ], $secondSummary);
+        $this->assertCount(2, $this->eventNestedAccountRows([
+            'event_id' => $eventId,
+            'parent_type' => EventOccurrenceNestedAccountStore::PARENT_TYPE,
+            'parent_id' => (string) $freshOccurrence->_id,
+        ]));
+    }
+
+    public function test_legacy_event_parties_all_history_repair_throws_when_a_repair_failure_would_block_cutover(): void
+    {
+        $past = Carbon::now()->subDays(3);
+        $legacy = $this->createEvent([
+            'artists' => null,
+            'event_parties' => [],
+            'profile_groups' => [],
+            'date_time_start' => $past,
+            'date_time_end' => $past->copy()->addHours(2),
+        ]);
+        $occurrence = $this->occurrenceDocumentAtOrder((string) $legacy->_id, 0);
+        $occurrence->starts_at = $past;
+        $occurrence->ends_at = $past->copy()->addHours(2);
+        $occurrence->own_profile_groups = [[
+            'id' => 'unrepairable-historical-group',
+            'label' => 'Unrepairable Historical Group',
+            'order' => 0,
+            'account_profile_ids' => [(string) $this->artist->_id],
+        ]];
+        $occurrence->profile_groups = $occurrence->own_profile_groups;
+        $occurrence->save();
+
+        $occurrence->event_id = null;
+        $occurrence->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('without canonical ownership');
+
+        app(LegacyEventPartiesCanonicalizationService::class)
+            ->repairNestedGroupsForCutover(failOnError: true);
+    }
+
+    public function test_legacy_event_parties_cutover_repair_recovers_a_soft_deleted_past_occurrence_from_one_mirror_without_touching_schedule(): void
+    {
+        $past = Carbon::now()->subDays(4);
+        $legacy = $this->createEvent([
+            'artists' => null,
+            'event_parties' => [],
+            'profile_groups' => [],
+            'date_time_start' => $past,
+            'date_time_end' => $past->copy()->addHours(2),
+        ]);
+        $eventId = (string) $legacy->_id;
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $occurrence->starts_at = $past;
+        $occurrence->ends_at = $past->copy()->addHours(2);
+        $occurrence->effective_ends_at = $past->copy()->addHours(2);
+        $occurrence->own_profile_groups = [[
+            'id' => 'historical-empty-group',
+            'label' => 'Historical Empty Group',
+            'order' => 0,
+        ]];
+        $occurrence->profile_groups = [];
+        $occurrence->save();
+        $occurrence->delete();
+
+        $beforeEventSchedule = [
+            $legacy->fresh()->date_time_start,
+            $legacy->fresh()->date_time_end,
+        ];
+        $beforeOccurrenceState = [
+            $occurrence->starts_at,
+            $occurrence->ends_at,
+            $occurrence->effective_ends_at,
+            $occurrence->deleted_at,
+        ];
+
+        $summary = app(LegacyEventPartiesCanonicalizationService::class)
+            ->repairNestedGroupsForCutover(failOnError: true);
+
+        $this->assertSame([
+            'scanned' => 1,
+            'invalid' => 1,
+            'repaired' => 1,
+            'unchanged' => 0,
+            'failed' => 0,
+        ], $summary);
+
+        $freshOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0, withTrashed: true);
+        $this->assertSame($freshOccurrence->own_profile_groups, $freshOccurrence->profile_groups);
+        $this->assertSame('Historical Empty Group', data_get($freshOccurrence, 'own_profile_groups.0.label'));
+        $this->assertEquals($beforeEventSchedule, [
+            $legacy->fresh()->date_time_start,
+            $legacy->fresh()->date_time_end,
+        ]);
+        $this->assertEquals($beforeOccurrenceState, [
+            $freshOccurrence->starts_at,
+            $freshOccurrence->ends_at,
+            $freshOccurrence->effective_ends_at,
+            $freshOccurrence->deleted_at,
+        ]);
+
+        $rows = $this->eventNestedAccountRows([
+            'event_id' => $eventId,
+            'parent_type' => EventOccurrenceNestedAccountStore::PARENT_TYPE,
+            'parent_id' => (string) $freshOccurrence->_id,
+        ]);
+        $this->assertCount(1, $rows);
+        $this->assertSame('group_head', $rows[0]['doc_type'] ?? null);
+        $this->assertSame('historical-empty-group', $rows[0]['group_key'] ?? null);
+    }
+
+    public function test_historical_nested_group_backfill_migration_prepares_one_mirror_occurrence_for_strict_label_cutover(): void
+    {
+        $legacy = $this->createEvent([
+            'artists' => null,
+            'event_parties' => [],
+            'profile_groups' => [],
+        ]);
+        $eventId = (string) $legacy->_id;
+        $occurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $occurrence->own_profile_groups = [[
+            'id' => 'migration-artists',
+            'label' => 'Migration Artists',
+            'order' => 0,
+        ]];
+        $occurrence->profile_groups = [];
+        $occurrence->save();
+
+        $backfill = require base_path('database/migrations/tenants/2026_08_26_000050_canonicalize_historical_event_nested_groups.php');
+        $backfill->up();
+
+        $freshOccurrence = $this->occurrenceDocumentAtOrder($eventId, 0);
+        $this->assertSame($freshOccurrence->own_profile_groups, $freshOccurrence->profile_groups);
+        $this->assertNotNull(DB::connection('tenant')->getDatabase()
+            ->selectCollection(EventOccurrenceNestedAccountStore::COLLECTION)
+            ->findOne([
+                '_id' => 'accounts-nested:head:event_occurrence:'.(string) $freshOccurrence->_id.':migration-artists',
+                'doc_type' => 'group_head',
+            ]));
+
+        $cutover = require base_path('database/migrations/tenants/2026_08_26_000100_remove_nested_group_label_copies.php');
+        $cutover->up();
     }
 
     public function test_tenant_admin_legacy_event_parties_repair_clears_legacy_artists_projection_when_event_parties_are_already_canonical(): void
@@ -9083,7 +9301,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['profile_groups']);
     }
 
-    public function test_event_occurrence_group_delete_rejects_over_budget_member_fanout(): void
+    public function test_event_occurrence_group_delete_purges_unbounded_members_and_preserves_sibling_group_without_touching_event(): void
     {
         $created = $this->postJson($this->accountEventsBase, $this->makeEventPayload([
             'occurrences' => $this->makeOccurrences(1),
@@ -9097,6 +9315,9 @@ class EventCrudControllerTest extends TestCaseTenant
         $label = 'Budget Members';
 
         $this->createOccurrenceGroupHead($eventId, $occurrenceId, $label)->assertCreated();
+        $this->createOccurrenceGroupHead($eventId, $occurrenceId, 'Surviving Group')->assertCreated();
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $eventUpdatedAt = (string) Event::query()->findOrFail($eventId)->updated_at;
 
         $tenantId = (string) Tenant::current()->getKey();
         $memberIds = array_map(
@@ -9128,8 +9349,7 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $response = $this->deleteOccurrenceProfileGroup($eventId, $occurrenceId, $groupId);
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['profile_groups']);
+        $response->assertOk();
 
         $management = $this->getJson("{$this->accountEventsBase}/{$eventId}");
         $management->assertOk();
@@ -9137,13 +9357,15 @@ class EventCrudControllerTest extends TestCaseTenant
             $management,
             0,
             0,
-            $label,
-            InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX + 1,
+            'Surviving Group',
+            0,
         );
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $this->assertSame($eventUpdatedAt, (string) Event::query()->findOrFail($eventId)->updated_at);
 
         $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $this->assertSame(
-            InputConstraints::EVENT_PROFILE_GROUP_MEMBERS_MAX + 1,
+            0,
             DB::connection('tenant')
                 ->getDatabase()
                 ->selectCollection(EventOccurrenceNestedAccountStore::COLLECTION)
@@ -9243,19 +9465,15 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertContains('Delete Me Into Archived', $archivedTitles);
     }
 
-    public function test_event_delete_dispatches_map_projection_delete_job_via_lifecycle_event(): void
+    public function test_event_delete_does_not_dispatch_map_projection_delete_job_after_transactional_cleanup_cutover(): void
     {
         Queue::fake();
         $event = $this->createEvent();
-        $eventId = (string) $event->_id;
 
         $response = $this->deleteJson("{$this->accountEventsBase}/{$event->_id}");
 
         $response->assertStatus(200);
-        Queue::assertPushed(DeleteMapPoiByRefJob::class, function (DeleteMapPoiByRefJob $job) use ($eventId): bool {
-            return (string) $this->readPrivateProperty($job, 'refType') === 'event'
-                && (string) $this->readPrivateProperty($job, 'refId') === $eventId;
-        });
+        Queue::assertNotPushed(DeleteMapPoiByRefJob::class);
     }
 
     public function test_publish_scheduled_events_job_promotes_ready_events_and_dispatches_projection_sync(): void

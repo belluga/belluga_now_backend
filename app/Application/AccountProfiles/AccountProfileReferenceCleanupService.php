@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
+use Belluga\MapPois\Application\MapPoiProjectionService;
 use Illuminate\Support\Facades\DB;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
@@ -21,6 +23,7 @@ final class AccountProfileReferenceCleanupService
         private readonly AccountProfileOutboxPublisher $outboxPublisher,
         private readonly AccountProfileOutboxDispatcher $outboxDispatcher,
         private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
+        private readonly MapPoiProjectionService $mapPois,
     ) {}
 
     /** @param list<string> $deletedProfileIds */
@@ -99,6 +102,50 @@ final class AccountProfileReferenceCleanupService
         }
 
         return array_values(array_unique($eventIds));
+    }
+
+    /** @param list<string> $profileIds */
+    public function purgeProfileGraphWithinTransaction(
+        AccountProfileTransactionContext $context,
+        array $profileIds,
+    ): void {
+        $profileIds = $this->normalizedIds($profileIds);
+        if ($profileIds === []) {
+            return;
+        }
+
+        $tenantId = trim((string) (Tenant::current()?->getKey() ?? ''));
+        $nestedFilter = [
+            '$or' => [
+                ['parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE, 'parent_id' => ['$in' => $profileIds]],
+                ['doc_type' => 'member_row', 'nested_profile.id' => ['$in' => $profileIds]],
+            ],
+        ];
+        if ($tenantId !== '') {
+            $nestedFilter['tenant_id'] = $tenantId;
+        }
+        $context->collection(AccountProfileNestedGroupMemberStore::COLLECTION)->deleteMany($nestedFilter, $context->rawOptions());
+
+        $projectionFilter = [
+            '$or' => [
+                ['parent_profile_id' => ['$in' => $profileIds]],
+                ['member_profile_id' => ['$in' => $profileIds]],
+            ],
+        ];
+        if ($tenantId !== '') {
+            $projectionFilter['tenant_id'] = $tenantId;
+        }
+        $context->collection(AccountProfileNestedPublicMembersProjectionService::COLLECTION)->deleteMany(
+            $projectionFilter,
+            $context->rawOptions(),
+        );
+
+        $this->mapPois->deleteByRefsWithinTransaction(
+            $context->database(),
+            $context->session(),
+            'account_profile',
+            $profileIds,
+        );
     }
 
     /**

@@ -26,12 +26,16 @@ use Belluga\Invites\Models\Tenants\InviteEdge;
 use Belluga\Invites\Models\Tenants\InviteFeedProjection;
 use Belluga\Invites\Models\Tenants\InviteOutboxEvent;
 use Belluga\Invites\Models\Tenants\InviteShareCode;
+use Belluga\MapPois\Application\MapPoiProjectionService;
+use Belluga\MapPois\Models\Tenants\MapPoi;
 use Belluga\PushHandler\Models\Tenants\PushDeliveryLog;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Belluga\PushHandler\Models\Tenants\PushMessageAction;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Mockery;
+use MongoDB\BSON\ObjectId;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -220,6 +224,35 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
                 ->all(),
         );
 
+        $tenantDatabase = DB::connection('tenant')->getDatabase();
+        $nestedId = 'current-delete-nested-'.(string) $personalProfile->_id;
+        $tenantDatabase->selectCollection('accounts_nested')->insertOne([
+            '_id' => $nestedId,
+            'tenant_id' => (string) Tenant::current()->getKey(),
+            'parent_type' => 'account_profile',
+            'parent_id' => (string) $personalProfile->_id,
+            'group_key' => 'current-delete',
+            'doc_type' => 'group_head',
+        ]);
+        $tenantDatabase->selectCollection('account_profile_nested_public_member_projection')->insertOne([
+            '_id' => 'current-delete-public-'.(string) $personalProfile->_id,
+            'tenant_id' => (string) Tenant::current()->getKey(),
+            'parent_profile_id' => (string) $personalProfile->_id,
+            'group_id' => 'current-delete',
+        ]);
+        $tenantDatabase->selectCollection((new MapPoi)->getTable())->insertOne([
+            '_id' => 'current-delete-map-'.(string) $personalProfile->_id,
+            'projection_key' => 'current-delete-map-'.(string) $personalProfile->_id,
+            'ref_type' => 'account_profile',
+            'ref_id' => new ObjectId((string) $personalProfile->_id),
+        ]);
+        $this->assertSame(0, $tenantDatabase->selectCollection('account_profile_outbox')->countDocuments([
+            'profile_id' => (string) $personalProfile->_id,
+        ]));
+        $this->assertSame(0, $tenantDatabase->selectCollection('account_profile_command_receipts')->countDocuments([
+            '_id' => ['$regex' => '^current-account-delete:'.preg_quote($targetId, '/')],
+        ]));
+
         $this->actingAsTenantIdentity($target);
 
         $this->deleteJson("{$this->base_api_tenant}profile", [
@@ -257,6 +290,21 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
         $this->assertFalse(PushMessageAction::query()->where('user_id', $targetId)->exists());
         $this->assertFalse(PersonalAccessToken::query()->where('tokenable_id', $targetId)->exists());
         $tenantDatabase = DB::connection('tenant')->getDatabase();
+
+        $this->assertNull($tenantDatabase->selectCollection('accounts_nested')->findOne(['_id' => $nestedId]));
+        $this->assertNull($tenantDatabase->selectCollection('account_profile_nested_public_member_projection')->findOne([
+            'parent_profile_id' => (string) $personalProfile->_id,
+        ]));
+        $this->assertNull($tenantDatabase->selectCollection((new MapPoi)->getTable())->findOne([
+            'ref_type' => 'account_profile',
+            'ref_id' => new ObjectId((string) $personalProfile->_id),
+        ]));
+        $this->assertSame(0, $tenantDatabase->selectCollection('account_profile_outbox')->countDocuments([
+            'profile_id' => (string) $personalProfile->_id,
+        ]));
+        $this->assertSame(0, $tenantDatabase->selectCollection('account_profile_command_receipts')->countDocuments([
+            '_id' => ['$regex' => '^current-account-delete:'.preg_quote($targetId, '/')],
+        ]));
 
         $this->assertNull($tenantDatabase->selectCollection('push_devices')->findOne([
             'account_user_id' => $targetId,
@@ -330,6 +378,77 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
 
         $this->assertFalse(PhoneOtpChallenge::query()->where('phone_hash', $phoneHash)->exists());
         $this->assertNull(AccountUser::withTrashed()->find($targetId));
+    }
+
+    public function test_current_principal_profile_graph_delete_rolls_back_when_map_poi_transactional_cleanup_fails(): void
+    {
+        $target = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'MapPoi rollback target',
+            'phones' => ['+5527999990299'],
+        ]);
+        $targetId = (string) $target->_id;
+        $account = Account::create([
+            'name' => 'MapPoi rollback account',
+            'slug' => 'map-poi-rollback-account',
+            'document' => ['type' => 'cpf', 'number' => 'MAP-POI-ROLLBACK-'.$targetId],
+            'ownership_state' => 'unmanaged',
+            'created_by' => $targetId,
+            'created_by_type' => 'tenant',
+        ]);
+        $profile = AccountProfile::create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'MapPoi rollback profile',
+            'slug' => 'map-poi-rollback-profile',
+            'created_by' => $targetId,
+            'created_by_type' => 'tenant',
+        ]);
+        $database = DB::connection('tenant')->getDatabase();
+        $nestedId = 'map-poi-rollback-nested-'.(string) $profile->_id;
+        $database->selectCollection('accounts_nested')->insertOne([
+            '_id' => $nestedId,
+            'tenant_id' => (string) Tenant::current()->getKey(),
+            'parent_type' => 'account_profile',
+            'parent_id' => (string) $profile->_id,
+            'group_key' => 'rollback',
+            'doc_type' => 'group_head',
+        ]);
+        $database->selectCollection('account_profile_nested_public_member_projection')->insertOne([
+            '_id' => 'map-poi-rollback-public-'.(string) $profile->_id,
+            'tenant_id' => (string) Tenant::current()->getKey(),
+            'parent_profile_id' => (string) $profile->_id,
+            'group_id' => 'rollback',
+        ]);
+        $database->selectCollection((new MapPoi)->getTable())->insertOne([
+            '_id' => 'map-poi-rollback-map-'.(string) $profile->_id,
+            'projection_key' => 'map-poi-rollback-map-'.(string) $profile->_id,
+            'ref_type' => 'account_profile',
+            'ref_id' => new ObjectId((string) $profile->_id),
+        ]);
+        $mapPois = Mockery::mock(MapPoiProjectionService::class);
+        $mapPois->shouldReceive('deleteByRefsWithinTransaction')
+            ->once()
+            ->andThrow(new \RuntimeException('MapPoi transactional delete failed.'));
+        $this->app->instance(MapPoiProjectionService::class, $mapPois);
+
+        $this->expectException(\RuntimeException::class);
+        try {
+            $this->app->make(CurrentTenantAccountDeletionService::class)->delete(
+                $this->resolveCanonicalTenant($this->tenant),
+                $target,
+            );
+        } finally {
+            $this->assertNotNull(AccountProfile::query()->find((string) $profile->_id));
+            $this->assertNotNull($database->selectCollection('accounts_nested')->findOne(['_id' => $nestedId]));
+            $this->assertNotNull($database->selectCollection('account_profile_nested_public_member_projection')->findOne([
+                'parent_profile_id' => (string) $profile->_id,
+            ]));
+            $this->assertNotNull($database->selectCollection((new MapPoi)->getTable())->findOne([
+                'ref_type' => 'account_profile',
+                'ref_id' => new ObjectId((string) $profile->_id),
+            ]));
+        }
     }
 
     /**
