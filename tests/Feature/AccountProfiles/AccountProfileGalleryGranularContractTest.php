@@ -36,6 +36,8 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
 
     private Account $account;
 
+    private int $transientProviderAttempts = 0;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -48,13 +50,24 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:create', 'account-users:update', 'account-users:view']);
         AccountProfile::query()->delete();
         TenantProfileType::query()->delete();
-        Http::fake(fn (Request $request) => str_contains($request->url(), 'fallback001')
-            ? Http::response([], 503)
-            : Http::response(
+        Http::fake(function (Request $request) {
+            if (str_contains($request->url(), 'fallback001')) {
+                return Http::response([], 503);
+            }
+            if (str_contains($request->url(), 'transient01')) {
+                $this->transientProviderAttempts++;
+
+                return $this->transientProviderAttempts === 1
+                    ? Http::response([], 503)
+                    : Http::response(['width' => 113, 'height' => 200]);
+            }
+
+            return Http::response(
                 str_contains($request->url(), 'HKIZFC5HFtc')
                     ? ['width' => 113, 'height' => 200]
                     : ['width' => 200, 'height' => 113],
-            ));
+            );
+        });
         [$this->account] = $this->seedAccountWithRole(['account-users:view', 'account-users:create', 'account-users:update', 'account-users:delete']);
         TenantProfileType::query()->create(['type' => 'venue', 'label' => 'Venue', 'allowed_taxonomies' => [], 'capabilities' => ['is_queryable' => true, 'is_publicly_navigable' => true, 'is_favoritable' => true, 'is_publicly_discoverable' => true, 'is_poi_enabled' => false, 'has_events' => true, 'has_gallery' => true]]);
     }
@@ -84,6 +97,19 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         $this->patchJson($this->url($profile)."/gallery/groups/{$group}/items/{$item}", [
             'youtube_url' => 'https://www.youtube.com/watch?v=fallback001',
         ])->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.player_aspect_ratio', 1.777778);
+    }
+
+    public function test_youtube_player_geometry_retries_one_transient_provider_failure(): void
+    {
+        $profile = $this->profile();
+        $group = $this->postJson($this->url($profile).'/gallery/groups', ['subtitle' => 'Videos'])->json('data.gallery_groups.0.group_id');
+
+        $this->postJson($this->url($profile)."/gallery/groups/{$group}/items", [
+            'type' => 'youtube',
+            'youtube_url' => 'https://www.youtube.com/shorts/transient01',
+        ])->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.player_aspect_ratio', 0.565);
+
+        $this->assertSame(2, $this->transientProviderAttempts);
     }
 
     public function test_granular_reorder_requires_the_full_exact_id_set_and_profile_patch_rejects_gallery(): void

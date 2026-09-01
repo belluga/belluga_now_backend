@@ -17,6 +17,7 @@ final class YoutubeVideoMetadataResolver
             $response = Http::acceptJson()
                 ->connectTimeout(1)
                 ->timeout(2)
+                ->retry(2, 100, throw: false)
                 ->get('https://www.youtube.com/oembed', [
                     'url' => "https://www.youtube.com/shorts/{$videoId}",
                     'format' => 'json',
