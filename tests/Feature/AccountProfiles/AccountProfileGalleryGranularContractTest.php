@@ -14,7 +14,9 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
 use App\Support\Validation\InputConstraints;
+use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -46,6 +48,13 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:create', 'account-users:update', 'account-users:view']);
         AccountProfile::query()->delete();
         TenantProfileType::query()->delete();
+        Http::fake(fn (Request $request) => str_contains($request->url(), 'fallback001')
+            ? Http::response([], 503)
+            : Http::response(
+                str_contains($request->url(), 'HKIZFC5HFtc')
+                    ? ['width' => 113, 'height' => 200]
+                    : ['width' => 200, 'height' => 113],
+            ));
         [$this->account] = $this->seedAccountWithRole(['account-users:view', 'account-users:create', 'account-users:update', 'account-users:delete']);
         TenantProfileType::query()->create(['type' => 'venue', 'label' => 'Venue', 'allowed_taxonomies' => [], 'capabilities' => ['is_queryable' => true, 'is_publicly_navigable' => true, 'is_favoritable' => true, 'is_publicly_discoverable' => true, 'is_poi_enabled' => false, 'has_events' => true, 'has_gallery' => true]]);
     }
@@ -59,6 +68,22 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         $groupId = (string) $group->json('data.gallery_groups.0.group_id');
         $item = $this->postJson($this->url($profile)."/gallery/groups/{$groupId}/items", ['type' => 'youtube', 'description' => 'Clip', 'youtube_url' => 'https://www.youtube.com/shorts/dQw4w9WgXcQ']);
         $item->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.type', 'youtube')->assertJsonPath('data.gallery_groups.0.items.0.youtube_video_id', 'dQw4w9WgXcQ')->assertJsonMissingPath('data.gallery_groups.0.items.0.youtube_url');
+    }
+
+    public function test_youtube_player_geometry_uses_provider_metadata_and_falls_back_without_rejecting_crud(): void
+    {
+        $profile = $this->profile();
+        $group = $this->postJson($this->url($profile).'/gallery/groups', ['subtitle' => 'Videos'])->json('data.gallery_groups.0.group_id');
+        $created = $this->postJson($this->url($profile)."/gallery/groups/{$group}/items", [
+            'type' => 'youtube',
+            'youtube_url' => 'https://www.youtube.com/watch?v=HKIZFC5HFtc',
+        ]);
+        $created->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.player_aspect_ratio', 0.565);
+
+        $item = $created->json('data.gallery_groups.0.items.0.item_id');
+        $this->patchJson($this->url($profile)."/gallery/groups/{$group}/items/{$item}", [
+            'youtube_url' => 'https://www.youtube.com/watch?v=fallback001',
+        ])->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.player_aspect_ratio', 1.777778);
     }
 
     public function test_granular_reorder_requires_the_full_exact_id_set_and_profile_patch_rejects_gallery(): void

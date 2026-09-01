@@ -19,6 +19,7 @@ final class AccountProfileGalleryMutationService
         private readonly AccountProfileManagementService $profiles,
         private readonly AccountProfileMediaService $media,
         private readonly AccountProfileTypeSetProvider $types,
+        private readonly YoutubeVideoMetadataResolver $youtubeMetadata,
     ) {}
 
     /** @return array{max_galleries:int,max_items_per_gallery:int} */
@@ -84,6 +85,7 @@ final class AccountProfileGalleryMutationService
             $item = ['item_id' => Str::lower((string) Str::ulid()), 'type' => $type, 'description' => $this->nullable($input['description'] ?? null), 'order' => count($items)];
             if ($type === 'youtube') {
                 $item['youtube_video_id'] = $this->youtube($input['youtube_url'] ?? null);
+                $item['player_aspect_ratio'] = $this->youtubeMetadata->playerAspectRatio($item['youtube_video_id']);
             } else {
                 $file = $input['image'] ?? null;
                 if (! $file instanceof UploadedFile || ! $file->isValid()) {
@@ -118,6 +120,7 @@ final class AccountProfileGalleryMutationService
             }
             if ($type === 'youtube' && array_key_exists('youtube_url', $input)) {
                 $item['youtube_video_id'] = $this->youtube($input['youtube_url']);
+                $item['player_aspect_ratio'] = $this->youtubeMetadata->playerAspectRatio($item['youtube_video_id']);
             }
             if ($type === 'photo' && array_key_exists('image', $input)) {
                 if (! $input['image'] instanceof UploadedFile || ! $input['image']->isValid()) {

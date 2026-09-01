@@ -196,6 +196,7 @@ final class AccountProfileGalleryService
                         continue;
                     }
                     $item['youtube_video_id'] = $videoId;
+                    $item['player_aspect_ratio'] = $this->normalizePlayerAspectRatio($rawItem['player_aspect_ratio'] ?? null);
                 } else {
                     $version = $this->normalizeStoredVersion($rawItem['version'] ?? null);
                     $item += ['image_url' => $this->mediaService->buildGalleryPublicUrl(
@@ -243,7 +244,7 @@ final class AccountProfileGalleryService
                 'order' => $this->normalizeOrder($rawGroup['order'] ?? null, $groupIndex),
                 'items' => array_values(array_map(
                     static fn (array $item, int $order): array => $item['type'] === 'youtube'
-                        ? ['item_id' => $item['item_id'], 'type' => 'youtube', 'description' => $item['description'], 'order' => $order, 'youtube_video_id' => $item['youtube_video_id']]
+                        ? ['item_id' => $item['item_id'], 'type' => 'youtube', 'description' => $item['description'], 'order' => $order, 'youtube_video_id' => $item['youtube_video_id'], 'player_aspect_ratio' => $item['player_aspect_ratio']]
                         : ['item_id' => $item['item_id'], 'type' => 'photo', 'description' => $item['description'], 'order' => $order, 'image_url' => $item['image_url'], 'thumb_url' => $item['thumb_url'], 'card_url' => $item['card_url'], 'modal_url' => $item['modal_url']],
                     $items,
                     array_keys($items),
@@ -267,6 +268,17 @@ final class AccountProfileGalleryService
             $groups,
             array_keys($groups),
         ));
+    }
+
+    private function normalizePlayerAspectRatio(mixed $value): float
+    {
+        if (! is_numeric($value)) {
+            return YoutubeVideoMetadataResolver::DEFAULT_ASPECT_RATIO;
+        }
+
+        $ratio = (float) $value;
+
+        return $ratio > 0 ? $ratio : YoutubeVideoMetadataResolver::DEFAULT_ASPECT_RATIO;
     }
 
     /**
