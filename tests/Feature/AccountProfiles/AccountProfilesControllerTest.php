@@ -369,45 +369,28 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_gallery_update_persists_an_outbox_event_and_conflicts_while_deletion_gated(): void
+    public function test_granular_gallery_mutation_persists_an_outbox_event_and_conflicts_while_deletion_gated(): void
     {
-        Storage::fake('public');
-
         $profile = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
             'profile_type' => 'venue',
             'display_name' => 'Outbox Gallery Venue',
             'is_active' => true,
         ]);
-        $commandId = 'u07a-gallery-update-'.uniqid('', true);
-        $url = "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}/gallery";
-        $payload = [
-            '_method' => 'PATCH',
-            'gallery_groups' => json_encode([
-                [
-                    'group_id' => 'main',
-                    'subtitle' => 'Main',
-                    'items' => [
-                        [
-                            'item_id' => 'entry',
-                            'upload' => 'gallery_entry',
-                        ],
-                    ],
-                ],
-            ], JSON_THROW_ON_ERROR),
-            'gallery_entry' => UploadedFile::fake()->image('entry.jpg', 1200, 800),
-        ];
-
-        $this->withHeaders([
-            ...$this->getMultipartHeaders(),
-            'X-Request-Id' => $commandId,
-        ])->post($url, $payload)->assertOk();
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}/gallery/groups";
+        $response = $this->postJson(
+            $url,
+            ['subtitle' => 'Main'],
+            $this->getHeaders(),
+        )->assertOk();
+        $groupId = (string) $response->json('data.gallery_groups.0.group_id');
+        $this->assertNotSame('', $groupId);
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $outbox = DB::connection('tenant')
             ->getDatabase()
             ->selectCollection('account_profile_outbox')
-            ->findOne(['command_id' => $commandId]);
+            ->findOne(['profile_id' => (string) $profile->getKey(), 'operation' => 'upsert']);
         $this->assertNotNull($outbox);
         $this->assertSame('upsert', $outbox['operation'] ?? null);
 
@@ -418,16 +401,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ]);
         $this->account->save();
 
-        $this->withHeaders([
-            ...$this->getMultipartHeaders(),
-            'X-Request-Id' => 'u07a-gallery-gated-'.uniqid('', true),
-        ])->post($url, [
-            '_method' => 'PATCH',
-            'gallery_groups' => json_encode([], JSON_THROW_ON_ERROR),
-        ])->assertConflict();
+        $this->patchJson(
+            "{$url}/{$groupId}",
+            ['subtitle' => 'Must Not Persist'],
+            [...$this->getHeaders(), 'X-Request-Id' => 'u07a-gallery-gated-'.uniqid('', true)],
+        )->assertConflict();
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
-        $this->assertSame('entry', (string) $profile->fresh()->gallery_groups[0]['items'][0]['item_id']);
+        $this->assertSame('Main', (string) $profile->fresh()->gallery_groups[0]['subtitle']);
     }
 
     public function test_profile_lifecycle_gateway_rejects_all_ordinary_mutations_while_account_is_deletion_gated(): void
@@ -4908,43 +4889,41 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertMediaUrlHealthy($createResponse->json('data.account_profile.avatar_url'));
         $this->assertMediaUrlHealthy($createResponse->json('data.account_profile.cover_url'));
 
+        $galleryBaseUrl = "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery/groups";
+        $groupResponse = $this->postJson(
+            $galleryBaseUrl,
+            ['subtitle' => 'Ambientes'],
+            $this->getHeaders(),
+        )->assertOk();
+        $groupId = (string) $groupResponse->json('data.gallery_groups.0.group_id');
+        $this->assertNotSame('', $groupId);
+
         $galleryResponse = $this->withHeaders($this->getMultipartHeaders())->post(
-            "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery",
+            "{$galleryBaseUrl}/{$groupId}/items",
             [
-                '_method' => 'PATCH',
-                'gallery_groups' => json_encode([
-                    [
-                        'group_id' => 'ambientes',
-                        'subtitle' => 'Ambientes',
-                        'items' => [
-                            [
-                                'item_id' => 'hall-principal',
-                                'description' => 'Hall principal',
-                                'upload' => 'upload_hall',
-                            ],
-                        ],
-                    ],
-                ], JSON_THROW_ON_ERROR),
-                'upload_hall' => UploadedFile::fake()->image('hall.jpg', 2200, 1400),
+                'type' => 'photo',
+                'description' => 'Hall principal',
+                'image' => UploadedFile::fake()->image('hall.jpg', 2200, 1400),
             ],
         );
 
         $galleryResponse->assertOk();
-        $galleryResponse->assertJsonPath('data.gallery_groups.0.group_id', 'ambientes');
-        $galleryResponse->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+        $galleryResponse->assertJsonPath('data.gallery_groups.0.group_id', $groupId);
+        $itemId = (string) $galleryResponse->json('data.gallery_groups.0.items.0.item_id');
+        $this->assertNotSame('', $itemId);
 
         $adminShow = $this->getJson(
             "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
             $this->getHeaders()
         );
         $adminShow->assertOk();
-        $adminShow->assertJsonPath('data.gallery_groups.0.group_id', 'ambientes');
-        $adminShow->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+        $adminShow->assertJsonPath('data.gallery_groups.0.group_id', $groupId);
+        $adminShow->assertJsonPath('data.gallery_groups.0.items.0.item_id', $itemId);
 
         $publicShow = $this->getJson("{$this->base_api_tenant}account_profiles/{$slug}");
         $publicShow->assertOk();
-        $publicShow->assertJsonPath('data.gallery_groups.0.group_id', 'ambientes');
-        $publicShow->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+        $publicShow->assertJsonPath('data.gallery_groups.0.group_id', $groupId);
+        $publicShow->assertJsonPath('data.gallery_groups.0.items.0.item_id', $itemId);
         $publicShow->assertJsonPath(
             'data.gallery_groups.0.items.0.modal_url',
             $adminShow->json('data.gallery_groups.0.items.0.modal_url')
@@ -4962,7 +4941,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             collect($files)->first(fn (string $path): bool => str_contains(basename($path), 'cover.'))
         );
         $this->assertNotEmpty(
-            collect($files)->first(fn (string $path): bool => str_contains(basename($path), 'gallery-item-hall-principal.'))
+            collect($files)->first(fn (string $path): bool => str_contains(basename($path), "gallery-item-{$itemId}."))
         );
     }
 
@@ -5523,28 +5502,25 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $profileId = (string) $profile->_id;
         $this->assertNotEmpty($profileId);
 
+        $galleryBaseUrl = "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery/groups";
+        $groupResponse = $this->postJson(
+            $galleryBaseUrl,
+            ['subtitle' => 'Ambientes'],
+            $this->getHeaders(),
+        )->assertOk();
+        $groupId = (string) $groupResponse->json('data.gallery_groups.0.group_id');
+        $this->assertNotSame('', $groupId);
+
         $seedGalleryResponse = $this->withHeaders($this->getMultipartHeaders())->post(
-            "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery",
+            "{$galleryBaseUrl}/{$groupId}/items",
             [
-                '_method' => 'PATCH',
-                'gallery_groups' => json_encode([
-                    [
-                        'group_id' => 'ambientes',
-                        'subtitle' => 'Ambientes',
-                        'items' => [
-                            [
-                                'item_id' => 'hall-principal',
-                                'description' => 'Hall principal',
-                                'upload' => 'upload_hall',
-                            ],
-                        ],
-                    ],
-                ], JSON_THROW_ON_ERROR),
-                'upload_hall' => UploadedFile::fake()->image('hall.jpg', 2200, 1400),
+                'type' => 'photo',
+                'description' => 'Hall principal',
+                'image' => UploadedFile::fake()->image('hall.jpg', 2200, 1400),
             ],
         );
         $seedGalleryResponse->assertOk();
-        $seedGalleryResponse->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+        $this->assertNotSame('', (string) $seedGalleryResponse->json('data.gallery_groups.0.items.0.item_id'));
 
         $updateResponse = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
@@ -5557,16 +5533,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $updateResponse->assertOk();
         $updateResponse->assertJsonPath('data.display_name', 'Renamed Journey Venue');
 
-        $clearGalleryResponse = $this->withHeaders($this->getMultipartHeaders())->post(
-            "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery",
-            [
-                '_method' => 'PATCH',
-                'gallery_groups' => json_encode([], JSON_THROW_ON_ERROR),
-            ],
+        $clearGalleryResponse = $this->deleteJson(
+            "{$galleryBaseUrl}/{$groupId}",
+            [],
+            $this->getHeaders(),
         );
 
         $clearGalleryResponse->assertOk();
-        $clearGalleryResponse->assertJsonPath('data.display_name', 'Renamed Journey Venue');
         $clearGalleryResponse->assertJsonPath('data.gallery_groups', []);
 
         $adminShow = $this->getJson(
