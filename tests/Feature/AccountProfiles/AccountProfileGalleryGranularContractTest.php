@@ -4,7 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\AccountProfiles;
 
+use App\Application\AccountProfiles\AccountProfileGalleryMutationService;
+use App\Application\AccountProfiles\AccountProfileGalleryService;
+use App\Application\AccountProfiles\AccountProfileManagementService;
+use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
+use App\Application\AccountProfiles\YoutubeVideoMetadataResolver;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Integration\Events\AccountProfileResolverAdapter;
@@ -17,7 +22,10 @@ use App\Support\Validation\InputConstraints;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
+use RuntimeException;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -79,8 +87,22 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         $group->assertOk()->assertJsonPath('data.gallery_capabilities.max_galleries', 6)->assertJsonCount(1, 'data.gallery_groups');
         $this->getJson($this->url($profile))->assertOk()->assertJsonPath('data.gallery_capabilities.max_items_per_gallery', 12);
         $groupId = (string) $group->json('data.gallery_groups.0.group_id');
-        $item = $this->postJson($this->url($profile)."/gallery/groups/{$groupId}/items", ['type' => 'youtube', 'description' => 'Clip', 'youtube_url' => 'https://www.youtube.com/shorts/dQw4w9WgXcQ']);
-        $item->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.type', 'youtube')->assertJsonPath('data.gallery_groups.0.items.0.youtube_video_id', 'dQw4w9WgXcQ')->assertJsonMissingPath('data.gallery_groups.0.items.0.youtube_url');
+        $item = $this->postJson($this->url($profile)."/gallery/groups/{$groupId}/items", ['type' => 'youtube', 'title' => 'Um minuto na praia', 'description' => 'Clip', 'youtube_url' => 'https://www.youtube.com/shorts/dQw4w9WgXcQ']);
+        $item->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.type', 'youtube')->assertJsonPath('data.gallery_groups.0.items.0.title', 'Um minuto na praia')->assertJsonPath('data.gallery_groups.0.items.0.youtube_video_id', 'dQw4w9WgXcQ')->assertJsonMissingPath('data.gallery_groups.0.items.0.youtube_url');
+    }
+
+    public function test_aggregate_gallery_replacement_route_is_not_available(): void
+    {
+        $profile = $this->profile();
+        $url = $this->url($profile).'/gallery';
+
+        $this->patchJson($url, [
+            'gallery_groups' => [],
+        ])->assertNotFound();
+        $this->withHeaders(['Accept' => 'application/json'])->post($url, [
+            '_method' => 'PATCH',
+            'gallery_groups' => [],
+        ])->assertNotFound();
     }
 
     public function test_youtube_player_geometry_uses_provider_metadata_and_falls_back_without_rejecting_crud(): void
@@ -203,14 +225,18 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         $this->getJson($this->url($profile).'/missing')->assertNotFound();
     }
 
-    public function test_item_patch_preserves_or_clears_description_and_rejects_type_or_provider_changes(): void
+    public function test_item_patch_preserves_or_clears_title_and_description_and_rejects_type_or_provider_changes(): void
     {
         $profile = $this->profile();
         $group = $this->postJson($this->url($profile).'/gallery/groups', ['subtitle' => 'Mixed'])->json('data.gallery_groups.0.group_id');
-        $item = $this->postJson($this->url($profile)."/gallery/groups/{$group}/items", ['type' => 'youtube', 'description' => 'Original', 'youtube_url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'])->json('data.gallery_groups.0.items.0.item_id');
+        $item = $this->postJson($this->url($profile)."/gallery/groups/{$group}/items", ['type' => 'youtube', 'title' => 'Original title', 'description' => 'Original', 'youtube_url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'])->json('data.gallery_groups.0.items.0.item_id');
         $base = $this->url($profile)."/gallery/groups/{$group}/items/{$item}";
-        $this->patchJson($base, ['type' => 'youtube'])->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.description', 'Original');
-        $this->patchJson($base, [])->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.description', 'Original');
+        $this->patchJson($base, ['type' => 'youtube'])->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.title', 'Original title')->assertJsonPath('data.gallery_groups.0.items.0.description', 'Original');
+        $this->patchJson($base, [])->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.title', 'Original title')->assertJsonPath('data.gallery_groups.0.items.0.description', 'Original');
+        $this->patchJson($base, ['title' => 'Updated title'])->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.title', 'Updated title')->assertJsonPath('data.gallery_groups.0.items.0.description', 'Original');
+        $this->patchJson($base, ['title' => null])->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.title', null);
+        $this->patchJson($base, ['title' => ''])->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.title', null);
+        $this->patchJson($base, ['title' => str_repeat('x', 256)])->assertStatus(422)->assertJsonValidationErrors(['title']);
         $this->patchJson($base, ['description' => null])->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.description', null);
         $this->patchJson($base, ['description' => ''])->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.description', null);
         $this->patchJson($base, ['type' => 'photo'])->assertStatus(422)->assertJsonValidationErrors(['type']);
@@ -249,15 +275,104 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
             'image' => UploadedFile::fake()->image('unsupported.gif'),
         ])->assertStatus(422)->assertJsonValidationErrors(['image']);
 
-        $item = $this->withHeaders(['Accept' => 'application/json'])->post($itemsUrl, [
+        $created = $this->withHeaders(['Accept' => 'application/json'])->post($itemsUrl, [
             'type' => 'photo',
+            'title' => 'Vista principal',
             'image' => UploadedFile::fake()->image('valid.png'),
-        ])->assertOk()->json('data.gallery_groups.0.items.0.item_id');
+        ])->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.title', 'Vista principal');
+        $item = $created->json('data.gallery_groups.0.items.0.item_id');
+
+        $this->getJson($this->url($profile))
+            ->assertOk()
+            ->assertJsonPath('data.gallery_groups.0.items.0.title', 'Vista principal');
+        $this->getJson($this->base_api_tenant.'account_profiles/'.$profile->slug, $this->getHeaders())
+            ->assertOk()
+            ->assertJsonPath('data.gallery_groups.0.items.0.title', 'Vista principal');
 
         $this->withHeaders(['Accept' => 'application/json'])->post("{$itemsUrl}/{$item}", [
             '_method' => 'PATCH',
             'image' => UploadedFile::fake()->image('replacement.jpg')->size(InputConstraints::IMAGE_MAX_KB + 1),
         ])->assertStatus(422)->assertJsonValidationErrors(['image']);
+    }
+
+    public function test_group_delete_rollback_restores_photos_from_the_authoritative_transaction_state(): void
+    {
+        Storage::fake('public');
+        $stale = $this->profile();
+        $stale->gallery_groups = [[
+            'group_id' => 'target',
+            'subtitle' => 'Target',
+            'order' => 0,
+            'items' => [[
+                'item_id' => 'old-photo',
+                'type' => 'photo',
+                'order' => 0,
+            ]],
+        ]];
+        $authoritative = clone $stale;
+        $authoritative->gallery_groups = [[
+            'group_id' => 'target',
+            'subtitle' => 'Target',
+            'order' => 0,
+            'items' => [
+                ['item_id' => 'old-photo', 'type' => 'photo', 'order' => 0],
+                ['item_id' => 'new-photo', 'type' => 'photo', 'order' => 1],
+            ],
+        ]];
+
+        $baseUrl = 'https://tenant-zeta.test';
+        $media = app(AccountProfileMediaService::class);
+        $media->storeGalleryUpload($baseUrl, $authoritative, 'old-photo', UploadedFile::fake()->image('old.jpg'));
+        $media->storeGalleryUpload($baseUrl, $authoritative, 'new-photo', UploadedFile::fake()->image('new.jpg'));
+        $before = collect(Storage::disk('public')->allFiles())
+            ->mapWithKeys(static fn (string $path): array => [$path => Storage::disk('public')->get($path)])
+            ->all();
+        $this->assertNotEmpty($before);
+
+        $profiles = Mockery::mock(AccountProfileManagementService::class);
+        $profiles->shouldReceive('update')->once()->andReturnUsing(
+            static function (
+                AccountProfile $profile,
+                array $attributes,
+                ?string $commandId,
+                ?\Closure $mutateWithinTransaction,
+                array $fingerprintSupplement,
+                bool $dispatchOutboxImmediately,
+                ?\Closure $compensateKnownRollback,
+                bool $useAggregateRevisionCas,
+            ) use ($authoritative): AccountProfile {
+                try {
+                    $firstAttempt = clone $authoritative;
+                    $mutateWithinTransaction?->__invoke($firstAttempt);
+                    $secondAttempt = clone $authoritative;
+                    $mutateWithinTransaction?->__invoke($secondAttempt);
+                    throw new RuntimeException('Forced rollback after retried authoritative gallery mutation.');
+                } catch (RuntimeException $exception) {
+                    $compensateKnownRollback?->__invoke();
+
+                    throw $exception;
+                }
+            },
+        );
+        $mutations = new AccountProfileGalleryMutationService(
+            new AccountProfileGalleryService($media, app(AccountProfileTypeSetProvider::class)),
+            $profiles,
+            $media,
+            app(AccountProfileTypeSetProvider::class),
+            app(YoutubeVideoMetadataResolver::class),
+        );
+
+        try {
+            $mutations->deleteGroup($stale, 'target', $baseUrl);
+            $this->fail('The forced rollback must escape the mutation service.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Forced rollback after retried authoritative gallery mutation.', $exception->getMessage());
+        }
+
+        $after = collect(Storage::disk('public')->allFiles())
+            ->mapWithKeys(static fn (string $path): array => [$path => Storage::disk('public')->get($path)])
+            ->all();
+        $this->assertSame($before, $after);
     }
 
     public function test_account_store_and_patch_reject_gallery_but_an_unrelated_patch_preserves_it(): void
@@ -266,7 +381,9 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         $profile->gallery_groups = [['group_id' => 'retained', 'subtitle' => 'Retained', 'order' => 0, 'items' => []]];
         $profile->save();
         $this->patchJson($this->url($profile), ['gallery_groups' => []])->assertStatus(422)->assertJsonValidationErrors(['gallery_groups']);
-        $this->patchJson($this->url($profile), ['display_name' => 'Preserved Gallery'])->assertOk();
+        $this->patchJson($this->url($profile), ['display_name' => 'Preserved Gallery'])
+            ->assertOk()
+            ->assertJsonMissingPath('data.gallery_capabilities');
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame('retained', AccountProfile::query()->findOrFail($profile->getKey())->gallery_groups[0]['group_id']);
         $this->postJson($this->base_tenant_api_admin.'account_profiles', ['gallery_groups' => [['group_id' => 'obsolete']]])

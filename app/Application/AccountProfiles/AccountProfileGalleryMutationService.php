@@ -63,6 +63,16 @@ final class AccountProfileGalleryMutationService
                 }
             }
             array_splice($groups, $index, 1);
+        }, function (array $groups) use ($id): array {
+            $index = $this->groupIndex($groups, $id);
+
+            return array_values(array_filter(array_map(
+                static fn (mixed $item): string => is_array($item)
+                    && ($item['type'] ?? 'photo') === 'photo'
+                    ? (string) ($item['item_id'] ?? '')
+                    : '',
+                $this->array($groups[$index]['items'] ?? []),
+            )));
         }, $baseUrl);
     }
 
@@ -75,14 +85,16 @@ final class AccountProfileGalleryMutationService
     /** @param array<string,mixed> $input @return array<int,array<string,mixed>> */
     public function createItem(AccountProfile $profile, string $groupId, array $input, string $baseUrl): array
     {
-        return $this->change($profile, function (array &$groups) use ($groupId, $input, $profile, $baseUrl): void {
+        $type = $this->type($input['type'] ?? null);
+        $itemId = Str::lower((string) Str::ulid());
+
+        return $this->change($profile, function (array &$groups) use ($groupId, $input, $profile, $baseUrl, $type, $itemId): void {
             $group = $this->groupIndex($groups, $groupId);
             $items = $this->array($groups[$group]['items'] ?? []);
             if (count($items) >= $this->capabilities()['max_items_per_gallery']) {
                 $this->fail('gallery_capabilities.max_items_per_gallery', 'Gallery item capacity has been reached.');
             }
-            $type = $this->type($input['type'] ?? null);
-            $item = ['item_id' => Str::lower((string) Str::ulid()), 'type' => $type, 'description' => $this->nullable($input['description'] ?? null), 'order' => count($items)];
+            $item = ['item_id' => $itemId, 'type' => $type, 'title' => $this->nullable($input['title'] ?? null), 'description' => $this->nullable($input['description'] ?? null), 'order' => count($items)];
             if ($type === 'youtube') {
                 $item['youtube_video_id'] = $this->youtube($input['youtube_url'] ?? null);
                 $item['player_aspect_ratio'] = $this->youtubeMetadata->playerAspectRatio($item['youtube_video_id']);
@@ -94,7 +106,7 @@ final class AccountProfileGalleryMutationService
             }
             $items[] = $item;
             $groups[$group]['items'] = $items;
-        }, $baseUrl);
+        }, $type === 'photo' ? [$itemId] : [], $baseUrl);
     }
 
     /** @param array<string,mixed> $input @return array<int,array<string,mixed>> */
@@ -118,6 +130,9 @@ final class AccountProfileGalleryMutationService
             if (array_key_exists('description', $input)) {
                 $item['description'] = $this->nullable($input['description']);
             }
+            if (array_key_exists('title', $input)) {
+                $item['title'] = $this->nullable($input['title']);
+            }
             if ($type === 'youtube' && array_key_exists('youtube_url', $input)) {
                 $item['youtube_video_id'] = $this->youtube($input['youtube_url']);
                 $item['player_aspect_ratio'] = $this->youtubeMetadata->playerAspectRatio($item['youtube_video_id']);
@@ -134,7 +149,7 @@ final class AccountProfileGalleryMutationService
             }
             $items[$index] = $item;
             $groups[$group]['items'] = $items;
-        }, $baseUrl);
+        }, array_key_exists('image', $input) ? [$itemId] : [], $baseUrl);
     }
 
     /** @return array<int,array<string,mixed>> */
@@ -148,7 +163,7 @@ final class AccountProfileGalleryMutationService
                 $this->media->removeGalleryUpload($profile, $itemId, $baseUrl);
             } array_splice($items, $index, 1);
             $groups[$group]['items'] = $items;
-        }, $baseUrl);
+        }, [$itemId], $baseUrl);
     }
 
     /** @return array<int,array<string,mixed>> */
@@ -160,15 +175,31 @@ final class AccountProfileGalleryMutationService
         });
     }
 
-    /** @return array<int,array<string,mixed>> */
-    private function change(AccountProfile $profile, callable $mutation, ?string $baseUrl = null): array
-    {
+    /**
+     * @param  array<int, string>|callable(array<int, array<string, mixed>>): array<int, string>  $affectedMediaItemIds
+     * @return array<int,array<string,mixed>>
+     */
+    private function change(
+        AccountProfile $profile,
+        callable $mutation,
+        array|callable $affectedMediaItemIds = [],
+        ?string $baseUrl = null,
+    ): array {
         if (! $this->isAllowed($profile)) {
             $this->fail('gallery_groups', 'Gallery is not enabled for this profile type.');
         }
-        $backup = $baseUrl === null ? null : $this->media->captureGalleryMutationBackup($profile, $baseUrl);
-        $updated = $this->profiles->update($profile, [], mutateWithinTransaction: function (AccountProfile $stored) use ($mutation): void {
+        $resolveAffectedItemsWithinTransaction = is_callable($affectedMediaItemIds);
+        $backup = $baseUrl === null || $resolveAffectedItemsWithinTransaction || $affectedMediaItemIds === []
+            ? null
+            : $this->media->captureGalleryItemMutationBackup($profile, $affectedMediaItemIds, $baseUrl);
+        $updated = $this->profiles->update($profile, [], mutateWithinTransaction: function (AccountProfile $stored) use ($mutation, $affectedMediaItemIds, $baseUrl, $resolveAffectedItemsWithinTransaction, &$backup): void {
             $groups = $this->array($stored->gallery_groups ?? []);
+            if ($baseUrl !== null && $resolveAffectedItemsWithinTransaction && $backup === null) {
+                $resolvedItemIds = $affectedMediaItemIds($groups);
+                $backup = $resolvedItemIds === []
+                    ? null
+                    : $this->media->captureGalleryItemMutationBackup($stored, $resolvedItemIds, $baseUrl);
+            }
             $mutation($groups);
             foreach ($groups as $groupOrder => &$group) {
                 $group['order'] = $groupOrder;
@@ -179,7 +210,11 @@ final class AccountProfileGalleryMutationService
                 } unset($item);
             } unset($group);
             $stored->gallery_groups = $groups;
-        }, compensateKnownRollback: $backup === null ? null : static fn (): mixed => $backup->restore(), useAggregateRevisionCas: false);
+        }, compensateKnownRollback: $baseUrl === null || (! $resolveAffectedItemsWithinTransaction && $backup === null)
+            ? null
+            : static function () use (&$backup): void {
+                $backup?->restore();
+            }, useAggregateRevisionCas: false);
 
         return $this->gallery->formatForRead($updated, request()->getSchemeAndHttpHost());
     }
