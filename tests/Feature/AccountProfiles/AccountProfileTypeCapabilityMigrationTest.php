@@ -211,6 +211,49 @@ class AccountProfileTypeCapabilityMigrationTest extends TestCaseTenant
         }
     }
 
+    public function test_external_links_capability_migration_backfills_explicit_false_without_type_defaults(): void
+    {
+        $collection = $this->profileTypesCollection();
+        $collection->insertMany([
+            ['type' => 'personal'],
+            ['type' => 'artist', 'capabilities' => ['has_external_links' => null]],
+            ['type' => 'venue', 'capabilities' => ['has_external_links' => 'invalid']],
+            ['type' => 'custom', 'capabilities' => ['has_external_links' => true]],
+        ]);
+
+        $this->runExternalLinksCapabilityMigration();
+
+        $this->assertFalse($this->capabilitiesFor('personal')['has_external_links']);
+        $this->assertFalse($this->capabilitiesFor('artist')['has_external_links']);
+        $this->assertFalse($this->capabilitiesFor('venue')['has_external_links']);
+        $this->assertTrue($this->capabilitiesFor('custom')['has_external_links']);
+
+        $this->runExternalLinksCapabilityMigration();
+
+        $this->assertTrue($this->capabilitiesFor('custom')['has_external_links']);
+    }
+
+    public function test_external_links_capability_migration_provisions_exact_manifest_index(): void
+    {
+        $this->dropProfileTypeIndexesExceptPrimaryKey();
+
+        $this->runExternalLinksCapabilityMigration();
+
+        $definition = collect((new AccountProfileTypeIndexManifest)->definitions())
+            ->firstWhere('id', 'C-17');
+        $this->assertIsArray($definition);
+        $this->assertSame('idx_account_profile_types_capability_has_external_links_v1', $definition['name']);
+        $this->assertSame(['capabilities.has_external_links' => 1], $definition['keys']);
+        $this->assertSame(['type' => 1], $definition['projection']);
+        $this->assertSame(['locale' => 'simple'], $definition['collation']);
+        $this->assertNull($definition['partial_filter']);
+
+        $index = $this->profileTypeIndexesByName()[$definition['name']] ?? null;
+        $this->assertNotNull($index);
+        $this->assertSame($definition['keys'], $this->arrayFrom($index['key'] ?? []));
+        $this->assertArrayNotHasKey('partialFilterExpression', $index);
+    }
+
     public function test_literal_migration_emits_explicit_simple_collation_for_every_fresh_history_index(): void
     {
         $this->dropProfileTypeIndexesExceptPrimaryKey();
@@ -491,6 +534,15 @@ class AccountProfileTypeCapabilityMigrationTest extends TestCaseTenant
     {
         $migration = require base_path(
             'database/migrations/tenants/2026_07_19_000100_add_account_profile_candidate_discovery_indexes.php',
+        );
+
+        $migration->up();
+    }
+
+    private function runExternalLinksCapabilityMigration(): void
+    {
+        $migration = require base_path(
+            'database/migrations/tenants/2026_09_02_000100_add_external_links_profile_type_capability.php',
         );
 
         $migration->up();

@@ -125,6 +125,39 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
         $this->assertSame(array_keys($this->expectedDefinitions()), array_keys($normalized));
     }
 
+    public function test_external_links_capability_has_no_requirements_or_type_specific_enablement(): void
+    {
+        $catalog = new AccountProfileTypeCapabilityCatalog;
+        $definition = $this->definitionsByKey()[AccountProfileTypeCapabilityCatalog::HAS_EXTERNAL_LINKS];
+
+        $this->assertFalse($definition['default']);
+        $this->assertSame([], $definition['requires']);
+
+        foreach (['', 'custom', 'personal', 'artist', 'venue'] as $type) {
+            $this->assertFalse(
+                $catalog->completeForPersistence($type)[AccountProfileTypeCapabilityCatalog::HAS_EXTERNAL_LINKS],
+                "Profile Type [{$type}] must not receive an implicit external-links enablement.",
+            );
+        }
+    }
+
+    public function test_external_links_runtime_resolution_fails_closed_for_missing_null_and_malformed_values(): void
+    {
+        $catalog = new AccountProfileTypeCapabilityCatalog;
+
+        foreach ([[], ['has_external_links' => null], ['has_external_links' => 1], ['has_external_links' => 'true']] as $capabilities) {
+            $this->assertFalse($catalog->isExplicitlyEnabled(
+                AccountProfileTypeCapabilityCatalog::HAS_EXTERNAL_LINKS,
+                $capabilities,
+            ));
+        }
+
+        $this->assertTrue($catalog->isExplicitlyEnabled(
+            AccountProfileTypeCapabilityCatalog::HAS_EXTERNAL_LINKS,
+            ['has_external_links' => true],
+        ));
+    }
+
     public function test_effective_capability_accessors_use_catalog_dependency_resolution(): void
     {
         $catalog = new AccountProfileTypeCapabilityCatalog;
@@ -366,6 +399,10 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
                 'requires' => [],
             ],
             AccountProfileTypeCapabilityCatalog::HAS_CONTACT_CHANNELS => [
+                'default' => false,
+                'requires' => [],
+            ],
+            AccountProfileTypeCapabilityCatalog::HAS_EXTERNAL_LINKS => [
                 'default' => false,
                 'requires' => [],
             ],

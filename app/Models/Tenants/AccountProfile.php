@@ -35,6 +35,7 @@ class AccountProfile extends Model
         'contact_source_account_profile_id',
         'contact_channels',
         'contact_bubble_channel_id',
+        'external_links',
         'aggregate_revision',
         'bio',
         'content',
@@ -97,6 +98,14 @@ class AccountProfile extends Model
      * @return array<int|string, mixed>
      */
     public function getContactChannelsAttribute(mixed $value): array
+    {
+        return $this->normalizeNestedArray($value);
+    }
+
+    /**
+     * @return array<int|string, mixed>
+     */
+    public function getExternalLinksAttribute(mixed $value): array
     {
         return $this->normalizeNestedArray($value);
     }

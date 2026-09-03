@@ -226,6 +226,13 @@ Route::prefix('account_profiles')
                 Route::patch('/', [AccountProfilesController::class, 'update'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
 
+                Route::post('/external_links', [AccountProfilesController::class, 'storeExternalLink'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+                Route::patch('/external_links/{external_link_id}', [AccountProfilesController::class, 'updateExternalLink'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+                Route::delete('/external_links/{external_link_id}', [AccountProfilesController::class, 'deleteExternalLink'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
                 Route::prefix('/gallery/groups')->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update'])->group(function (): void {
                     Route::post('/', [AccountProfileGalleryController::class, 'createGroup']);
                     Route::patch('/reorder', [AccountProfileGalleryController::class, 'reorderGroups']);

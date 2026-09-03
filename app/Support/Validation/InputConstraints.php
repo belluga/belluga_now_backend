@@ -28,6 +28,8 @@ final class InputConstraints
 
     public const ACCOUNT_PROFILE_GALLERY_KEY_MAX = 64;
 
+    public const ACCOUNT_PROFILE_EXTERNAL_LINK_URL_MAX = 2048;
+
     public const EMAIL_MAX = 255;
 
     public const EMAIL_ARRAY_MAX = 10;

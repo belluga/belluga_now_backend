@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Application\AccountProfiles\AccountProfileCandidateDiscoveryService;
+use App\Application\AccountProfiles\AccountProfileExternalLinkService;
 use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileGalleryMutationService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
@@ -17,6 +18,8 @@ use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Http\Api\v1\Requests\AccountProfileCandidatesRequest;
+use App\Http\Api\v1\Requests\AccountProfileExternalLinkStoreRequest;
+use App\Http\Api\v1\Requests\AccountProfileExternalLinkUpdateRequest;
 use App\Http\Api\v1\Requests\AccountProfileNearRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupDeleteRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupLabelPatchRequest;
@@ -46,6 +49,7 @@ class AccountProfilesController extends Controller
         private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
         private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly RuntimeDiscoveryFilterCatalogService $runtimeDiscoveryFilterCatalogService,
+        private readonly AccountProfileExternalLinkService $externalLinks,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -151,6 +155,7 @@ class AccountProfilesController extends Controller
                 $profile,
                 includeAgendaOccurrences: true,
                 publicContactProjection: true,
+                includeExternalLinks: true,
             ),
         ]);
     }
@@ -209,7 +214,11 @@ class AccountProfilesController extends Controller
         );
 
         return response()->json([
-            'data' => $this->formatter->format($profile),
+            'data' => $this->formatter->format(
+                $profile,
+                includeExternalLinks: true,
+                includeExternalLinksLimit: true,
+            ),
         ], 201);
     }
 
@@ -217,7 +226,11 @@ class AccountProfilesController extends Controller
     {
         $profile = $this->profileQueryService->findOrFail($account_profile_id);
 
-        $data = $this->formatter->format($profile);
+        $data = $this->formatter->format(
+            $profile,
+            includeExternalLinks: true,
+            includeExternalLinksLimit: true,
+        );
         $data['gallery_capabilities'] = $this->galleryMutations->capabilities();
 
         return response()->json(['data' => $data]);
@@ -344,8 +357,89 @@ class AccountProfilesController extends Controller
         );
 
         return response()->json([
-            'data' => $this->formatter->format($updated),
+            'data' => $this->formatter->format(
+                $updated,
+                includeExternalLinks: true,
+                includeExternalLinksLimit: true,
+            ),
         ]);
+    }
+
+    public function storeExternalLink(
+        AccountProfileExternalLinkStoreRequest $request,
+        string $tenant_domain,
+        string $account_profile_id,
+    ): JsonResponse {
+        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+        $updated = $this->externalLinks->create(
+            $profile,
+            $request->validated(),
+            $request->header('X-Request-Id'),
+            $this->auditAttributes($request),
+        );
+
+        return response()->json(['data' => $this->formatter->format(
+            $updated,
+            includeExternalLinks: true,
+            includeExternalLinksLimit: true,
+        )], 201);
+    }
+
+    public function updateExternalLink(
+        AccountProfileExternalLinkUpdateRequest $request,
+        string $tenant_domain,
+        string $account_profile_id,
+        string $external_link_id,
+    ): JsonResponse {
+        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+        $updated = $this->externalLinks->update(
+            $profile,
+            $external_link_id,
+            $request->validated(),
+            $request->header('X-Request-Id'),
+            $this->auditAttributes($request),
+        );
+
+        return response()->json(['data' => $this->formatter->format(
+            $updated,
+            includeExternalLinks: true,
+            includeExternalLinksLimit: true,
+        )]);
+    }
+
+    public function deleteExternalLink(
+        Request $request,
+        string $tenant_domain,
+        string $account_profile_id,
+        string $external_link_id,
+    ): JsonResponse {
+        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+        $updated = $this->externalLinks->delete(
+            $profile,
+            $external_link_id,
+            $request->header('X-Request-Id'),
+            $this->auditAttributes($request),
+        );
+
+        return response()->json(['data' => $this->formatter->format(
+            $updated,
+            includeExternalLinks: true,
+            includeExternalLinksLimit: true,
+        )]);
+    }
+
+    /** @return array<string, string> */
+    private function auditAttributes(Request $request): array
+    {
+        $actor = $request->user();
+        if ($actor === null) {
+            return [];
+        }
+
+        return [
+            'updated_by' => (string) $actor->_id,
+            'updated_by_type' => $actor instanceof \App\Models\Landlord\LandlordUser ? 'landlord' : 'tenant',
+        ];
     }
 
     public function destroy(string $tenant_domain, string $account_profile_id): JsonResponse
@@ -362,7 +456,11 @@ class AccountProfilesController extends Controller
         $restored = $this->profileService->restore($profile, request()->header('X-Request-Id'));
 
         return response()->json([
-            'data' => $this->formatter->format($restored),
+            'data' => $this->formatter->format(
+                $restored,
+                includeExternalLinks: true,
+                includeExternalLinksLimit: true,
+            ),
         ]);
     }
 

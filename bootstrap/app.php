@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\AccountProfileExternalLinksCapabilityDisabledException;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
@@ -211,6 +212,17 @@ return Application::configure(basePath: dirname(__DIR__))
             return response()->json([
                 'message' => 'A concurrency conflict occurred. Please try again.',
             ], 409);
+        });
+        $exceptions->renderable(function (AccountProfileExternalLinksCapabilityDisabledException $e, Request $request) use ($isApiRequest) {
+            if (! $isApiRequest($request)) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => $e->getMessage(),
+                'errors' => $e->errors(),
+                'code' => AccountProfileExternalLinksCapabilityDisabledException::ERROR_CODE,
+            ], 422);
         });
         $exceptions->renderable(function (NotFoundHttpException $e) {
             return response()->json(['message' => 'Resource you are looking for was not found.'], 404);

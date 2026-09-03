@@ -133,6 +133,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                     'is_poi_enabled' => true,
                     'is_reference_location_enabled' => true,
                     'has_nested_profile_groups' => true,
+                    'has_external_links' => true,
                 ],
             ],
             $this->getHeaders()
@@ -146,6 +147,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
         $response->assertJsonPath('data.capabilities.is_reference_location_enabled', true);
         $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
+        $response->assertJsonPath('data.capabilities.has_external_links', true);
         $response->assertJsonPath('data.poi_visual.mode', 'icon');
         $response->assertJsonPath('data.poi_visual.icon', 'place');
         $response->assertJsonPath('data.poi_visual.color', '#FF8800');
@@ -673,6 +675,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 'is_poi_enabled' => true,
                 'has_events' => true,
                 'has_nested_profile_groups' => false,
+                'has_external_links' => false,
             ],
         ]);
 
@@ -681,6 +684,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             [
                 'capabilities' => [
                     'has_nested_profile_groups' => true,
+                    'has_external_links' => true,
                 ],
             ],
             $this->getHeaders()
@@ -692,6 +696,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
         $response->assertJsonPath('data.capabilities.has_events', true);
         $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
+        $response->assertJsonPath('data.capabilities.has_external_links', true);
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
@@ -700,6 +705,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $this->assertTrue((bool) ($model->capabilities['is_poi_enabled'] ?? false));
         $this->assertTrue((bool) ($model->capabilities['has_events'] ?? false));
         $this->assertTrue((bool) ($model->capabilities['has_nested_profile_groups'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['has_external_links'] ?? false));
     }
 
     public function test_profile_type_map_poi_projection_impact_returns_projection_count(): void

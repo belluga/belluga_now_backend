@@ -26,6 +26,7 @@ class AccountProfileFormatterService
         private readonly AccountProfileContactChannelsService $contactChannelsService,
         private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
         private readonly RichTextReadCanonicalizer $richTextReadCanonicalizer,
+        private readonly AccountProfileExternalLinkService $externalLinks,
     ) {}
 
     /**
@@ -35,6 +36,8 @@ class AccountProfileFormatterService
         AccountProfile $profile,
         bool $includeAgendaOccurrences = false,
         bool $publicContactProjection = false,
+        bool $includeExternalLinks = false,
+        bool $includeExternalLinksLimit = false,
     ): array {
         $baseUrl = request()->getSchemeAndHttpHost();
         $account = Account::query()->where('_id', $profile->account_id)->first();
@@ -93,6 +96,16 @@ class AccountProfileFormatterService
             'updated_at' => $profile->updated_at?->toJSON(),
             'deleted_at' => $profile->deleted_at?->toJSON(),
         ];
+
+        if ($includeExternalLinks && $this->externalLinks->isAllowedForRead($profile)) {
+            $formattedExternalLinks = $this->externalLinks->formatForRead($profile);
+            if ($includeExternalLinksLimit || $formattedExternalLinks !== []) {
+                $payload['external_links'] = $formattedExternalLinks;
+            }
+            if ($includeExternalLinksLimit) {
+                $payload['external_links_limit'] = $this->externalLinks->currentLimit($profile);
+            }
+        }
 
         $payload = [
             ...$payload,

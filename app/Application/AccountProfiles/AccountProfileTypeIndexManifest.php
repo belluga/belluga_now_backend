@@ -24,6 +24,7 @@ final class AccountProfileTypeIndexManifest
         ['id' => 'C-14', 'capability' => 'has_gallery', 'name' => 'idx_account_profile_types_capability_has_gallery_v1'],
         ['id' => 'C-15', 'capability' => 'has_nested_profile_groups', 'name' => 'idx_account_profile_types_capability_has_nested_profile_groups_v1'],
         ['id' => 'C-16', 'capability' => 'has_contact_channels', 'name' => 'idx_account_profile_types_capability_has_contact_channels_v1'],
+        ['id' => 'C-17', 'capability' => 'has_external_links', 'name' => 'idx_account_profile_types_capability_has_external_links_v1'],
     ];
 
     /**

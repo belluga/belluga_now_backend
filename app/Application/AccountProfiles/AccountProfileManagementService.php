@@ -497,6 +497,13 @@ class AccountProfileManagementService
         return $receipt === null ? null : $this->resultForCommandReceipt($receipt, $fingerprint);
     }
 
+    public function hasCommittedCommand(?string $commandId): bool
+    {
+        $normalized = trim((string) $commandId);
+
+        return $normalized !== '' && $this->outboxPublisher->committedReceipt($normalized) !== null;
+    }
+
     public function dispatchOutboxEvent(?string $outboxEventId): void
     {
         if ($outboxEventId !== null) {
