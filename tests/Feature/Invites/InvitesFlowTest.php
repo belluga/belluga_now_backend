@@ -1523,6 +1523,43 @@ class InvitesFlowTest extends TestCaseTenant
         $response->assertJsonPath('invite.taxonomy_terms.0.name', 'Showcase');
     }
 
+    public function test_share_preview_uses_someone_fallback_without_changing_legacy_payload_shape(): void
+    {
+        $code = 'UNKNOWN1234';
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        InviteShareCode::query()->create([
+            'code' => $code,
+            'event_id' => (string) $this->event->_id,
+            'occurrence_id' => $occurrenceId,
+            'inviter_principal' => [
+                'kind' => 'user',
+                'principal_id' => (string) $this->sender->_id,
+            ],
+            'issued_by_user_id' => (string) $this->sender->_id,
+            'account_profile_id' => null,
+            'inviter_display_name' => '',
+            'inviter_avatar_url' => null,
+            'expires_at' => Carbon::now()->addDay(),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}invites/share/{$code}");
+
+        $response->assertOk();
+        $response->assertJsonPath('invite.inviter_name', 'Alguém');
+        $response->assertJsonPath('invite.inviter_candidates.0.display_name', 'Alguém');
+        $response->assertJsonStructure([
+            'invite' => [
+                'inviter_name',
+                'inviter_candidates' => [[
+                    'invite_id',
+                    'display_name',
+                    'avatar_url',
+                    'status',
+                ]],
+            ],
+        ]);
+    }
+
     public function test_share_preview_rejects_unknown_or_expired_code(): void
     {
         $missingResponse = $this->getJson("{$this->base_api_tenant}invites/share/MISSING1234");

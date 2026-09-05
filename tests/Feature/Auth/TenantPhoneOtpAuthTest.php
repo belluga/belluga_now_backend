@@ -62,6 +62,19 @@ class TenantPhoneOtpAuthTest extends TestCaseTenant
         TenantPushSettings::query()->delete();
     }
 
+    public function test_phone_otp_validation_returns_json_without_accept_header(): void
+    {
+        $response = $this->post("{$this->base_api_tenant}auth/otp/challenge", [
+            'phone' => 'invalid',
+            'device_name' => 'android-release-smoke',
+            'delivery_channel' => 'whatsapp',
+        ]);
+
+        $response->assertUnprocessable();
+        $response->assertHeader('Content-Type', 'application/json');
+        $response->assertJsonValidationErrors(['phone']);
+    }
+
     public function test_phone_otp_challenge_defaults_to_whatsapp_primary_webhook(): void
     {
         Queue::fake();

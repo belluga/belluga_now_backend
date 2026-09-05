@@ -197,6 +197,11 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) use ($isApiRequest) {
+        $exceptions->shouldRenderJsonWhen(
+            static fn (Request $request): bool =>
+                $isApiRequest($request) || $request->expectsJson()
+        );
+
         $exceptions->renderable(function (AuthenticationException $e, Request $request) use ($isApiRequest) {
             if (! $isApiRequest($request)) {
                 return null;
