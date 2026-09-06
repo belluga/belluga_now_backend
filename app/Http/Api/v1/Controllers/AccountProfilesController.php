@@ -13,7 +13,6 @@ use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileNameSearchKey;
 use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
 use App\Application\AccountProfiles\AccountProfileQueryService;
-use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Http\Api\v1\Requests\AccountProfileCandidatesRequest;
 use App\Http\Api\v1\Requests\AccountProfileExternalLinkStoreRequest;
@@ -32,7 +31,6 @@ use App\Http\Api\v1\Requests\AccountProfileUpdateRequest;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class AccountProfilesController extends Controller
@@ -51,14 +49,12 @@ class AccountProfilesController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $ownershipStates = AccountOwnershipStateService::allowedStates();
-
         $validated = $request->validate([
             'account_id' => ['sometimes', 'string', 'regex:/^[a-f0-9]{24}$/i'],
             'profile_type' => ['sometimes', 'string', 'max:255'],
-            'ownership_state' => ['sometimes', 'string', Rule::in($ownershipStates)],
+            'ownership_state' => ['prohibited'],
             'filter' => ['sometimes', 'array'],
-            'filter.ownership_state' => ['sometimes', 'string', Rule::in($ownershipStates)],
+            'filter.ownership_state' => ['prohibited'],
             'contact_mode' => ['prohibited'],
             'contact_channels_enabled_only' => ['prohibited'],
             'queryable_only' => ['prohibited'],

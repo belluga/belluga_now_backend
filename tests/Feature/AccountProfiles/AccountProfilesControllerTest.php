@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\AccountProfiles;
 
 use App\Application\AccountProfiles\AccountProfileAgendaOccurrencesService;
+use App\Application\AccountProfiles\AccountProfileContactChannelsService;
 use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileLifecycleService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
@@ -4155,7 +4156,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertCount(0, $partialItems);
     }
 
-    public function test_admin_account_profile_index_filters_by_ownership_state(): void
+    public function test_admin_account_profile_index_rejects_ownership_state_filter(): void
     {
         AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -4181,14 +4182,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         );
 
-        $response->assertStatus(200);
-        $items = collect($response->json('data'));
-        $this->assertTrue(
-            $items->every(static fn (array $item): bool => ($item['ownership_state'] ?? null) === 'unmanaged')
-        );
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['ownership_state']);
     }
 
-    public function test_admin_account_profile_index_filters_by_nested_ownership_state(): void
+    public function test_admin_account_profile_index_rejects_nested_ownership_state_filter(): void
     {
         AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -4220,11 +4218,337 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         );
 
-        $response->assertStatus(200);
-        $items = collect($response->json('data'));
-        $this->assertTrue(
-            $items->every(static fn (array $item): bool => ($item['ownership_state'] ?? null) === 'unmanaged')
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['filter.ownership_state']);
+    }
+
+    public function test_admin_account_profile_index_searches_name_and_semantic_terms_prefixes(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Casa João Silva',
+            'slug' => 'casa-joao-silva',
+            'is_active' => true,
+            'name_search_key' => 'casa joao silva',
+            'search_terms' => ['casa', 'joao', 'silva', 'venue', 'gastronomia', 'italiana'],
+        ]);
+
+        foreach (['sil', 'ven', 'ita'] as $search) {
+            $response = $this->getJson(
+                "{$this->base_tenant_api_admin}account_profiles?search={$search}",
+                $this->getHeaders(),
+            )->assertOk();
+
+            $this->assertContains(
+                (string) $profile->_id,
+                collect($response->json('data'))->pluck('id')->all(),
+                "Expected admin semantic search [{$search}] to match the indexed terms branch.",
+            );
+            $this->assertSame(
+                (string) $this->account->slug,
+                collect($response->json('data'))->first()['account_slug'] ?? null,
+            );
+        }
+
+        $legacyAccount = Account::create([
+            'name' => 'Legacy Search Account',
+            'document' => 'DOC-LEGACY-SEARCH-ACCOUNT',
+        ]);
+        $legacyProfile = AccountProfile::create([
+            'account_id' => (string) $legacyAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Maria Souza',
+            'slug' => 'maria-souza',
+            'is_active' => true,
+        ]);
+        $legacyProfile->forceFill(['name_search_key' => 'maria souza']);
+        $legacyProfile->offsetUnset('search_terms');
+        $legacyProfile->save();
+
+        $legacyResponse = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?search=mar",
+            $this->getHeaders(),
+        )->assertOk();
+        $this->assertContains(
+            (string) $legacyProfile->_id,
+            collect($legacyResponse->json('data'))->pluck('id')->all(),
         );
+
+        $this->account->forceFill([
+            'name' => 'Account Only Secret Token',
+            'slug' => 'account-only-secret-token',
+            'document' => 'DOC-ACCOUNT-ONLY-SECRET-TOKEN',
+        ])->save();
+        $accountOnlyResponse = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?search=secret",
+            $this->getHeaders(),
+        )->assertOk();
+        $this->assertNotContains(
+            (string) $profile->_id,
+            collect($accountOnlyResponse->json('data'))->pluck('id')->all(),
+        );
+    }
+
+    public function test_admin_account_profile_index_keeps_dangling_profile_with_nullable_account_metadata(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => str_repeat('f', 24),
+            'profile_type' => 'venue',
+            'display_name' => 'Dangling Profile',
+            'slug' => 'dangling-profile',
+            'is_active' => true,
+            'name_search_key' => 'dangling profile',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?search=dang",
+            $this->getHeaders(),
+        )->assertOk();
+        $item = collect($response->json('data'))->firstWhere(
+            'id',
+            (string) $profile->_id,
+        );
+
+        $this->assertIsArray($item);
+        $this->assertNull($item['account_slug'] ?? null);
+        $this->assertNull($item['ownership_state'] ?? null);
+    }
+
+    public function test_admin_account_profile_index_uses_id_as_stable_page_tie_breaker(): void
+    {
+        $createdAt = Carbon::parse('2026-09-06T12:00:00Z');
+        $profiles = collect(range(1, 3))->map(function (int $suffix) use ($createdAt): AccountProfile {
+            $account = Account::create([
+                'name' => "Stable page account {$suffix}",
+                'document' => "DOC-STABLE-PAGE-{$suffix}",
+            ]);
+            $profile = AccountProfile::create([
+                'account_id' => (string) $account->_id,
+                'profile_type' => 'venue',
+                'display_name' => "Stable page profile {$suffix}",
+                'is_active' => true,
+                'name_search_key' => "stable page profile {$suffix}",
+            ]);
+            $profile->forceFill([
+                'created_at' => $createdAt,
+                'updated_at' => $createdAt,
+            ])->save();
+
+            return $profile;
+        });
+
+        $expectedIds = $profiles
+            ->map(static fn (AccountProfile $profile): string => (string) $profile->_id)
+            ->sortDesc()
+            ->values()
+            ->all();
+
+        $firstPage = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?search=stable&page=1&per_page=2",
+            $this->getHeaders(),
+        )->assertOk();
+        $secondPage = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?search=stable&page=2&per_page=2",
+            $this->getHeaders(),
+        )->assertOk();
+
+        $actualIds = collect($firstPage->json('data'))
+            ->concat($secondPage->json('data'))
+            ->pluck('id')
+            ->all();
+
+        $this->assertSame($expectedIds, $actualIds);
+        $this->assertCount(3, array_unique($actualIds));
+    }
+
+    public function test_admin_account_profile_index_hydrates_only_the_returned_page(): void
+    {
+        $secondAccount = Account::create([
+            'name' => 'Second bounded account',
+            'document' => 'DOC-BOUNDED-SECOND',
+        ]);
+        $firstProfile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'First bounded profile',
+            'slug' => 'first-bounded-profile',
+            'is_active' => true,
+        ]);
+        $secondProfile = AccountProfile::create([
+            'account_id' => (string) $secondAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Second bounded profile',
+            'slug' => 'second-bounded-profile',
+            'is_active' => true,
+        ]);
+
+        $operator = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Bounded list operator',
+            'phones' => ['+5527999990123'],
+            'credentials' => [],
+        ]);
+        $operator->account_roles = [[
+            'account_id' => (string) $firstProfile->account_id,
+            'slug' => 'admin',
+        ]];
+        $operator->save();
+        $this->assertNotNull($operator->_id);
+
+        $paginator = null;
+        $trace = $this->captureMongoCommands(function () use (&$paginator): void {
+            $paginator = app(AccountProfileQueryService::class)->paginate(
+                ['sort' => 'created_at'],
+                includeArchived: false,
+                perPage: 2,
+            );
+        });
+
+        $this->assertNotNull($paginator);
+        $pageAccountIds = collect($paginator->getCollection())
+            ->pluck('account_id')
+            ->map(static fn (mixed $id): string => (string) $id)
+            ->sort()
+            ->values()
+            ->all();
+        $this->assertSame(
+            collect([(string) $firstProfile->account_id, (string) $secondProfile->account_id])
+                ->sort()
+                ->values()
+                ->all(),
+            $pageAccountIds,
+        );
+        $accountUserFinds = array_values(array_filter(
+            $trace->commands(),
+            static fn (array $entry): bool => $entry['name'] === 'find'
+                && ($entry['command']['find'] ?? null) === 'account_users',
+        ));
+        $this->assertCount(1, $accountUserFinds);
+        $filter = $accountUserFinds[0]['command']['filter'] ?? [];
+        $clauses = isset($filter['$and']) && is_array($filter['$and'])
+            ? $filter['$and']
+            : [$filter];
+        $accountIdClause = collect($clauses)->first(
+            static fn (mixed $clause): bool => is_array($clause)
+                && isset($clause['account_roles.account_id']['$in']),
+        );
+        $candidateIds = is_array($accountIdClause)
+            ? $accountIdClause['account_roles.account_id']['$in']
+            : null;
+        $this->assertEqualsCanonicalizing(
+            $pageAccountIds,
+            array_map(static fn (mixed $id): string => (string) $id, $candidateIds ?? []),
+            json_encode($accountUserFinds, JSON_INVALID_UTF8_SUBSTITUTE),
+        );
+
+        $accountFinds = array_values(array_filter(
+            $trace->commands(),
+            static fn (array $entry): bool => $entry['name'] === 'find'
+                && ($entry['command']['find'] ?? null) === 'accounts',
+        ));
+        $this->assertCount(1, $accountFinds);
+        $accountFilter = $accountFinds[0]['command']['filter'] ?? [];
+        $accountClauses = isset($accountFilter['$and']) && is_array($accountFilter['$and'])
+            ? $accountFilter['$and']
+            : [$accountFilter];
+        $accountIdClause = collect($accountClauses)->first(
+            static fn (mixed $clause): bool => is_array($clause)
+                && isset($clause['_id']['$in']),
+        );
+        $hydratedAccountIds = is_array($accountIdClause) ? $accountIdClause['_id']['$in'] : [];
+        $this->assertEqualsCanonicalizing(
+            $pageAccountIds,
+            array_map(static fn (mixed $id): string => (string) $id, $hydratedAccountIds),
+            json_encode($accountFinds, JSON_INVALID_UTF8_SUBSTITUTE),
+        );
+
+        $profileTypeFinds = array_values(array_filter(
+            $trace->commands(),
+            static fn (array $entry): bool => $entry['name'] === 'find'
+                && ($entry['command']['find'] ?? null) === 'account_profile_types',
+        ));
+        $this->assertCount(3, $profileTypeFinds);
+        $contactCapabilityFinds = array_values(array_filter(
+            $profileTypeFinds,
+            static fn (array $entry): bool => ($entry['command']['filter'] ?? null) === [
+                'capabilities.has_contact_channels' => true,
+            ],
+        ));
+        $this->assertCount(1, $contactCapabilityFinds);
+
+        $profileFinds = array_values(array_filter(
+            $trace->commands(),
+            static fn (array $entry): bool => $entry['name'] === 'find'
+                && ($entry['command']['find'] ?? null) === 'account_profiles',
+        ));
+        $this->assertCount(1, $profileFinds);
+    }
+
+    public function test_admin_account_profile_list_batches_mirrored_contact_sources(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+        $source = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Batched contact source',
+            'slug' => 'batched-contact-source',
+            'is_active' => true,
+            'contact_mode' => 'own',
+            'contact_channels' => [[
+                'id' => 'source-email',
+                'type' => 'email',
+                'value' => 'source@example.test',
+            ]],
+        ]);
+        $mirrors = collect([1, 2])->map(function (int $suffix) use ($source): AccountProfile {
+            $account = Account::create([
+                'name' => "Batched mirror account {$suffix}",
+                'document' => "DOC-BATCHED-MIRROR-{$suffix}",
+            ]);
+
+            return AccountProfile::create([
+                'account_id' => (string) $account->_id,
+                'profile_type' => 'venue',
+                'display_name' => "Batched mirror {$suffix}",
+                'slug' => "batched-mirror-{$suffix}",
+                'is_active' => true,
+                'contact_mode' => 'mirrored_account_profile',
+                'contact_source_account_profile_id' => (string) $source->_id,
+            ]);
+        });
+
+        $channelsByProfileId = [];
+        $trace = $this->captureMongoCommands(function () use ($mirrors, &$channelsByProfileId): void {
+            $channelsByProfileId = app(AccountProfileContactChannelsService::class)
+                ->resolveEffectiveContactChannelsByProfileId($mirrors);
+        });
+
+        foreach ($mirrors as $mirror) {
+            $this->assertSame(
+                'source-email',
+                $channelsByProfileId[(string) $mirror->_id][0]['id'] ?? null,
+            );
+        }
+        $profileFinds = array_values(array_filter(
+            $trace->commands(),
+            static fn (array $entry): bool => $entry['name'] === 'find'
+                && ($entry['command']['find'] ?? null) === 'account_profiles',
+        ));
+        $this->assertCount(1, $profileFinds);
+        $filter = $profileFinds[0]['command']['filter'] ?? [];
+        $clauses = isset($filter['$and']) && is_array($filter['$and'])
+            ? $filter['$and']
+            : [$filter];
+        $sourceIdClause = collect($clauses)->first(
+            static fn (mixed $clause): bool => is_array($clause)
+                && isset($clause['_id']['$in']),
+        );
+        $sourceIds = is_array($sourceIdClause) ? $sourceIdClause['_id']['$in'] : [];
+        $this->assertSame([(string) $source->_id], array_map(
+            static fn (mixed $id): string => (string) $id,
+            $sourceIds,
+        ));
     }
 
     public function test_account_profile_types_returns_registry(): void

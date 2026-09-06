@@ -48,25 +48,28 @@ class AccountProfileQueryService extends AbstractQueryService
         unset($queryParams['search']);
 
         if ($search !== '') {
-            $query->where(
-                'name_search_key',
-                new Regex('^'.preg_quote($search, '/'), 'i')
+            $query->whereRaw(
+                AccountProfileSearchV1::mongoOrPredicate(
+                    'name_search_key',
+                    'search_terms',
+                    $search,
+                )
             );
-        }
-
-        $ownershipState = $this->extractOwnershipState($queryParams);
-        if ($ownershipState !== null) {
-            $this->applyOwnershipFilter($query, $ownershipState);
         }
 
         $paginator = $this->buildPaginator(
             $query,
-            $this->withoutOwnershipState($queryParams),
+            $queryParams,
             $includeArchived,
             $perPage
         );
 
         return $this->hydrateOwnershipState($paginator);
+    }
+
+    protected function applyDefaultSort(Builder $query): void
+    {
+        $query->orderByDesc('created_at')->orderByDesc('_id');
     }
 
     public function publicPaginate(array $queryParams, int $perPage = 15): LengthAwarePaginator
@@ -963,20 +966,26 @@ class AccountProfileQueryService extends AbstractQueryService
         ?Account $account = null,
         array $userOperatedLookup = [],
         ?AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy = null,
+        ?array $effectiveContactChannels = null,
     ): array {
         $baseUrl = request()->getSchemeAndHttpHost();
-        $resolvedAccount = $account
-            ?? Account::query()->where('_id', $profile->account_id)->first();
+        // Account hydration is explicitly page-bounded by the caller. A
+        // missing/dangling Account must remain nullable instead of triggering
+        // a per-row fallback query during serialization.
+        $resolvedAccount = $account;
         $slug = trim((string) ($profile->slug ?? ''));
-        $canOpenPublicDetail = $this->canOpenPublicDetailForProfile(
-            $profile,
-            $resolvedAccount,
-            $publicCatalogPolicy,
-        );
+        $canOpenPublicDetail = $resolvedAccount instanceof Account
+            ? $this->canOpenPublicDetailForProfile(
+                $profile,
+                $resolvedAccount,
+                $publicCatalogPolicy,
+            )
+            : false;
 
         return [
             'id' => (string) $profile->_id,
             'account_id' => (string) $profile->account_id,
+            'account_slug' => $resolvedAccount?->slug,
             'profile_type' => $profile->profile_type,
             'display_name' => $profile->display_name,
             'slug' => $profile->slug,
@@ -1018,8 +1027,8 @@ class AccountProfileQueryService extends AbstractQueryService
                     $userOperatedLookup
                 )
                 : null,
-            'effective_contact_channels' => $this->contactChannelsService
-                ->resolveEffectiveContactChannels($profile),
+            'effective_contact_channels' => $effectiveContactChannels
+                ?? $this->contactChannelsService->resolveEffectiveContactChannels($profile),
             'created_at' => $profile->created_at?->toJSON(),
             'updated_at' => $profile->updated_at?->toJSON(),
             'deleted_at' => $profile->deleted_at?->toJSON(),
@@ -1097,60 +1106,6 @@ class AccountProfileQueryService extends AbstractQueryService
             'lat' => (float) $coordinates[1],
             'lng' => (float) $coordinates[0],
         ];
-    }
-
-    private function applyOwnershipFilter(Builder $profileQuery, string $ownershipState): void
-    {
-        $accountQuery = Account::query();
-        $this->ownershipStateService->applyOwnershipFilterToAccountsQuery($accountQuery, $ownershipState);
-
-        $accountIds = $accountQuery
-            ->pluck('_id')
-            ->map(static fn ($id): string => (string) $id)
-            ->values()
-            ->all();
-
-        if ($accountIds === []) {
-            $profileQuery->whereRaw(['_id' => ['$exists' => false]]);
-
-            return;
-        }
-
-        $profileQuery->whereIn('account_id', $accountIds);
-    }
-
-    private function extractOwnershipState(array $queryParams): ?string
-    {
-        $topLevel = $queryParams['ownership_state'] ?? null;
-        if (is_string($topLevel) && trim($topLevel) !== '') {
-            return trim($topLevel);
-        }
-
-        $filter = $queryParams['filter'] ?? null;
-        if (! is_array($filter)) {
-            return null;
-        }
-
-        $filterValue = $filter['ownership_state'] ?? null;
-        if (is_string($filterValue) && trim($filterValue) !== '') {
-            return trim($filterValue);
-        }
-
-        return null;
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function withoutOwnershipState(array $queryParams): array
-    {
-        unset($queryParams['ownership_state']);
-
-        if (isset($queryParams['filter']) && is_array($queryParams['filter'])) {
-            unset($queryParams['filter']['ownership_state']);
-        }
-
-        return $queryParams;
     }
 
     private function applyPublicSearchFilter(Builder $query, string $search): void
@@ -1554,6 +1509,8 @@ class AccountProfileQueryService extends AbstractQueryService
         $userOperatedLookup = $this->ownershipStateService->userOperatedAccountIdLookup(
             array_keys($accountsById)
         );
+        $effectiveContactChannelsByProfileId = $this->contactChannelsService
+            ->resolveEffectiveContactChannelsByProfileId($profiles);
 
         $paginator->setCollection(
             $profiles
@@ -1561,7 +1518,8 @@ class AccountProfileQueryService extends AbstractQueryService
                     fn (AccountProfile $profile): array => $this->format(
                         $profile,
                         $accountsById[(string) $profile->account_id] ?? null,
-                        $userOperatedLookup
+                        $userOperatedLookup,
+                        effectiveContactChannels: $effectiveContactChannelsByProfileId[(string) $profile->getKey()] ?? [],
                     )
                 )
                 ->values()

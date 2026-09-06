@@ -119,23 +119,43 @@ class AccountOwnershipStateService
      */
     public function userOperatedAccountIdLookup(?array $candidateAccountIds = null): array
     {
-        $accountIds = $this->userOperatedAccountIds();
-
         if ($candidateAccountIds !== null) {
             $allowed = [];
             foreach ($candidateAccountIds as $id) {
                 $normalized = trim((string) $id);
-                if ($normalized === '') {
-                    continue;
+                if ($normalized !== '') {
+                    $allowed[$normalized] = true;
                 }
-                $allowed[$normalized] = true;
             }
 
-            $accountIds = array_values(array_filter(
-                $accountIds,
-                static fn (string $id): bool => array_key_exists($id, $allowed)
-            ));
+            if ($allowed === []) {
+                return [];
+            }
+
+            $lookup = [];
+            $rolesPerUser = AccountUser::query()
+                ->whereIn('account_roles.account_id', array_keys($allowed))
+                ->pluck('account_roles')
+                ->all();
+            foreach ($rolesPerUser as $roles) {
+                if (! is_array($roles)) {
+                    continue;
+                }
+                foreach ($roles as $role) {
+                    if (! is_array($role)) {
+                        continue;
+                    }
+                    $accountId = trim((string) ($role['account_id'] ?? ''));
+                    if ($accountId !== '' && isset($allowed[$accountId])) {
+                        $lookup[$accountId] = true;
+                    }
+                }
+            }
+
+            return $lookup;
         }
+
+        $accountIds = $this->userOperatedAccountIds();
 
         $lookup = [];
         foreach ($accountIds as $accountId) {
