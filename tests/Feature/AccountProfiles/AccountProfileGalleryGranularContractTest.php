@@ -416,7 +416,7 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         $this->getJson($this->base_api_tenant.'account_profiles/'.$profile->slug, $this->getHeaders())->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.type', 'photo');
     }
 
-    public function test_event_profile_projection_keeps_photos_omits_youtube_and_honors_gallery_capability(): void
+    public function test_event_profile_projection_keeps_mixed_items_in_order_and_honors_gallery_capability(): void
     {
         $capabilities = [
             'is_queryable' => true,
@@ -444,7 +444,12 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         $resolver = app(AccountProfileResolverAdapter::class);
         $resolved = $resolver->resolvePhysicalHostByProfileId((string) $profile->getKey());
         $this->assertSame('photo', data_get($resolved, 'venue.gallery_groups.0.items.0.type'));
-        $this->assertCount(1, data_get($resolved, 'venue.gallery_groups.0.items', []));
+        $this->assertSame('youtube', data_get($resolved, 'venue.gallery_groups.0.items.1.type'));
+        $this->assertSame('dQw4w9WgXcQ', data_get($resolved, 'venue.gallery_groups.0.items.1.youtube_video_id'));
+        $this->assertCount(2, data_get($resolved, 'venue.gallery_groups.0.items', []));
+        $this->assertArrayNotHasKey('media_path', data_get($resolved, 'venue.gallery_groups.0.items.0', []));
+        $this->assertArrayNotHasKey('version', data_get($resolved, 'venue.gallery_groups.0.items.0', []));
+        $this->assertArrayNotHasKey('youtube_url', data_get($resolved, 'venue.gallery_groups.0.items.1', []));
 
         TenantProfileType::query()->where('type', 'venue')->update(['capabilities' => [...$capabilities, 'has_gallery' => false]]);
         AccountProfileTypeSetProvider::bumpRevision();

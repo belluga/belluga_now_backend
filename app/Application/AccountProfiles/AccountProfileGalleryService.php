@@ -154,6 +154,10 @@ final class AccountProfileGalleryService
      */
     public function formatForPublicDetail(AccountProfile $profile, string $baseUrl): array
     {
+        if ($this->arrayFrom($profile->gallery_groups ?? []) === []) {
+            return [];
+        }
+
         if (! $this->isExposedForProfile($profile)) {
             return [];
         }

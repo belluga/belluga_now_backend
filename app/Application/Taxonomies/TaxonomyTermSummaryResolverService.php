@@ -100,6 +100,44 @@ class TaxonomyTermSummaryResolverService
     }
 
     /**
+     * Resolve snapshots while dropping assignments whose taxonomy or term no
+     * longer exists. Repair jobs use this after a taxonomy mutation so removed
+     * vocabulary cannot remain searchable through an old embedded snapshot.
+     *
+     * @param  array<int, array<string, mixed>>  $terms
+     * @return array<int, array{type: string, value: string, name: string, taxonomy_name: string, label: string}>
+     */
+    public function resolveExisting(array $terms): array
+    {
+        $resolved = $this->resolve($terms);
+        if ($resolved === []) {
+            return [];
+        }
+
+        $taxonomies = $this->taxonomiesBySlug(array_values(array_unique(array_column($resolved, 'type'))));
+        $valuesByTaxonomyId = [];
+        foreach ($resolved as $term) {
+            $taxonomy = $taxonomies[$term['type']] ?? null;
+            if (! $taxonomy) {
+                continue;
+            }
+            $valuesByTaxonomyId[(string) $taxonomy->_id][] = $term['value'];
+        }
+        foreach ($valuesByTaxonomyId as $taxonomyId => $values) {
+            $this->cacheTermNames($taxonomyId, array_values(array_unique($values)));
+        }
+
+        return array_values(array_filter($resolved, function (array $term) use ($taxonomies): bool {
+            $taxonomy = $taxonomies[$term['type']] ?? null;
+            if (! $taxonomy) {
+                return false;
+            }
+
+            return ($this->termNameByTaxonomyAndSlugCache[(string) $taxonomy->_id.':'.$term['value']] ?? null) !== null;
+        }));
+    }
+
+    /**
      * @param  array<int, string>  $slugs
      * @return array<string, Taxonomy|null>
      */

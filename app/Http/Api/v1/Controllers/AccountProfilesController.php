@@ -12,8 +12,6 @@ use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileNameSearchKey;
 use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
-use App\Application\AccountProfiles\AccountProfileNestedGroupService;
-use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
@@ -25,6 +23,7 @@ use App\Http\Api\v1\Requests\AccountProfileNestedGroupDeleteRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupLabelPatchRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersPatchRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersRequest;
+use App\Http\Api\v1\Requests\AccountProfileNestedGroupOrderPatchRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicIndexRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicNestedGroupMembersRequest;
@@ -45,9 +44,7 @@ class AccountProfilesController extends Controller
         private readonly AccountProfileQueryService $profileQueryService,
         private readonly AccountProfileFormatterService $formatter,
         private readonly AccountProfileGalleryMutationService $galleryMutations,
-        private readonly AccountProfileNestedGroupService $nestedGroupService,
         private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
-        private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly RuntimeDiscoveryFilterCatalogService $runtimeDiscoveryFilterCatalogService,
         private readonly AccountProfileExternalLinkService $externalLinks,
     ) {}
@@ -62,10 +59,10 @@ class AccountProfilesController extends Controller
             'ownership_state' => ['sometimes', 'string', Rule::in($ownershipStates)],
             'filter' => ['sometimes', 'array'],
             'filter.ownership_state' => ['sometimes', 'string', Rule::in($ownershipStates)],
-            'contact_mode' => ['sometimes', 'string', 'in:own,mirrored_account_profile'],
-            'contact_channels_enabled_only' => ['sometimes', 'boolean'],
-            'queryable_only' => ['sometimes', 'boolean'],
-            'exclude_account_profile_id' => ['sometimes', 'string', 'regex:/^[a-f0-9]{24}$/i'],
+            'contact_mode' => ['prohibited'],
+            'contact_channels_enabled_only' => ['prohibited'],
+            'queryable_only' => ['prohibited'],
+            'exclude_account_profile_id' => ['prohibited'],
             'search' => [
                 'bail',
                 'sometimes',
@@ -166,12 +163,15 @@ class AccountProfilesController extends Controller
         string $account_profile_slug,
         string $group_id,
     ): JsonResponse {
-        return response()->json($this->nestedPublicMembersProjectionService->publicMemberPage(
-            $account_profile_slug,
+        $profile = $this->profileQueryService->publicFindBySlugOrFail($account_profile_slug);
+
+        return response()->json($this->nestedGroupMemberStore->publicMemberPage(
+            $profile,
             $group_id,
             $request->perPage(),
             $request->suppliedPerPage(),
             $request->cursor(),
+            $request->normalizedSearch(),
         ));
     }
 
@@ -250,6 +250,7 @@ class AccountProfilesController extends Controller
             $request->perPage(),
             $request->suppliedPerPage(),
             $request->cursor(),
+            $request->normalizedSearch(),
             $this->candidateDiscoveryService,
         ));
     }
@@ -303,6 +304,23 @@ class AccountProfilesController extends Controller
                     $request->label(),
                 ),
             ],
+        ]);
+    }
+
+    public function patchNestedGroupOrder(
+        AccountProfileNestedGroupOrderPatchRequest $request,
+        string $tenant_domain,
+        string $account_profile_id,
+        string $group_id,
+    ): JsonResponse {
+        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+
+        return response()->json([
+            'data' => $this->profileService->moveNestedGroup(
+                $profile,
+                $group_id,
+                $request->direction(),
+            ),
         ]);
     }
 

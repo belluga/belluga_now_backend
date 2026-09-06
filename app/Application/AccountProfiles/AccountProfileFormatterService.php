@@ -20,7 +20,6 @@ class AccountProfileFormatterService
         private readonly AccountProfileAgendaOccurrencesService $agendaOccurrencesService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
-        private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly AccountProfileGalleryService $galleryService,
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly AccountProfileContactChannelsService $contactChannelsService,
@@ -50,7 +49,9 @@ class AccountProfileFormatterService
             );
 
         $nestedProfileGroups = $includeAgendaOccurrences
-            ? $this->nestedPublicMembersProjectionService->publicMetadataGroups($profile)
+            ? ($publicCatalogPolicy->isPublicNestedParent($profile)
+                ? $this->nestedGroupMemberStore->publicMetadataGroups($profile)
+                : [])
             : $this->nestedGroupMemberStore->metadataGroups($profile);
         $selectedSummariesByProfileId = $includeAgendaOccurrences
             ? []

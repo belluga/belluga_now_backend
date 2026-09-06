@@ -25,15 +25,17 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
-use Laravel\Sanctum\Sanctum;
 use Mockery;
 use Symfony\Component\Process\Process;
 use Tests\Helpers\TenantLabels;
+use Tests\Helpers\TenantScopedSanctum as Sanctum;
 use Tests\TestCaseTenant;
+use Tests\Traits\RestoresTenantContextAfterRequest;
 use Tests\Traits\SeedsTenantAccounts;
 
 class TenantPhoneOtpAuthTest extends TestCaseTenant
 {
+    use RestoresTenantContextAfterRequest;
     use SeedsTenantAccounts;
 
     protected TenantLabels $tenant {

@@ -32,15 +32,18 @@ use Belluga\Invites\Models\Tenants\PrincipalSocialMetric;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Laravel\Sanctum\Sanctum;
 use Mockery;
 use Tests\Helpers\TenantLabels;
+use Tests\Helpers\TenantScopedSanctum as Sanctum;
+use Tests\Support\MongoCommandTrace;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
+use Tests\Traits\RestoresTenantContextAfterRequest;
 
 class StoreReleaseSocialGraphTest extends TestCaseTenant
 {
     use RefreshLandlordAndTenantDatabases;
+    use RestoresTenantContextAfterRequest;
 
     protected TenantLabels $tenant {
         get {
@@ -498,10 +501,10 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         ]);
 
         Sanctum::actingAs($viewer, ['*']);
-        DB::connection('tenant')->flushQueryLog();
-        DB::connection('tenant')->enableQueryLog();
-
-        $response = $this->getJson("{$this->base_api_tenant}contacts/inviteables");
+        $response = null;
+        $trace = $this->captureMongoCommands(function () use (&$response): void {
+            $response = $this->getJson("{$this->base_api_tenant}contacts/inviteables");
+        });
 
         $response->assertOk();
         $this->assertSame(
@@ -513,15 +516,13 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             collect($response->json('items'))->pluck('receiver_account_profile_id')->all(),
         );
 
-        $connection = DB::connection('tenant');
-        $queryLog = json_encode($connection->getQueryLog(), JSON_UNESCAPED_SLASHES);
-        $connection->disableQueryLog();
-        $connection->flushQueryLog();
-        $this->assertStringContainsString('inviteable_people_projection', $queryLog);
-        $this->assertStringNotContainsString('contact_hash_directory', $queryLog);
-        $this->assertStringNotContainsString('favorite_edges', $queryLog);
-        $this->assertStringNotContainsString('email_hashes', $queryLog);
-        $this->assertStringNotContainsString('phone_hashes', $queryLog);
+        $this->assertNotSame([], $trace->commandsForCollection('inviteable_people_projection'));
+        foreach (['contact_hash_directory', 'favorite_edges'] as $forbiddenCollection) {
+            $this->assertSame([], $trace->commandsForCollection($forbiddenCollection), $forbiddenCollection);
+        }
+        $traceJson = json_encode($trace->commands(), JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
+        $this->assertStringNotContainsString('email_hashes', $traceJson);
+        $this->assertStringNotContainsString('phone_hashes', $traceJson);
     }
 
     public function test_contact_import_materializes_inviteable_projection_for_owner(): void
@@ -953,7 +954,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         Sanctum::actingAs($sender, ['*']);
 
         $this->postJson("{$this->base_api_tenant}contacts/import", [
-            'contacts' => array_fill(0, 501, [
+            'contacts' => array_fill(0, 5001, [
                 'type' => 'phone',
                 'hash' => hash('sha256', '5527999992402'),
             ]),
@@ -1430,6 +1431,23 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             'event_id' => (string) $event->_id,
             'occurrence_id' => $this->firstOccurrenceId($event),
         ];
+    }
+
+    /** @param callable():void $operation */
+    private function captureMongoCommands(callable $operation): MongoCommandTrace
+    {
+        $client = DB::connection('tenant')->getClient();
+        $this->assertNotNull($client);
+        $trace = new MongoCommandTrace;
+        $client->addSubscriber($trace);
+
+        try {
+            $operation();
+        } finally {
+            $client->removeSubscriber($trace);
+        }
+
+        return $trace;
     }
 
     private function initializeSystem(): void

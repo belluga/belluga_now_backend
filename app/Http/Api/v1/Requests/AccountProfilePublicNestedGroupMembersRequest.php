@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Application\AccountProfiles\AccountProfileSearchV1;
+use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 final class AccountProfilePublicNestedGroupMembersRequest extends FormRequest
@@ -20,7 +22,17 @@ final class AccountProfilePublicNestedGroupMembersRequest extends FormRequest
     {
         return [
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:50'],
-            'cursor' => ['sometimes', 'string'],
+            'cursor' => ['sometimes', 'string', 'max:'.InputConstraints::PAGINATION_CURSOR_MAX],
+            'search' => [
+                'sometimes',
+                'nullable',
+                'string',
+                static function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (trim((string) $value) !== '' && AccountProfileSearchV1::normalizeRequestSearch($value) === null) {
+                        $fail('The search must normalize to 2 to 100 ASCII characters.');
+                    }
+                },
+            ],
         ];
     }
 
@@ -44,5 +56,14 @@ final class AccountProfilePublicNestedGroupMembersRequest extends FormRequest
         $cursor = trim($cursor);
 
         return $cursor === '' ? null : $cursor;
+    }
+
+    public function normalizedSearch(): ?string
+    {
+        $raw = $this->input('search');
+
+        return is_string($raw) && trim($raw) !== ''
+            ? AccountProfileSearchV1::normalizeRequestSearch($raw)
+            : null;
     }
 }

@@ -42,6 +42,7 @@ class AccountProfile extends Model
         'avatar_url',
         'cover_url',
         'name_search_key',
+        'search_terms',
         'is_active',
         'is_verified',
         'created_by',
@@ -106,6 +107,12 @@ class AccountProfile extends Model
      * @return array<int|string, mixed>
      */
     public function getExternalLinksAttribute(mixed $value): array
+    {
+        return $this->normalizeNestedArray($value);
+    }
+
+    /** @return array<int|string, mixed> */
+    public function getSearchTermsAttribute(mixed $value): array
     {
         return $this->normalizeNestedArray($value);
     }

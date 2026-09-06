@@ -19,11 +19,13 @@ use RuntimeException;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
+use Tests\Traits\RestoresTenantContextAfterRequest;
 use Tests\Traits\SeedsTenantAccounts;
 
 class TenantPublicAccountTokenScopeTest extends TestCaseTenant
 {
     use RefreshLandlordAndTenantDatabases;
+    use RestoresTenantContextAfterRequest;
     use SeedsTenantAccounts;
 
     protected TenantLabels $tenant {

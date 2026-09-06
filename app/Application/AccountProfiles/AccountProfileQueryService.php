@@ -44,7 +44,6 @@ class AccountProfileQueryService extends AbstractQueryService
     public function paginate(array $queryParams, bool $includeArchived, int $perPage = 15): LengthAwarePaginator
     {
         $query = AccountProfile::query();
-        $queryParams = $this->applyAdminCandidateFilters($query, $queryParams);
         $search = trim((string) ($queryParams['search'] ?? ''));
         unset($queryParams['search']);
 
@@ -68,56 +67,6 @@ class AccountProfileQueryService extends AbstractQueryService
         );
 
         return $this->hydrateOwnershipState($paginator);
-    }
-
-    /**
-     * @param  array<string, mixed>  $queryParams
-     * @return array<string, mixed>
-     */
-    private function applyAdminCandidateFilters(Builder $query, array $queryParams): array
-    {
-        $queryableOnly = filter_var(
-            $queryParams['queryable_only'] ?? false,
-            FILTER_VALIDATE_BOOL,
-            FILTER_NULL_ON_FAILURE
-        ) ?? false;
-        if ($queryableOnly) {
-            $queryableTypes = $this->queryableProfileTypes();
-            if ($queryableTypes === []) {
-                $query->whereRaw(['_id' => ['$exists' => false]]);
-            } else {
-                $query->whereIn('profile_type', $queryableTypes)
-                    ->where('is_active', true);
-            }
-        }
-
-        $contactChannelsEnabledOnly = filter_var(
-            $queryParams['contact_channels_enabled_only'] ?? false,
-            FILTER_VALIDATE_BOOL,
-            FILTER_NULL_ON_FAILURE
-        ) ?? false;
-        if ($contactChannelsEnabledOnly) {
-            $contactChannelsEnabledTypes = $this->typeSetProvider->contactChannelsEnabledTypes();
-            if ($contactChannelsEnabledTypes === []) {
-                $query->whereRaw(['_id' => ['$exists' => false]]);
-            } else {
-                $query->whereIn('profile_type', $contactChannelsEnabledTypes)
-                    ->where('is_active', true);
-            }
-        }
-
-        $excludedProfileId = trim((string) ($queryParams['exclude_account_profile_id'] ?? ''));
-        if ($excludedProfileId !== '') {
-            $query->where('_id', '!=', $excludedProfileId);
-        }
-
-        unset(
-            $queryParams['queryable_only'],
-            $queryParams['contact_channels_enabled_only'],
-            $queryParams['exclude_account_profile_id']
-        );
-
-        return $queryParams;
     }
 
     public function publicPaginate(array $queryParams, int $perPage = 15): LengthAwarePaginator
@@ -285,11 +234,6 @@ class AccountProfileQueryService extends AbstractQueryService
     /**
      * @return array<int, string>
      */
-    private function queryableProfileTypes(): array
-    {
-        return $this->typeSetProvider->queryableTypes();
-    }
-
     /**
      * @param  array<string, mixed>  $queryParams
      * @return array<string, mixed>
@@ -492,17 +436,15 @@ class AccountProfileQueryService extends AbstractQueryService
         int $limit,
     ): array {
         $baseMatch = $publicCatalogPolicy->catalogMatchExpression();
-
-        if ($search !== '') {
-            $baseMatch['$and'][] = $this->publicSearchExpression($search);
-        }
+        $pipeline = $this->publicSearchCandidateStages($baseMatch, $search);
 
         $facet = [
             'page_rows' => $this->buildPublicDiscoveryPageRowsBranch(
                 $selectedTypes,
                 $taxonomyFilters,
                 $skip,
-                $limit
+                $limit,
+                $search !== '',
             ),
             'page_total' => $this->buildPublicDiscoveryTotalBranch(
                 $selectedTypes,
@@ -526,7 +468,7 @@ class AccountProfileQueryService extends AbstractQueryService
         }
 
         return [
-            ['$match' => $baseMatch],
+            ...$pipeline,
             ...$this->publishedParentAccountGateStages(),
             ['$facet' => $facet],
         ];
@@ -594,11 +536,14 @@ class AccountProfileQueryService extends AbstractQueryService
         array $taxonomyFilters,
         int $skip,
         int $limit,
+        bool $searching,
     ): array {
         $pipeline = [];
         $this->applySelectedPublicProfileTypesMatch($pipeline, $selectedTypes);
         $this->applyPublicTaxonomySelectionMatch($pipeline, $taxonomyFilters);
-        $pipeline[] = ['$sort' => ['created_at' => -1, '_id' => -1]];
+        $pipeline[] = ['$sort' => $searching
+            ? ['name_search_key' => 1, '_id' => 1]
+            : ['created_at' => -1, '_id' => -1]];
         $pipeline[] = ['$skip' => $skip];
         $pipeline[] = ['$limit' => $limit];
         $pipeline[] = ['$project' => ['_id' => 1]];
@@ -1483,14 +1428,39 @@ class AccountProfileQueryService extends AbstractQueryService
      */
     private function publicSearchExpression(string $search): array
     {
-        $query = trim($search);
+        $query = AccountProfileSearchV1::normalizeRequestSearch($search);
         if ($query === '') {
             return [];
         }
 
-        return [
-            'name_search_key' => new Regex('^'.preg_quote($query, '/'), 'i'),
-        ];
+        if ($query === null) {
+            return ['_id' => ['$exists' => false]];
+        }
+
+        return AccountProfileSearchV1::mongoOrPredicate('name_search_key', 'search_terms', $query);
+    }
+
+    /**
+     * @param  array<string, mixed>  $baseMatch
+     * @return array<int, array<string, mixed>>
+     */
+    private function publicSearchCandidateStages(array $baseMatch, string $search): array
+    {
+        if (trim($search) === '') {
+            return [['$match' => $baseMatch]];
+        }
+
+        $normalizedSearch = AccountProfileSearchV1::normalizeRequestSearch($search);
+        if ($normalizedSearch === null) {
+            return [['$match' => ['_id' => ['$exists' => false]]]];
+        }
+
+        return [['$match' => AccountProfileSearchV1::mongoScopedOrPredicate(
+            $baseMatch,
+            'name_search_key',
+            'search_terms',
+            $normalizedSearch,
+        )]];
     }
 
     private function toFloat(mixed $value): ?float

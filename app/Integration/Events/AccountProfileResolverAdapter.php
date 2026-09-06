@@ -10,7 +10,9 @@ use App\Application\AccountProfiles\AccountProfilePublicCatalogEligibilityPolicy
 use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
+use App\Application\AccountProfiles\AccountProfileSearchV1;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
@@ -151,16 +153,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
                 'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
                     is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
                 ),
-                'gallery_groups' => array_values(array_filter(array_map(
-                    static fn (array $group): array => [
-                        ...$group,
-                        'items' => array_values(array_filter(
-                            $group['items'],
-                            static fn (array $item): bool => ($item['type'] ?? 'photo') === 'photo',
-                        )),
-                    ],
-                    $this->galleryService->formatForPublicDetail($profile, $baseUrl),
-                ), static fn (array $group): bool => $group['items'] !== [])),
+                'gallery_groups' => $this->galleryService->formatForPublicDetail($profile, $baseUrl),
             ],
             'location' => $location,
         ];
@@ -269,6 +262,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
                     '_id',
                     'display_name',
                     'name_search_key',
+                    'search_terms',
                     'profile_type',
                     'slug',
                     'avatar_url',
@@ -486,6 +480,41 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         return in_array($normalized, $this->resolvePubliclyNavigableProfileTypes(), true);
     }
 
+    public function publicCatalogProfileTypes(): array
+    {
+        return $this->typeSetProvider->publicCatalogTypes();
+    }
+
+    public function publiclyNavigableProfileTypes(): array
+    {
+        return $this->resolvePubliclyNavigableProfileTypes();
+    }
+
+    public function publicMemberProfileMatchExpression(): array
+    {
+        return $this->publicCatalogSnapshotReader->catalogSnapshot()->policy()->catalogMatchExpression();
+    }
+
+    public function publicMemberAccountMatchExpression(): array
+    {
+        return ['publication.status' => AccountPublicationStateService::PUBLISHED];
+    }
+
+    public function normalizeMemberSearch(mixed $rawSearch): ?string
+    {
+        return AccountProfileSearchV1::normalizeRequestSearch($rawSearch);
+    }
+
+    public function memberSearchPredicate(array $scope, string $normalizedSearch): array
+    {
+        return AccountProfileSearchV1::mongoScopedOrPredicate(
+            $scope,
+            'nested_profile.search_key',
+            'nested_profile.search_terms',
+            $normalizedSearch,
+        );
+    }
+
     /**
      * @return array<int, string>
      */
@@ -634,6 +663,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
      *   id: string,
      *   label: ?string,
      *   search_key: ?string,
+     *   search_terms: array<int, string>,
      *   profile_type: ?string,
      *   category: ?string,
      *   taxonomy_terms_flat: array<int, string>,
@@ -647,12 +677,17 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         $profileType = trim((string) ($profile->profile_type ?? ''));
         $label = trim((string) ($profile->display_name ?? ''));
         $searchKey = trim((string) ($profile->getAttribute('name_search_key') ?? ''));
+        $searchTerms = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $term): string => trim((string) $term),
+            (array) ($profile->getAttribute('search_terms') ?? []),
+        ), static fn (string $term): bool => $term !== '')));
         $slug = trim((string) ($profile->slug ?? ''));
 
         return [
             'id' => (string) $profile->getKey(),
             'label' => $label === '' ? null : $label,
             'search_key' => $searchKey === '' ? null : $searchKey,
+            'search_terms' => $searchTerms,
             'profile_type' => $profileType === '' ? null : $profileType,
             'category' => $profileType === '' ? null : $profileType,
             'taxonomy_terms_flat' => array_values(array_filter(array_map(

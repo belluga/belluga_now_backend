@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Taxonomies;
 
+use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\StaticAsset;
 use Belluga\Events\Models\Tenants\Event;
@@ -23,6 +24,7 @@ class TaxonomySnapshotBackfillService
 
     public function __construct(
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
+        private readonly AccountProfileManagementService $accountProfileManagementService,
     ) {}
 
     /**
@@ -98,11 +100,25 @@ class TaxonomySnapshotBackfillService
                 }
 
                 if ($changed || $flatChanged) {
-                    $model->setAttribute('taxonomy_terms', $resolved);
-                    if ($refreshFlatTerms) {
-                        $model->setAttribute('taxonomy_terms_flat', $expectedFlatTerms);
+                    if ($model instanceof AccountProfile) {
+                        $this->accountProfileManagementService->update(
+                            $model,
+                            ['taxonomy_terms' => $resolved],
+                            fingerprintSupplement: [
+                                'source' => 'taxonomy_snapshot_repair',
+                                'taxonomy_type' => $taxonomyType,
+                                'term_value' => $termValue,
+                            ],
+                            useAggregateRevisionCas: false,
+                            forceSearchRefresh: true,
+                        );
+                    } else {
+                        $model->setAttribute('taxonomy_terms', $resolved);
+                        if ($refreshFlatTerms) {
+                            $model->setAttribute('taxonomy_terms_flat', $expectedFlatTerms);
+                        }
+                        $model->save();
                     }
-                    $model->save();
                     $summary['repaired']++;
                 } else {
                     $summary['skipped']++;
@@ -343,7 +359,7 @@ class TaxonomySnapshotBackfillService
         }
 
         if ($missing !== []) {
-            foreach ($this->taxonomyTermSummaryResolver->resolve(array_values($missing)) as $resolved) {
+            foreach ($this->taxonomyTermSummaryResolver->resolveExisting(array_values($missing)) as $resolved) {
                 $cacheKey = $this->termCacheKey($resolved['type'], $resolved['value']);
                 $this->termSnapshotCache[$cacheKey] = $resolved;
             }

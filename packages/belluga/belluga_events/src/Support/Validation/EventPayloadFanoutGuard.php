@@ -53,7 +53,6 @@ final class EventPayloadFanoutGuard
             $errors['event_parties'] = 'event_parties was removed from normal event writes; use the dedicated occurrence group endpoints.';
         }
 
-        $relatedProfileCount = count(self::profileGroupMemberIds(self::list($payload['profile_groups'] ?? [])));
         $occurrenceTaxonomyTermCount = 0;
         $occurrenceTaxonomyTerms = [];
         $programmingItemCount = 0;
@@ -68,10 +67,6 @@ final class EventPayloadFanoutGuard
                 $errors["occurrences.{$occurrenceIndex}.event_parties"] =
                     'event_parties was removed from normal occurrence writes; use the dedicated occurrence group endpoints.';
             }
-            $relatedProfileCount += count(self::profileGroupMemberIds(
-                self::list($occurrence['profile_groups'] ?? [])
-            ));
-
             $taxonomyTerms = self::list($occurrence['taxonomy_terms'] ?? []);
             $occurrenceTaxonomyTermCount += count($taxonomyTerms);
             foreach ($taxonomyTerms as $term) {
@@ -91,13 +86,6 @@ final class EventPayloadFanoutGuard
                     $programmingReferenceCount += 1;
                 }
             }
-        }
-
-        if ($relatedProfileCount > InputConstraints::EVENT_OCCURRENCE_PARTIES_TOTAL_MAX) {
-            $errors['profile_groups'] = sprintf(
-                'The event may not reference more than %d related profiles across profile_groups on the event and all occurrences.',
-                InputConstraints::EVENT_OCCURRENCE_PARTIES_TOTAL_MAX
-            );
         }
 
         if ($occurrenceTaxonomyTermCount > InputConstraints::EVENT_OCCURRENCE_TAXONOMY_TERMS_TOTAL_MAX) {
@@ -140,28 +128,6 @@ final class EventPayloadFanoutGuard
     private static function list(mixed $value): array
     {
         return is_array($value) ? array_values($value) : [];
-    }
-
-    /**
-     * @param  array<int, mixed>  $groups
-     * @return array<int, string>
-     */
-    private static function profileGroupMemberIds(array $groups): array
-    {
-        $ids = [];
-        foreach ($groups as $group) {
-            if (! is_array($group)) {
-                continue;
-            }
-            foreach (self::list($group['account_profile_ids'] ?? []) as $rawId) {
-                $id = trim((string) $rawId);
-                if ($id !== '') {
-                    $ids[] = $id;
-                }
-            }
-        }
-
-        return array_values(array_unique($ids));
     }
 
     /**

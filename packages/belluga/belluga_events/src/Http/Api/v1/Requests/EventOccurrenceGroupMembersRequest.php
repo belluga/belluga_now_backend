@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Http\Api\v1\Requests;
 
+use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
 final class EventOccurrenceGroupMembersRequest extends FormRequest
@@ -20,7 +21,14 @@ final class EventOccurrenceGroupMembersRequest extends FormRequest
     {
         return [
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:50'],
-            'cursor' => ['sometimes', 'string'],
+            'cursor' => ['sometimes', 'string', 'max:'.InputConstraints::PAGINATION_CURSOR_MAX],
+            'search' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'min:2',
+                'max:400',
+            ],
         ];
     }
 

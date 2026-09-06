@@ -18,7 +18,6 @@ use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
-use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
@@ -29,10 +28,12 @@ use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
+use Tests\Traits\SeedsOccurrenceProfileGroups;
 
 class EventQueryPerformanceGuardrailTest extends TestCaseTenant
 {
     use RefreshLandlordAndTenantDatabases;
+    use SeedsOccurrenceProfileGroups;
 
     protected TenantLabels $tenant {
         get {
@@ -139,6 +140,72 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
 
         $this->assertCount(1, $bulkLoadCalls, 'Management formatter must bulk-load occurrences once for the page.');
         $this->assertCount(5, $bulkLoadCalls[0], 'Bulk occurrence formatter load must be bounded to the requested page size.');
+    }
+
+    public function test_event_list_counterparts_use_one_accounts_nested_aggregate_for_the_page(): void
+    {
+        TenantProfileType::query()->where('type', 'artist')->delete();
+        TenantProfileType::query()->create([
+            'type' => 'artist',
+            'label' => 'Artist',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+            ],
+        ]);
+        $profile = $this->createAccountProfileFixture('artist', 'Page Counterpart Artist', 611);
+        $baseStart = Carbon::now()->startOfDay()->addDays(2)->setHour(10);
+
+        foreach (range(0, 2) as $index) {
+            $event = $this->createEventFixture(
+                sprintf('Page Counterpart Event %02d', $index),
+                $baseStart->copy()->addDays($index),
+            );
+            $occurrence = EventOccurrence::query()
+                ->where('event_id', (string) $event->_id)
+                ->orderBy('starts_at')
+                ->firstOrFail();
+            $this->seedOccurrenceProfileGroups(
+                $event,
+                $occurrence,
+                [[
+                    'id' => 'artists',
+                    'label' => 'Artists',
+                    'order' => 0,
+                    'account_profile_ids' => [(string) $profile->_id],
+                ]],
+            );
+        }
+
+        $service = app(EventQueryService::class);
+        $connection = DB::connection('tenant');
+
+        foreach ([true, false] as $isAdminContext) {
+            $connection->flushQueryLog();
+            $connection->enableQueryLog();
+            $page = $service->paginateManagement([], false, 10, $isAdminContext);
+            $queries = collect($connection->getQueryLog());
+            $connection->disableQueryLog();
+            $connection->flushQueryLog();
+
+            $this->assertCount(3, $page->items());
+            $accountsNestedQueries = $queries->filter(
+                static fn (array $query): bool => str_contains(
+                    json_encode($query, JSON_UNESCAPED_SLASHES),
+                    'accounts_nested',
+                ),
+            );
+            $this->assertCount(
+                1,
+                $accountsNestedQueries,
+                sprintf(
+                    '%s Event list formatting must aggregate counterpart summaries once for the whole page.',
+                    $isAdminContext ? 'Management' : 'Public',
+                ),
+            );
+        }
     }
 
     public function test_management_event_query_source_does_not_reintroduce_all_occurrence_id_materialization(): void
@@ -687,8 +754,8 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             'own_profile_groups' => $groupMetadata,
             'profile_groups' => $groupMetadata,
         ])->save();
-        app(EventOccurrenceNestedAccountStore::class)->syncOccurrenceGroups(
-            (string) $event->_id,
+        $this->seedOccurrenceProfileGroups(
+            $event,
             $selectedOccurrence,
             [[
                 'id' => 'artists',
@@ -791,8 +858,8 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             'own_profile_groups' => $groupMetadata,
             'profile_groups' => $groupMetadata,
         ])->save();
-        app(EventOccurrenceNestedAccountStore::class)->syncOccurrenceGroups(
-            (string) $event->_id,
+        $this->seedOccurrenceProfileGroups(
+            $event,
             $occurrence,
             [[
                 'id' => 'artists',

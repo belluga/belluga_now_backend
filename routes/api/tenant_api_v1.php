@@ -215,6 +215,8 @@ Route::prefix('account_profiles')
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
                 Route::patch('/nested_profile_groups/{group_id}', [AccountProfilesController::class, 'patchNestedGroupLabel'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+                Route::patch('/nested_profile_groups/{group_id}/order', [AccountProfilesController::class, 'patchNestedGroupOrder'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
                 Route::get('/nested_profile_groups/{group_id}/members', [AccountProfilesController::class, 'nestedGroupMembers'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
                 Route::patch('/nested_profile_groups/{group_id}/members', [AccountProfilesController::class, 'patchNestedGroupMembers'])
