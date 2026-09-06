@@ -28,6 +28,7 @@ use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Contracts\EventContentSanitizerContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
 use Belluga\Events\Domain\Events\EventUpdated;
+use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupMembersPatchRequest;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
@@ -46,6 +47,7 @@ use Illuminate\Support\Facades\Event as EventBus;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Mockery\MockInterface;
@@ -7921,6 +7923,21 @@ class EventCrudControllerTest extends TestCaseTenant
             ->assertJsonMissing(['id' => $memberIds[0]])
             ->assertJsonPath('data.0.id', $memberIds[1]);
         $this->actingAsEventOwnerUser();
+    }
+
+    public function test_event_group_delta_validation_accepts_one_thousand_ids_and_rejects_one_thousand_and_one(): void
+    {
+        $ids = collect(range(1, 1001))
+            ->map(static fn (int $index): string => sprintf('%024x', $index))
+            ->all();
+        $rules = (new EventOccurrenceGroupMembersPatchRequest)->rules();
+
+        $accepted = Validator::make(['add_ids' => array_slice($ids, 0, 1000)], $rules);
+        $rejected = Validator::make(['add_ids' => $ids], $rules);
+
+        $this->assertFalse($accepted->fails());
+        $this->assertTrue($rejected->fails());
+        $this->assertArrayHasKey('add_ids', $rejected->errors()->toArray());
     }
 
     public function test_event_admin_member_search_continues_after_the_first_cursor_page(): void

@@ -23,6 +23,7 @@ use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersPatchRequest;
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\LandlordUser;
@@ -51,6 +52,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event as EventBus;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
 use MongoDB\BSON\ObjectId;
@@ -7716,6 +7718,21 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ->assertOk()
             ->assertJsonMissing(['id' => $memberIds[0]])
             ->assertJsonPath('data.0.id', $memberIds[1]);
+    }
+
+    public function test_account_group_delta_validation_accepts_one_thousand_ids_and_rejects_one_thousand_and_one(): void
+    {
+        $ids = collect(range(1, 1001))
+            ->map(static fn (int $index): string => sprintf('%024x', $index))
+            ->all();
+        $rules = (new AccountProfileNestedGroupMembersPatchRequest)->rules();
+
+        $accepted = Validator::make(['add_ids' => array_slice($ids, 0, 1000)], $rules);
+        $rejected = Validator::make(['add_ids' => $ids], $rules);
+
+        $this->assertFalse($accepted->fails());
+        $this->assertTrue($rejected->fails());
+        $this->assertArrayHasKey('add_ids', $rejected->errors()->toArray());
     }
 
     public function test_account_nested_member_rows_do_not_copy_group_order(): void
