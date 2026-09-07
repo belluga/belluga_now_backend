@@ -471,6 +471,8 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
                 'account_id' => (string) $account->_id,
                 'profile_type' => 'venue',
                 'display_name' => sprintf('Budget Venue %02d', $index),
+                'name_search_key' => sprintf('budget venue %02d', $index),
+                'search_terms' => ['budget', 'venue', sprintf('%02d', $index)],
                 'taxonomy_terms' => [],
                 'location' => [
                     'type' => 'Point',

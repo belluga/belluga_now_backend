@@ -6,6 +6,7 @@ namespace Tests\Feature\Events;
 
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
+use App\Application\AccountProfiles\AccountProfileSearchV1;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
@@ -1134,8 +1135,8 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
-        $venueSearch = (string) $this->venue->slug;
-        $partialVenueSearch = substr($venueSearch, -6, 5);
+        $venueSearch = 'main';
+        $partialVenueSearch = 'ven';
 
         $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search={$venueSearch}&page=1&page_size=20");
 
@@ -1161,6 +1162,54 @@ class EventCrudControllerTest extends TestCaseTenant
         Sanctum::actingAs($landlord, ['events:update']);
         $updateResponse = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search={$venueSearch}");
         $updateResponse->assertStatus(200);
+    }
+
+    public function test_event_account_profile_candidates_use_canonical_name_and_taxonomy_term_search_without_weakening_context_filters(): void
+    {
+        $landlord = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlord, ['events:read']);
+
+        $artist = $this->createAccountProfile('artist', 'João da Silva');
+        $artist->search_terms = ['joao', 'silva', 'gastronomia'];
+        $artist->save();
+
+        $wrongType = $this->createAccountProfile('band', 'Outra Pessoa Silva');
+        $wrongType->search_terms = ['outra', 'pessoa', 'silva', 'gastronomia'];
+        $wrongType->save();
+
+        $nameResponse = $this->getJson(
+            "{$this->tenantAdminEventsBase}/account_profile_candidates?type=related_account_profile&profile_type=artist&search=sil"
+        );
+        $nameResponse->assertOk();
+        $nameIds = collect($nameResponse->json('data') ?? [])->pluck('id')->all();
+        $this->assertContains((string) $artist->_id, $nameIds);
+        $this->assertNotContains((string) $wrongType->_id, $nameIds);
+
+        $taxonomyResponse = $this->getJson(
+            "{$this->tenantAdminEventsBase}/account_profile_candidates?type=related_account_profile&profile_type=artist&search=gastr"
+        );
+        $taxonomyResponse->assertOk();
+        $taxonomyIds = collect($taxonomyResponse->json('data') ?? [])->pluck('id')->all();
+        $this->assertContains((string) $artist->_id, $taxonomyIds);
+        $this->assertNotContains((string) $wrongType->_id, $taxonomyIds);
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $locatedVenue = $this->createAccountProfile('venue', 'Casa Neutra');
+        $locatedVenue->search_terms = ['casa', 'neutra', 'gastronomia'];
+        $locatedVenue->save();
+
+        $unlocatedVenue = $this->createAccountProfile('venue', 'Espaço Gastronomia');
+        $unlocatedVenue->location = null;
+        $unlocatedVenue->search_terms = ['espaco', 'gastronomia'];
+        $unlocatedVenue->save();
+
+        $hostResponse = $this->getJson(
+            "{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=gastr"
+        );
+        $hostResponse->assertOk();
+        $hostIds = collect($hostResponse->json('data') ?? [])->pluck('id')->all();
+        $this->assertContains((string) $locatedVenue->_id, $hostIds);
+        $this->assertNotContains((string) $unlocatedVenue->_id, $hostIds);
     }
 
     public function test_event_account_profile_candidates_endpoint_normalizes_mixed_media_shapes_and_skips_invalid_physical_hosts_without_failing_response(): void
@@ -1205,6 +1254,13 @@ class EventCrudControllerTest extends TestCaseTenant
         );
 
         $this->venue->display_name = 'Candidate Relative Host';
+        $candidateSearch = AccountProfileSearchV1::fromSources(
+            $this->venue->display_name,
+            null,
+            [],
+        );
+        $this->venue->name_search_key = $candidateSearch['name_search_key'];
+        $this->venue->search_terms = $candidateSearch['search_terms'];
         $this->venue->avatar_url = "/api/v1/media/account-profiles/{$this->venue->_id}/avatar?v=9";
         $this->venue->cover_url = "/api/v1/media/account-profiles/{$this->venue->_id}/cover?v=10";
         $this->venue->save();
@@ -1482,6 +1538,13 @@ class EventCrudControllerTest extends TestCaseTenant
         Sanctum::actingAs($landlord, ['events:read']);
 
         $this->artist->display_name = 'Selector Zero Slug Artist';
+        $selectorSearch = AccountProfileSearchV1::fromSources(
+            $this->artist->display_name,
+            null,
+            [],
+        );
+        $this->artist->name_search_key = $selectorSearch['name_search_key'];
+        $this->artist->search_terms = $selectorSearch['search_terms'];
         $this->artist->slug = '0';
         $this->artist->save();
 
@@ -1532,6 +1595,8 @@ class EventCrudControllerTest extends TestCaseTenant
             'account_id' => (string) $hostAccount->_id,
             'profile_type' => 'restaurant',
             'display_name' => 'Main Bistro',
+            'name_search_key' => 'main bistro',
+            'search_terms' => ['main', 'bistro'],
             'taxonomy_terms' => [],
             'location' => [
                 'type' => 'Point',
@@ -9203,10 +9268,14 @@ class EventCrudControllerTest extends TestCaseTenant
             ];
         }
 
+        $search = AccountProfileSearchV1::fromSources($displayName, null, []);
+
         return AccountProfile::create([
             'account_id' => (string) $account->_id,
             'profile_type' => $profileType,
             'display_name' => $displayName,
+            'name_search_key' => $search['name_search_key'],
+            'search_terms' => $search['search_terms'],
             'taxonomy_terms' => [],
             'location' => $location,
             'is_active' => true,

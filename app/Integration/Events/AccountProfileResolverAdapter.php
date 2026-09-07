@@ -365,23 +365,27 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     ): LengthAwarePaginator {
         $normalizedPage = max(1, $page);
         $normalizedPerPage = max(1, min($perPage, 50));
-        $normalizedSearch = trim((string) ($search ?? ''));
-        $normalizedProfileType = trim((string) ($profileType ?? ''));
-        $likePattern = $normalizedSearch === ''
+        $rawSearch = trim((string) ($search ?? ''));
+        $normalizedSearch = $rawSearch === ''
             ? null
-            : '%'.addcslashes($normalizedSearch, '%_\\').'%';
+            : AccountProfileSearchV1::normalizeRequestSearch($rawSearch);
+        $normalizedProfileType = trim((string) ($profileType ?? ''));
 
-        $query = match ($candidateType) {
-            'related_account_profile' => $this->queryRelatedAccountProfileCandidates(
-                $likePattern,
-                $accountId,
-                $normalizedProfileType !== '' ? $normalizedProfileType : null,
-            ),
-            'physical_host' => $this->queryPhysicalHostCandidates($likePattern, $accountId),
-            default => throw ValidationException::withMessages([
-                'type' => ['Unsupported account profile candidate type.'],
-            ]),
-        };
+        if ($rawSearch !== '' && $normalizedSearch === null) {
+            $query = AccountProfile::query()->whereRaw(['_id' => ['$exists' => false]]);
+        } else {
+            $query = match ($candidateType) {
+                'related_account_profile' => $this->queryRelatedAccountProfileCandidates(
+                    $normalizedSearch,
+                    $accountId,
+                    $normalizedProfileType !== '' ? $normalizedProfileType : null,
+                ),
+                'physical_host' => $this->queryPhysicalHostCandidates($normalizedSearch, $accountId),
+                default => throw ValidationException::withMessages([
+                    'type' => ['Unsupported account profile candidate type.'],
+                ]),
+            };
+        }
 
         $paginator = $query
             ->orderBy('display_name')
@@ -399,7 +403,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     }
 
     private function queryPhysicalHostCandidates(
-        ?string $likePattern,
+        ?string $normalizedSearch,
         ?string $accountId
     ): Builder {
         $profileTypes = $this->typeSetProvider->queryablePubliclyNavigablePoiEnabledTypes();
@@ -416,11 +420,12 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             $query->where('account_id', $accountId);
         }
 
-        if ($likePattern !== null) {
-            $query->where(static function ($builder) use ($likePattern): void {
-                $builder->where('display_name', 'like', $likePattern)
-                    ->orWhere('slug', 'like', $likePattern);
-            });
+        if ($normalizedSearch !== null) {
+            $query->whereRaw(AccountProfileSearchV1::mongoOrPredicate(
+                'name_search_key',
+                'search_terms',
+                $normalizedSearch,
+            ));
         }
 
         return $query;
@@ -430,7 +435,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
      * @return Builder<AccountProfile>
      */
     private function queryRelatedAccountProfileCandidates(
-        ?string $likePattern,
+        ?string $normalizedSearch,
         ?string $accountId,
         ?string $profileType = null,
     ): Builder {
@@ -450,11 +455,12 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             $query->where('account_id', $accountId);
         }
 
-        if ($likePattern !== null) {
-            $query->where(static function ($builder) use ($likePattern): void {
-                $builder->where('display_name', 'like', $likePattern)
-                    ->orWhere('slug', 'like', $likePattern);
-            });
+        if ($normalizedSearch !== null) {
+            $query->whereRaw(AccountProfileSearchV1::mongoOrPredicate(
+                'name_search_key',
+                'search_terms',
+                $normalizedSearch,
+            ));
         }
 
         return $query;
