@@ -34,26 +34,26 @@ final class AccountProfileGalleryMutationService
     }
 
     /** @return array<int,array<string,mixed>> */
-    public function createGroup(AccountProfile $profile, string $subtitle): array
+    public function createGroup(AccountProfile $profile, string $subtitle, array $auditAttributes = []): array
     {
         return $this->change($profile, function (array &$groups) use ($subtitle): void {
             if (count($groups) >= $this->capabilities()['max_galleries']) {
                 $this->fail('gallery_capabilities.max_galleries', 'Gallery capacity has been reached.');
             }
             $groups[] = ['group_id' => Str::lower((string) Str::ulid()), 'subtitle' => $subtitle, 'order' => count($groups), 'items' => []];
-        });
+        }, auditAttributes: $auditAttributes);
     }
 
     /** @return array<int,array<string,mixed>> */
-    public function renameGroup(AccountProfile $profile, string $id, string $subtitle): array
+    public function renameGroup(AccountProfile $profile, string $id, string $subtitle, array $auditAttributes = []): array
     {
         return $this->change($profile, function (array &$groups) use ($id, $subtitle): void {
             $groups[$this->groupIndex($groups, $id)]['subtitle'] = $subtitle;
-        });
+        }, auditAttributes: $auditAttributes);
     }
 
     /** @return array<int,array<string,mixed>> */
-    public function deleteGroup(AccountProfile $profile, string $id, string $baseUrl): array
+    public function deleteGroup(AccountProfile $profile, string $id, string $baseUrl, array $auditAttributes = []): array
     {
         return $this->change($profile, function (array &$groups) use ($id, $profile, $baseUrl): void {
             $index = $this->groupIndex($groups, $id);
@@ -73,17 +73,17 @@ final class AccountProfileGalleryMutationService
                     : '',
                 $this->array($groups[$index]['items'] ?? []),
             )));
-        }, $baseUrl);
+        }, $baseUrl, auditAttributes: $auditAttributes);
     }
 
     /** @return array<int,array<string,mixed>> */
-    public function reorderGroups(AccountProfile $profile, array $ids): array
+    public function reorderGroups(AccountProfile $profile, array $ids, array $auditAttributes = []): array
     {
-        return $this->change($profile, fn (array &$groups): array => $groups = $this->reorder($groups, $ids, 'group_id'));
+        return $this->change($profile, fn (array &$groups): array => $groups = $this->reorder($groups, $ids, 'group_id'), auditAttributes: $auditAttributes);
     }
 
     /** @param array<string,mixed> $input @return array<int,array<string,mixed>> */
-    public function createItem(AccountProfile $profile, string $groupId, array $input, string $baseUrl): array
+    public function createItem(AccountProfile $profile, string $groupId, array $input, string $baseUrl, array $auditAttributes = []): array
     {
         $type = $this->type($input['type'] ?? null);
         $itemId = Str::lower((string) Str::ulid());
@@ -106,11 +106,11 @@ final class AccountProfileGalleryMutationService
             }
             $items[] = $item;
             $groups[$group]['items'] = $items;
-        }, $type === 'photo' ? [$itemId] : [], $baseUrl);
+        }, $type === 'photo' ? [$itemId] : [], $baseUrl, $auditAttributes);
     }
 
     /** @param array<string,mixed> $input @return array<int,array<string,mixed>> */
-    public function updateItem(AccountProfile $profile, string $groupId, string $itemId, array $input, string $baseUrl): array
+    public function updateItem(AccountProfile $profile, string $groupId, string $itemId, array $input, string $baseUrl, array $auditAttributes = []): array
     {
         return $this->change($profile, function (array &$groups) use ($groupId, $itemId, $input, $profile, $baseUrl): void {
             $group = $this->groupIndex($groups, $groupId);
@@ -149,11 +149,11 @@ final class AccountProfileGalleryMutationService
             }
             $items[$index] = $item;
             $groups[$group]['items'] = $items;
-        }, array_key_exists('image', $input) ? [$itemId] : [], $baseUrl);
+        }, array_key_exists('image', $input) ? [$itemId] : [], $baseUrl, $auditAttributes);
     }
 
     /** @return array<int,array<string,mixed>> */
-    public function deleteItem(AccountProfile $profile, string $groupId, string $itemId, string $baseUrl): array
+    public function deleteItem(AccountProfile $profile, string $groupId, string $itemId, string $baseUrl, array $auditAttributes = []): array
     {
         return $this->change($profile, function (array &$groups) use ($groupId, $itemId, $profile, $baseUrl): void {
             $group = $this->groupIndex($groups, $groupId);
@@ -163,16 +163,16 @@ final class AccountProfileGalleryMutationService
                 $this->media->removeGalleryUpload($profile, $itemId, $baseUrl);
             } array_splice($items, $index, 1);
             $groups[$group]['items'] = $items;
-        }, [$itemId], $baseUrl);
+        }, [$itemId], $baseUrl, $auditAttributes);
     }
 
     /** @return array<int,array<string,mixed>> */
-    public function reorderItems(AccountProfile $profile, string $groupId, array $ids): array
+    public function reorderItems(AccountProfile $profile, string $groupId, array $ids, array $auditAttributes = []): array
     {
         return $this->change($profile, function (array &$groups) use ($groupId, $ids): void {
             $group = $this->groupIndex($groups, $groupId);
             $groups[$group]['items'] = $this->reorder($this->array($groups[$group]['items'] ?? []), $ids, 'item_id');
-        });
+        }, auditAttributes: $auditAttributes);
     }
 
     /**
@@ -184,6 +184,7 @@ final class AccountProfileGalleryMutationService
         callable $mutation,
         array|callable $affectedMediaItemIds = [],
         ?string $baseUrl = null,
+        array $auditAttributes = [],
     ): array {
         if (! $this->isAllowed($profile)) {
             $this->fail('gallery_groups', 'Gallery is not enabled for this profile type.');
@@ -192,7 +193,7 @@ final class AccountProfileGalleryMutationService
         $backup = $baseUrl === null || $resolveAffectedItemsWithinTransaction || $affectedMediaItemIds === []
             ? null
             : $this->media->captureGalleryItemMutationBackup($profile, $affectedMediaItemIds, $baseUrl);
-        $updated = $this->profiles->update($profile, [], mutateWithinTransaction: function (AccountProfile $stored) use ($mutation, $affectedMediaItemIds, $baseUrl, $resolveAffectedItemsWithinTransaction, &$backup): void {
+        $updated = $this->profiles->update($profile, $auditAttributes, mutateWithinTransaction: function (AccountProfile $stored) use ($mutation, $affectedMediaItemIds, $baseUrl, $resolveAffectedItemsWithinTransaction, &$backup): void {
             $groups = $this->array($stored->gallery_groups ?? []);
             if ($baseUrl !== null && $resolveAffectedItemsWithinTransaction && $backup === null) {
                 $resolvedItemIds = $affectedMediaItemIds($groups);

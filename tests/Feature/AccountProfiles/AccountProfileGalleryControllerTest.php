@@ -57,9 +57,26 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
     public function test_granular_photo_create_public_readback_variants_and_cleanup(): void
     {
         Storage::fake('public');
+        $actor = LandlordUser::query()->create([
+            'name' => 'Gallery Mutation Actor',
+            'emails' => ['gallery-mutation-actor@example.org'],
+            'identity_state' => 'registered',
+        ]);
+        $actor->tenant_roles = [[
+            'name' => 'Gallery Manager',
+            'slug' => 'gallery-manager',
+            'permissions' => ['account-users:update', 'account-users:view'],
+            'tenant_id' => (string) Tenant::current()?->getKey(),
+        ]];
+        $actor->save();
+        Sanctum::actingAs($actor, ['account-users:update', 'account-users:view']);
         $profile = $this->profile('gallery-media');
         $base = $this->groupsUrl($profile);
         $groupId = $this->postJson($base, ['subtitle' => 'Photos'])->assertOk()->json('data.gallery_groups.0.group_id');
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $profile->refresh();
+        $this->assertSame((string) $actor->getKey(), (string) $profile->updated_by);
+        $this->assertSame('landlord', $profile->updated_by_type);
         $created = $this->withHeaders(['Accept' => 'application/json'])->post("{$base}/{$groupId}/items", ['type' => 'photo', 'description' => 'Front entrance', 'image' => UploadedFile::fake()->image('front.jpg', 1800, 1200)])->assertOk();
         $item = $created->json('data.gallery_groups.0.items.0');
         $itemId = (string) $item['item_id'];
