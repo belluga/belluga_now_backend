@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Auth;
 
+use App\Application\AccountProfiles\AccountProfileSearchV1;
 use App\Application\Accounts\AccountUserService;
 use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
@@ -191,7 +192,10 @@ class TenantPublicAccountTokenScopeTest extends TestCaseTenant
         $operator = $this->createAccountUserWithPermissions($this->account, ['events:create']);
         $newToken = $this->issueScopedToken($operator, ['events:create'], $this->account);
         $host = AccountProfile::query()->where('account_id', (string) $this->account->_id)->firstOrFail();
+        $search = AccountProfileSearchV1::fromSources('Scoped Host', null, []);
         $host->display_name = 'Scoped Host';
+        $host->name_search_key = $search['name_search_key'];
+        $host->search_terms = $search['search_terms'];
         $host->location = [
             'type' => 'Point',
             'coordinates' => [-40.0, -20.0],

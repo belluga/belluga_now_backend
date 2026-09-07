@@ -415,7 +415,6 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
     private function runtimeConsumerPaths(): array
     {
         return [
-            'app/Application/AccountProfiles/AccountProfileNestedGroupService.php',
             'app/Application/AccountProfiles/AccountProfileGalleryService.php',
             'app/Application/AccountProfiles/AccountProfileContactChannelsService.php',
             'app/Application/AccountProfiles/AccountProfileRegistryManagementService.php',
@@ -433,7 +432,6 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
     {
         return [
             'app/Application/AccountProfiles/AccountProfileQueryService.php',
-            'app/Application/AccountProfiles/AccountProfileNestedGroupService.php',
             'app/Integration/Events/AccountProfileResolverAdapter.php',
         ];
     }
