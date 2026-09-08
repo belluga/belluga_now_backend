@@ -186,7 +186,12 @@ class TaxonomyTermManagementService
             abort(404, 'Taxonomy term not found.');
         }
 
+        $taxonomyType = (string) ($taxonomy->slug ?? '');
+        $termValue = (string) ($term->slug ?? '');
         $term->delete();
+        DB::connection('tenant')->afterCommit(
+            static fn () => RepairTaxonomyTermSnapshotsJob::dispatch($taxonomyType, $termValue),
+        );
     }
 
     private function findTaxonomy(string $taxonomyId): Taxonomy

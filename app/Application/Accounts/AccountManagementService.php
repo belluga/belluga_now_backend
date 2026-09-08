@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Application\Accounts;
 
 use App\Application\AccountProfiles\AccountProfileLifecycleService;
-use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
 use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\AccountProfiles\AccountProfileTransactionContext;
@@ -29,7 +28,6 @@ class AccountManagementService
         private readonly AccountOwnershipStateService $ownershipStateService,
         private readonly AccountPublicationStateService $accountPublicationStateService,
         private readonly PushUserGatewayContract $pushUsers,
-        private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly AccountProfileLifecycleService $accountProfileLifecycleService,
         private readonly AccountProfileOutboxDispatcher $accountProfileOutboxDispatcher,
         private readonly AccountProfileQueryService $accountProfileQueryService,
@@ -184,13 +182,11 @@ class AccountManagementService
                 $account,
                 $attributes,
                 $publicationChanged,
-                $tenantConnection,
             ): Account {
                 $account->fill($attributes);
                 $account->save();
 
                 if ($publicationChanged) {
-                    $this->syncNestedPublicMembersProjectionForAccount($tenantConnection, $account);
                 }
 
                 return $account->fresh();
@@ -464,30 +460,6 @@ class AccountManagementService
             ->filter(static fn (string $id): bool => $id !== '')
             ->values()
             ->all();
-    }
-
-    private function syncNestedPublicMembersProjectionForAccount(Connection $connection, Account $account): void
-    {
-        $profiles = $this->accountProfileQueryService
-            ->findWithTrashedByAccountId((string) $account->_id);
-
-        if ($profiles->isEmpty()) {
-            return;
-        }
-
-        $context = $this->profileTransactionContext($connection);
-        $profileIds = [];
-        foreach ($profiles as $profile) {
-            if (! $profile instanceof AccountProfile) {
-                continue;
-            }
-
-            $profileIds[] = trim((string) $profile->getKey());
-            $this->nestedPublicMembersProjectionService->rebuildForProfileWithinContext($context, $profile);
-        }
-
-        $this->nestedPublicMembersProjectionService
-            ->rebuildParentsAffectedByMemberProfilesWithinContext($context, $profileIds, $profileIds);
     }
 
     private function profileTransactionContext(Connection $connection): AccountProfileTransactionContext

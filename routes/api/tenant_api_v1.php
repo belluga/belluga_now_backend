@@ -215,6 +215,8 @@ Route::prefix('account_profiles')
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
                 Route::patch('/nested_profile_groups/{group_id}', [AccountProfilesController::class, 'patchNestedGroupLabel'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+                Route::patch('/nested_profile_groups/{group_id}/order', [AccountProfilesController::class, 'patchNestedGroupOrder'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
                 Route::get('/nested_profile_groups/{group_id}/members', [AccountProfilesController::class, 'nestedGroupMembers'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
                 Route::patch('/nested_profile_groups/{group_id}/members', [AccountProfilesController::class, 'patchNestedGroupMembers'])
@@ -226,8 +228,23 @@ Route::prefix('account_profiles')
                 Route::patch('/', [AccountProfilesController::class, 'update'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
 
-                Route::patch('/gallery', [AccountProfileGalleryController::class, 'update'])
+                Route::post('/external_links', [AccountProfilesController::class, 'storeExternalLink'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+                Route::patch('/external_links/{external_link_id}', [AccountProfilesController::class, 'updateExternalLink'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+                Route::delete('/external_links/{external_link_id}', [AccountProfilesController::class, 'deleteExternalLink'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+                Route::prefix('/gallery/groups')->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update'])->group(function (): void {
+                    Route::post('/', [AccountProfileGalleryController::class, 'createGroup']);
+                    Route::patch('/reorder', [AccountProfileGalleryController::class, 'reorderGroups']);
+                    Route::patch('/{group_id}', [AccountProfileGalleryController::class, 'updateGroup']);
+                    Route::delete('/{group_id}', [AccountProfileGalleryController::class, 'deleteGroup']);
+                    Route::post('/{group_id}/items', [AccountProfileGalleryController::class, 'createItem']);
+                    Route::patch('/{group_id}/items/reorder', [AccountProfileGalleryController::class, 'reorderItems']);
+                    Route::patch('/{group_id}/items/{item_id}', [AccountProfileGalleryController::class, 'updateItem']);
+                    Route::delete('/{group_id}/items/{item_id}', [AccountProfileGalleryController::class, 'deleteItem']);
+                });
 
                 Route::delete('/', [AccountProfilesController::class, 'destroy'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);

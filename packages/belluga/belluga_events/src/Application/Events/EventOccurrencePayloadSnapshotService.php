@@ -13,10 +13,6 @@ use RuntimeException;
 
 class EventOccurrencePayloadSnapshotService
 {
-    public function __construct(
-        private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
-    ) {}
-
     /**
      * @return array<int, array<string, mixed>>
      */

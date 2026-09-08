@@ -20,12 +20,12 @@ class AccountProfileFormatterService
         private readonly AccountProfileAgendaOccurrencesService $agendaOccurrencesService,
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
-        private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly AccountProfileGalleryService $galleryService,
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly AccountProfileContactChannelsService $contactChannelsService,
         private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
         private readonly RichTextReadCanonicalizer $richTextReadCanonicalizer,
+        private readonly AccountProfileExternalLinkService $externalLinks,
     ) {}
 
     /**
@@ -35,6 +35,8 @@ class AccountProfileFormatterService
         AccountProfile $profile,
         bool $includeAgendaOccurrences = false,
         bool $publicContactProjection = false,
+        bool $includeExternalLinks = false,
+        bool $includeExternalLinksLimit = false,
     ): array {
         $baseUrl = request()->getSchemeAndHttpHost();
         $account = Account::query()->where('_id', $profile->account_id)->first();
@@ -47,7 +49,9 @@ class AccountProfileFormatterService
             );
 
         $nestedProfileGroups = $includeAgendaOccurrences
-            ? $this->nestedPublicMembersProjectionService->publicMetadataGroups($profile)
+            ? ($publicCatalogPolicy->isPublicNestedParent($profile)
+                ? $this->nestedGroupMemberStore->publicMetadataGroups($profile)
+                : [])
             : $this->nestedGroupMemberStore->metadataGroups($profile);
         $selectedSummariesByProfileId = $includeAgendaOccurrences
             ? []
@@ -93,6 +97,16 @@ class AccountProfileFormatterService
             'updated_at' => $profile->updated_at?->toJSON(),
             'deleted_at' => $profile->deleted_at?->toJSON(),
         ];
+
+        if ($includeExternalLinks && $this->externalLinks->isAllowedForRead($profile)) {
+            $formattedExternalLinks = $this->externalLinks->formatForRead($profile);
+            if ($includeExternalLinksLimit || $formattedExternalLinks !== []) {
+                $payload['external_links'] = $formattedExternalLinks;
+            }
+            if ($includeExternalLinksLimit) {
+                $payload['external_links_limit'] = $this->externalLinks->currentLimit($profile);
+            }
+        }
 
         $payload = [
             ...$payload,

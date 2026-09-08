@@ -33,7 +33,46 @@ final class AccountProfileRelationAdmissionService
         bool $touchTargets = true,
     ): array {
         $requirements = $this->requirements($parentProfileId, $attributes);
+
+        return $this->admitRequirements($context, $requirements, $touchTargets);
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @return array<string, AccountProfile>
+     */
+    public function admitQueryableProfiles(
+        AccountProfileTransactionContext $context,
+        ?string $parentProfileId,
+        array $profileIds,
+    ): array {
+        $requirements = [];
+        $normalizedParentProfileId = trim((string) $parentProfileId);
+        foreach ($profileIds as $profileId) {
+            $normalizedProfileId = trim((string) $profileId);
+            if ($normalizedProfileId === '' || $normalizedProfileId === $normalizedParentProfileId) {
+                continue;
+            }
+            $requirements[$normalizedProfileId] = [
+                'queryable' => true,
+                'contact_capable' => false,
+            ];
+        }
+
+        return $this->admitRequirements($context, $requirements, true);
+    }
+
+    /**
+     * @param  array<string, array{queryable:bool,contact_capable:bool}>  $requirements
+     * @return array<string, AccountProfile>
+     */
+    private function admitRequirements(
+        AccountProfileTransactionContext $context,
+        array $requirements,
+        bool $touchTargets,
+    ): array {
         $admitted = [];
+        ksort($requirements, SORT_STRING);
 
         foreach ($requirements as $profileId => $requirement) {
             $profile = AccountProfile::withTrashed()->find($profileId);
@@ -71,15 +110,6 @@ final class AccountProfileRelationAdmissionService
         $contactSourceId = trim((string) ($attributes['contact_source_account_profile_id'] ?? ''));
         if ($contactSourceId !== '') {
             $register($contactSourceId, 'contact_capable');
-        }
-
-        foreach ((array) ($attributes['nested_profile_groups'] ?? []) as $group) {
-            if (! is_array($group)) {
-                continue;
-            }
-            foreach ((array) ($group['account_profile_ids'] ?? []) as $profileId) {
-                $register((string) $profileId, 'queryable');
-            }
         }
 
         if ($parentProfileId !== null && trim($parentProfileId) !== '') {

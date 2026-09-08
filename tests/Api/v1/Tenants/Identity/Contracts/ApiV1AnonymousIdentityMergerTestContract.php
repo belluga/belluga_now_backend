@@ -29,9 +29,7 @@ abstract class ApiV1AnonymousIdentityMergerTestContract extends TestCaseTenant
         parent::setUp();
 
         Tenant::forgetCurrent();
-        $this->tenantModel = Tenant::query()
-            ->where('slug', $this->tenant->slug)
-            ->firstOrFail();
+        $this->tenantModel = $this->ensureCanonicalTenantExists($this->tenant);
         $this->tenantModel->makeCurrent();
     }
 

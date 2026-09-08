@@ -1,7 +1,6 @@
 <?php
 
 use App\Application\AccountProfiles\AccountProfileNameSearchKeyRepairService;
-use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionBackfillService;
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Application\AccountProfiles\AccountProfileRegistrySyncIndexPrecondition;
 use App\Application\Accounts\AccountMissingProfileRepairService;
@@ -16,10 +15,7 @@ use App\Application\Social\InviteablePeopleProjectionService;
 use App\Application\Taxonomies\TaxonomySnapshotBackfillService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
-use App\Models\Tenants\AccountProfile;
 use Belluga\Events\Application\Events\EventOccurrenceReconciliationService;
-use Belluga\Events\Application\Events\EventProfileGroupMemberStore;
-use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
 use Belluga\Events\Application\Operations\EventAsyncOperationsMonitorService;
 use Belluga\Events\Contracts\TenantExecutionContextContract;
 use Belluga\Events\Jobs\PublishScheduledEventsJob;
@@ -346,70 +342,6 @@ Artisan::command('invites:inviteable-people-projection:backfill {tenant_slug?} {
     return 0;
 })->purpose('Backfill inviteable_people_projection for one tenant or every tenant before projection-only reads.');
 
-Artisan::command('account-profiles:nested-public-members-projection:backfill {tenant_slug?} {--all}', function () {
-    $runCurrentTenant = function (?string $tenantSlug = null): array {
-        $summary = app(AccountProfileNestedPublicMembersProjectionBackfillService::class)
-            ->rebuildCurrentTenant();
-        if ($tenantSlug !== null) {
-            $summary['tenant_slug'] = $tenantSlug;
-        }
-
-        $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
-
-        return $summary;
-    };
-
-    if ($this->option('all')) {
-        $count = 0;
-        foreach (Tenant::query()->get() as $tenant) {
-            if (! $tenant instanceof Tenant) {
-                continue;
-            }
-
-            $tenant->makeCurrent();
-            try {
-                $runCurrentTenant((string) $tenant->slug);
-                $count++;
-            } finally {
-                $tenant->forgetCurrent();
-            }
-        }
-
-        $this->info(sprintf('Processed nested public members projection rebuild for tenants: %d', $count));
-
-        return 0;
-    }
-
-    $tenantSlug = trim((string) $this->argument('tenant_slug'));
-    if ($tenantSlug !== '') {
-        $tenant = Tenant::query()->where('slug', $tenantSlug)->first();
-        if (! $tenant) {
-            $this->error("Tenant not found for slug [{$tenantSlug}].");
-
-            return 1;
-        }
-
-        $tenant->makeCurrent();
-        try {
-            $runCurrentTenant($tenantSlug);
-        } finally {
-            $tenant->forgetCurrent();
-        }
-
-        return 0;
-    }
-
-    if (! Tenant::current()) {
-        $this->error('No current tenant. Provide {tenant_slug} or use --all.');
-
-        return 1;
-    }
-
-    $runCurrentTenant((string) Tenant::current()?->slug);
-
-    return 0;
-})->purpose('Rebuild nested public member projection rows for one tenant or all tenants.');
-
 Artisan::command('api-security:abuse-signals:prune', function () {
     $result = app(ApiAbuseSignalRecorder::class)->pruneExpired();
     $this->info(sprintf(
@@ -429,17 +361,6 @@ Artisan::command('api-security:abuse-signals:report {--hours=24}', function () {
 
     return 0;
 })->purpose('Print API abuse signal aggregate report for observe-mode/enforcement review.');
-
-Artisan::command('events:legacy-event-parties:repair {--dry-run}', function () {
-    $service = app(LegacyEventPartiesCanonicalizationService::class);
-    $summary = $this->option('dry-run')
-        ? $service->inspect()
-        : $service->repair();
-
-    $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-
-    return 0;
-})->purpose('Inspect or repair legacy events that still rely on artists/venue event_parties drift.');
 
 Artisan::command('landlord:password-credentials:repair {--dry-run}', function () {
     $summary = app(LandlordPasswordCredentialBackfillService::class)
@@ -545,120 +466,6 @@ Artisan::command('events:occurrences:repair {tenant_slug?} {--all}', function ()
 
     return 0;
 })->purpose('Explicit manual repair for event occurrence projections; not part of recurring scheduler runtime.');
-
-Artisan::command('events:diagnostic:append-profile-group-member {tenant_ref} {event_id} {profile_id} {--with-event-party}', function () {
-    if (! app()->environment(['local', 'testing'])) {
-        $this->error('events:diagnostic:append-profile-group-member is local/testing only.');
-
-        return 1;
-    }
-
-    $tenantRef = trim((string) $this->argument('tenant_ref'));
-    $eventId = trim((string) $this->argument('event_id'));
-    $profileId = trim((string) $this->argument('profile_id'));
-
-    if ($tenantRef === '' || $eventId === '' || $profileId === '') {
-        $this->error('tenant_ref, event_id, and profile_id are required.');
-
-        return 1;
-    }
-
-    $tenant = Tenant::query()
-        ->where('_id', $tenantRef)
-        ->orWhere('slug', $tenantRef)
-        ->first();
-    if (! $tenant) {
-        $this->error("Tenant not found for reference [{$tenantRef}].");
-
-        return 1;
-    }
-
-    $normalizeArray = static function ($value): array {
-        if ($value instanceof \MongoDB\Model\BSONArray || $value instanceof \MongoDB\Model\BSONDocument) {
-            return $value->getArrayCopy();
-        }
-
-        return is_array($value) ? $value : [];
-    };
-
-    $normalizeDocumentArray = static function ($value) use ($normalizeArray): array {
-        return array_values(array_map(static function ($row): array {
-            if ($row instanceof \MongoDB\Model\BSONArray || $row instanceof \MongoDB\Model\BSONDocument) {
-                $row = $row->getArrayCopy();
-            }
-
-            return is_array($row) ? $row : [];
-        }, $normalizeArray($value)));
-    };
-
-    $normalizeScalarArray = static function ($value) use ($normalizeArray): array {
-        return array_values($normalizeArray($value));
-    };
-
-    $tenant->makeCurrent();
-    try {
-        $event = \Belluga\Events\Models\Tenants\Event::query()
-            ->where('_id', $eventId)
-            ->first();
-        if (! $event) {
-            $this->error("Event not found for id [{$eventId}].");
-
-            return 1;
-        }
-
-        $profile = AccountProfile::query()
-            ->where('_id', $profileId)
-            ->first();
-        if (! $profile instanceof AccountProfile) {
-            $this->error("Account profile not found for id [{$profileId}].");
-
-            return 1;
-        }
-
-        $groups = $normalizeDocumentArray($event->profile_groups ?? []);
-        if (! isset($groups[0])) {
-            $this->error('Missing first profile group for diagnostic mutation.');
-
-            return 1;
-        }
-
-        $profileGroupMemberStore = app(EventProfileGroupMemberStore::class);
-        $groups = $profileGroupMemberStore->inflateGroupsWithMembers(
-            $groups,
-            'event',
-            (string) $event->getKey(),
-        );
-
-        $memberIds = $normalizeScalarArray($groups[0]['account_profile_ids'] ?? []);
-        if (! in_array($profileId, $memberIds, true)) {
-            $memberIds[] = $profileId;
-        }
-        $groups[0]['account_profile_ids'] = $memberIds;
-        $event->profile_groups = $profileGroupMemberStore->metadataOnly($groups);
-
-        if ((bool) $this->option('with-event-party')) {
-            $this->warn('--with-event-party is deprecated and ignored; canonical diagnostics only mutate profile_groups.');
-        }
-
-        $event->save();
-        $event = $event->fresh() ?? $event;
-        $profileGroupMemberStore->syncEventGroups($event, $groups);
-        app(EventOccurrenceReconciliationService::class)->reconcileEvent($event);
-
-        $this->line(json_encode([
-            'tenant_ref' => $tenantRef,
-            'event_id' => $eventId,
-            'profile_id' => $profileId,
-            'with_event_party' => false,
-            'with_event_party_requested' => (bool) $this->option('with-event-party'),
-            'occurrence_projections_repaired' => true,
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
-
-        return 0;
-    } finally {
-        $tenant->forgetCurrent();
-    }
-})->purpose('Append a profile id to the first event profile group and resync occurrence projections for local diagnostics.');
 
 Artisan::command('push:topics:repair {tenant_slug?} {--all} {--chunk=200}', function (PushTopicMembershipService $memberships) {
     $chunkSize = max(1, min((int) $this->option('chunk'), 1000));

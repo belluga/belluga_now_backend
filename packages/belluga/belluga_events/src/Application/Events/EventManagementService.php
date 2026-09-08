@@ -170,6 +170,22 @@ class EventManagementService
         return $group;
     }
 
+    /** @return array{event_id:string,occurrence_id:string,groups:array<int, array{id:string,order:int}>} */
+    public function moveOccurrenceGroup(
+        Event $event,
+        EventOccurrence $occurrence,
+        string $groupId,
+        string $direction,
+    ): array {
+        $result = $this->eventAggregateWrites->moveOccurrenceGroup($event, $occurrence, $groupId, $direction);
+        if ($result['_changed']) {
+            $this->events->dispatch(new EventUpdated((string) $event->_id));
+        }
+        unset($result['_changed']);
+
+        return $result;
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      * @return array{
@@ -427,7 +443,6 @@ class EventManagementService
                 'date_time_start' => $start,
                 'date_time_end' => $end,
                 'profile_groups' => $profileGroups,
-                '_profile_groups_explicit' => array_key_exists('profile_groups', $occurrence),
                 'has_location_override' => false,
                 'location_override' => null,
                 'taxonomy_terms' => $taxonomyTerms,

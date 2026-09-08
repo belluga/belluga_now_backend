@@ -93,6 +93,7 @@
         <env name="APP_HOST" value="nginx" />
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
+        <env name="ACCOUNT_PROFILE_EXTERNAL_LINKS_LIMIT" value="3"/>
         <env name="CACHE_STORE" value="array"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>

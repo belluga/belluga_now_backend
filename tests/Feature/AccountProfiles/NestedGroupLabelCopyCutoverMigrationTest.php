@@ -54,17 +54,12 @@ final class NestedGroupLabelCopyCutoverMigrationTest extends TestCase
                 'group_key' => 'artists', 'group_label' => 'Artists', 'doc_type' => 'member_row',
             ],
         ]);
-        $database->selectCollection('account_profile_nested_public_member_projection')->insertOne([
-            '_id' => 'projection-1', 'group_label' => 'Artists',
-        ]);
-
         $migration = $this->migration();
         $migration->up();
         $migration->up();
 
         self::assertNull($database->selectCollection('accounts_nested')->findOne(['_id' => 'member-1'])['group_label'] ?? null);
         self::assertNull($database->selectCollection('accounts_nested')->findOne(['_id' => 'member-2'])['group_label'] ?? null);
-        self::assertNull($database->selectCollection('account_profile_nested_public_member_projection')->findOne(['_id' => 'projection-1'])['group_label'] ?? null);
     }
 
     public function test_cutover_rejects_duplicate_or_non_parity_embedded_mirror(): void

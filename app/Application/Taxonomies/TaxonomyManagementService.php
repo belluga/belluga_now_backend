@@ -73,8 +73,12 @@ class TaxonomyManagementService
             abort(404, 'Taxonomy not found.');
         }
 
+        $taxonomyType = (string) ($taxonomy->slug ?? '');
         TaxonomyTerm::query()->where('taxonomy_id', (string) $taxonomy->_id)->delete();
         $taxonomy->delete();
+        DB::connection('tenant')->afterCommit(
+            static fn () => RepairTaxonomyTermSnapshotsJob::dispatch($taxonomyType),
+        );
     }
 
     /**

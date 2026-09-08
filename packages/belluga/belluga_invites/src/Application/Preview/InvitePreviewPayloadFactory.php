@@ -135,7 +135,7 @@ class InvitePreviewPayloadFactory
         ];
         $normalizedDisplayName = trim((string) $inviterDisplayName);
         if ($normalizedDisplayName === '') {
-            $normalizedDisplayName = 'Um amigo';
+            $normalizedDisplayName = 'Alguém';
         }
         $normalizedAvatarUrl = $this->normalizeOptionalString($inviterAvatarUrl);
 

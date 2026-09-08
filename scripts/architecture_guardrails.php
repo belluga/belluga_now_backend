@@ -54,6 +54,7 @@ final class ArchitectureGuardrailRunner
         $this->checkAccountRouteAbilityBindingGuardrails();
         $this->checkAccountProfileQueryabilityGuardrails();
         $this->checkPublicTaxonomyCutoverGuardrails();
+        $this->checkNestedMemberPaginationGuardrails();
 
         if ($this->violations === []) {
             fwrite(STDOUT, "[ARCH-GUARDRAILS] PASS - no architecture violations found.\n");
@@ -2043,6 +2044,48 @@ final class ArchitectureGuardrailRunner
                 'scripts/public_taxonomy_cutover_guardrails.php',
                 1,
                 'Public taxonomy cutover guardrails reported violations. Review the emitted findings above.'
+            );
+        }
+    }
+
+    private function checkNestedMemberPaginationGuardrails(): void
+    {
+        $scriptPath = $this->repoRoot.'/scripts/nested_member_pagination_guardrails.php';
+        if (! is_file($scriptPath)) {
+            $this->addViolation(
+                'LAR-NESTED-MEMBER-GUARD',
+                'scripts/nested_member_pagination_guardrails.php',
+                1,
+                'Missing nested-member pagination guardrail script.',
+            );
+
+            return;
+        }
+
+        require_once $scriptPath;
+        if (! class_exists('NestedMemberPaginationGuard')) {
+            $this->addViolation(
+                'LAR-NESTED-MEMBER-GUARD',
+                'scripts/nested_member_pagination_guardrails.php',
+                1,
+                'Nested-member pagination guardrail script did not expose its runtime guard.',
+            );
+
+            return;
+        }
+
+        ob_start();
+        $exitCode = (new \NestedMemberPaginationGuard($this->repoRoot))->run();
+        $guardOutput = (string) ob_get_clean();
+        if ($guardOutput !== '') {
+            fwrite($exitCode === 0 ? STDOUT : STDERR, $guardOutput);
+        }
+        if ($exitCode !== 0) {
+            $this->addViolation(
+                'LAR-NESTED-MEMBER-GUARD',
+                'scripts/nested_member_pagination_guardrails.php',
+                1,
+                'Nested-member pagination guardrails reported violations.',
             );
         }
     }

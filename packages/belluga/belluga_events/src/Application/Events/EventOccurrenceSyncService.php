@@ -22,7 +22,6 @@ class EventOccurrenceSyncService
     public function __construct(
         private readonly EventTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
         private readonly EventProfileResolverContract $eventProfileResolver,
-        private readonly EventProfileGroupMemberStore $profileGroupMemberStore,
         private readonly EventOccurrenceNestedAccountStore $occurrenceNestedAccountStore,
     ) {}
 
@@ -74,11 +73,12 @@ class EventOccurrenceSyncService
             $ownTaxonomyTerms = $this->ensureTaxonomySnapshots($occurrence['taxonomy_terms'] ?? []);
             $effectiveTaxonomyTerms = $ownTaxonomyTerms !== [] ? $ownTaxonomyTerms : $eventTaxonomyTerms;
             $ownProfileGroups = $this->normalizeProfileGroups($occurrence['profile_groups'] ?? []);
-            $profileGroupsExplicit = (bool) ($occurrence['_profile_groups_explicit'] ?? false);
             $effectiveLocation = $this->resolveEffectiveLocationPayload($event, $occurrence, $eventGeoLocation);
             $programmingItems = $this->normalizeProgrammingItems($occurrence['programming_items'] ?? []);
             $document = $resolvedDocuments[$index] ?? null;
-            $isExistingDocument = $document instanceof EventOccurrence;
+            if (! $document instanceof EventOccurrence) {
+                $ownProfileGroups = [];
+            }
 
             $payload = [
                 'event_id' => $eventId,
@@ -93,8 +93,8 @@ class EventOccurrenceSyncService
                 'geo_location' => $effectiveLocation['geo_location'],
                 'has_location_override' => $effectiveLocation['has_location_override'],
                 'location_override' => $effectiveLocation['location_override'],
-                'own_profile_groups' => $this->profileGroupMemberStore->metadataOnly($ownProfileGroups),
-                'profile_groups' => $this->profileGroupMemberStore->metadataOnly($ownProfileGroups),
+                'own_profile_groups' => $this->occurrenceNestedAccountStore->metadataOnly($ownProfileGroups),
+                'profile_groups' => $this->occurrenceNestedAccountStore->metadataOnly($ownProfileGroups),
                 'categories' => $this->normalizeArray($event->categories ?? []),
                 'own_taxonomy_terms' => $ownTaxonomyTerms,
                 'taxonomy_terms' => $effectiveTaxonomyTerms,
@@ -127,24 +127,6 @@ class EventOccurrenceSyncService
             }
 
             if (isset($document->_id)) {
-                if (! $isExistingDocument) {
-                    $this->profileGroupMemberStore->syncOccurrenceGroups(
-                        $eventId,
-                        $document,
-                        $ownProfileGroups,
-                    );
-                    $this->occurrenceNestedAccountStore->syncOccurrenceGroups(
-                        $eventId,
-                        $document,
-                        $ownProfileGroups,
-                    );
-                } elseif ($profileGroupsExplicit) {
-                    $this->occurrenceNestedAccountStore->syncOccurrenceGroupMetadata(
-                        $eventId,
-                        $document,
-                        $ownProfileGroups,
-                    );
-                }
                 $documentId = (string) $document->_id;
                 $activeDocumentIds[] = $documentId;
                 $occurrenceRefs[] = [
@@ -515,9 +497,7 @@ class EventOccurrenceSyncService
         return [];
     }
 
-    /**
-     * @return array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>
-     */
+    /** @return array<int, array{id: string, label: string, order: int}> */
     private function normalizeProfileGroups(mixed $value): array
     {
         $rows = $this->normalizeArray($value);
@@ -535,20 +515,11 @@ class EventOccurrenceSyncService
                 $id = 'group-'.$index;
             }
 
-            $memberIds = [];
-            foreach ($this->normalizeArray($payload['account_profile_ids'] ?? $payload['profile_ids'] ?? []) as $rawMemberId) {
-                $memberId = trim((string) $rawMemberId);
-                if ($memberId !== '' && ! in_array($memberId, $memberIds, true)) {
-                    $memberIds[] = $memberId;
-                }
-            }
-
             $groups[] = [
                 '_source_index' => $index,
                 'id' => $id,
                 'label' => $label,
                 'order' => isset($payload['order']) ? (int) $payload['order'] : $index,
-                'account_profile_ids' => $memberIds,
             ];
         }
 
@@ -563,53 +534,9 @@ class EventOccurrenceSyncService
                 'id' => $group['id'],
                 'label' => $group['label'],
                 'order' => $group['order'],
-                'account_profile_ids' => $group['account_profile_ids'],
             ],
             $groups
         ));
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $eventGroups
-     * @param  array<int, array<string, mixed>>  $ownGroups
-     * @return array<int, array{id: string, label: string, order: int, account_profile_ids: array<int, string>}>
-     */
-    private function mergeProfileGroups(array $eventGroups, array $ownGroups): array
-    {
-        $merged = [];
-        $indexById = [];
-        foreach ([$eventGroups, $ownGroups] as $groupSet) {
-            foreach ($groupSet as $group) {
-                $id = trim((string) ($group['id'] ?? ''));
-                $label = trim((string) ($group['label'] ?? ''));
-                if ($id === '' || $label === '') {
-                    continue;
-                }
-
-                if (! isset($indexById[$id])) {
-                    $indexById[$id] = count($merged);
-                    $merged[] = [
-                        'id' => $id,
-                        'label' => $label,
-                        'order' => count($merged),
-                        'account_profile_ids' => [],
-                    ];
-                }
-
-                $targetIndex = $indexById[$id];
-                foreach ($this->normalizeArray($group['account_profile_ids'] ?? []) as $rawMemberId) {
-                    $memberId = trim((string) $rawMemberId);
-                    if (
-                        $memberId !== ''
-                        && ! in_array($memberId, $merged[$targetIndex]['account_profile_ids'], true)
-                    ) {
-                        $merged[$targetIndex]['account_profile_ids'][] = $memberId;
-                    }
-                }
-            }
-        }
-
-        return $merged;
     }
 
     private function resolveEventGeoLocation(Event $event): array

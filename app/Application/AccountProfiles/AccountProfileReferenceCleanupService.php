@@ -126,20 +126,6 @@ final class AccountProfileReferenceCleanupService
         }
         $context->collection(AccountProfileNestedGroupMemberStore::COLLECTION)->deleteMany($nestedFilter, $context->rawOptions());
 
-        $projectionFilter = [
-            '$or' => [
-                ['parent_profile_id' => ['$in' => $profileIds]],
-                ['member_profile_id' => ['$in' => $profileIds]],
-            ],
-        ];
-        if ($tenantId !== '') {
-            $projectionFilter['tenant_id'] = $tenantId;
-        }
-        $context->collection(AccountProfileNestedPublicMembersProjectionService::COLLECTION)->deleteMany(
-            $projectionFilter,
-            $context->rawOptions(),
-        );
-
         $this->mapPois->deleteByRefsWithinTransaction(
             $context->database(),
             $context->session(),
@@ -203,41 +189,14 @@ final class AccountProfileReferenceCleanupService
             $attributes['contact_bubble_channel_id'] = null;
         }
 
-        $groups = $this->nestedGroupMemberStore->metadataGroupsWithinContext($context, $profile);
-        $cleanedGroups = [];
-        $groupsChanged = false;
-        foreach ($groups as $group) {
-            if (! is_array($group)) {
-                $cleanedGroups[] = $group;
-
-                continue;
-            }
-
-            $groupId = trim((string) ($group['id'] ?? ''));
-            $memberIds = $groupId === ''
-                ? []
-                : $this->nestedGroupMemberStore->groupMemberIdsWithinContext($context, $profile, $groupId);
-            $cleanedMemberIds = array_values(array_filter(
-                $memberIds,
-                fn (mixed $memberId): bool => ! in_array(trim((string) $memberId), $deletedProfileIds, true),
-            ));
-            if ($cleanedMemberIds !== $memberIds) {
-                $groupsChanged = true;
-                if ($groupId !== '') {
-                    $this->nestedGroupMemberStore->replaceGroupMembersWithinContext(
-                        $context,
-                        $profile,
-                        $groupId,
-                        $cleanedMemberIds,
-                    );
-                }
-            }
-            $group['member_count'] = count($cleanedMemberIds);
-            $cleanedGroups[] = $group;
-        }
-
-        if ($groupsChanged) {
-            $attributes['nested_profile_groups'] = $cleanedGroups;
+        $deletedRelationships = $this->nestedGroupMemberStore->removeMemberIdsFromParentWithinContext(
+            $context,
+            $profile,
+            $deletedProfileIds,
+        );
+        if ($deletedRelationships > 0) {
+            $attributes['nested_profile_groups'] = $this->nestedGroupMemberStore
+                ->metadataGroupsWithinContext($context, $profile);
         }
 
         return $attributes;
@@ -283,9 +242,7 @@ final class AccountProfileReferenceCleanupService
         return AccountProfile::withTrashed()
             ->whereNotIn('_id', $deletedProfileIds)
             ->where(function ($query) use ($deletedProfileIds, $parentIdsFromMemberRows): void {
-                $query
-                    ->whereIn('contact_source_account_profile_id', $deletedProfileIds)
-                    ->orWhereIn('nested_profile_groups.account_profile_ids', $deletedProfileIds);
+                $query->whereIn('contact_source_account_profile_id', $deletedProfileIds);
 
                 if ($parentIdsFromMemberRows !== []) {
                     $query->orWhereIn('_id', $parentIdsFromMemberRows);

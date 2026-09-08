@@ -31,7 +31,7 @@ final class EventOccurrenceNestedAccountStore
 
     private const DOC_TYPE_MEMBER = 'member_row';
 
-    private const CURSOR_VERSION = 1;
+    private const CURSOR_VERSION = 2;
 
     private const CURSOR_SCOPE = 'event_related_profile_members';
 
@@ -44,35 +44,32 @@ final class EventOccurrenceNestedAccountStore
 
     /**
      * @param  array<int, array<string, mixed>>  $groups
+     * @return array<int, array{id:string,label:string,order:int}>
      */
-    public function syncOccurrenceGroups(string $eventId, EventOccurrence $occurrence, array $groups): void
+    public function metadataOnly(array $groups): array
     {
-        $eventId = trim($eventId);
-        $occurrenceId = trim((string) $occurrence->getKey());
-        if ($eventId === '' || $occurrenceId === '') {
-            return;
-        }
-
-        $filter = [
-            'tenant_id' => $this->tenantId(),
-            'event_id' => $eventId,
-            'parent_type' => self::PARENT_TYPE,
-            'parent_id' => $occurrenceId,
-        ];
-
-        $this->collection()->deleteMany($filter);
-
-        $rows = $this->rowsForOccurrence($eventId, $occurrenceId, $groups);
-        if ($rows !== []) {
-            $this->collection()->insertMany($rows);
-        }
+        return array_values(array_map(
+            static fn (array $group): array => [
+                'id' => trim((string) ($group['id'] ?? '')),
+                'label' => (string) ($group['label'] ?? ''),
+                'order' => (int) ($group['order'] ?? 0),
+            ],
+            array_values(array_filter(
+                $groups,
+                static fn (array $group): bool => trim((string) ($group['id'] ?? '')) !== '',
+            )),
+        ));
     }
 
     /**
      * @param  array<int, array<string, mixed>>  $groups
      */
-    public function syncOccurrenceGroupMetadata(string $eventId, EventOccurrence $occurrence, array $groups): void
-    {
+    public function syncOccurrenceGroupMetadataWithinContext(
+        EventTransactionContext $context,
+        string $eventId,
+        EventOccurrence $occurrence,
+        array $groups,
+    ): void {
         $eventId = trim($eventId);
         $occurrenceId = trim((string) $occurrence->getKey());
         if ($eventId === '' || $occurrenceId === '') {
@@ -104,7 +101,7 @@ final class EventOccurrenceNestedAccountStore
         )));
 
         if ($normalizedGroups === []) {
-            $this->collection()->deleteMany($filter);
+            $context->collection(self::COLLECTION)->deleteMany($filter, $context->rawOptions());
 
             return;
         }
@@ -116,7 +113,7 @@ final class EventOccurrenceNestedAccountStore
             $groupId = (string) $group['id'];
             $keepGroupIds[] = $groupId;
 
-            $this->collection()->updateOne(
+            $context->collection(self::COLLECTION)->updateOne(
                 [
                     '_id' => $this->headId($occurrenceId, $groupId),
                 ],
@@ -133,31 +130,15 @@ final class EventOccurrenceNestedAccountStore
                         'updated_at' => $now,
                     ],
                 ],
-                ['upsert' => true],
+                [...$context->rawOptions(), 'upsert' => true],
             );
 
-            $this->collection()->updateMany(
-                [
-                    'tenant_id' => $filter['tenant_id'],
-                    'event_id' => $eventId,
-                    'parent_type' => self::PARENT_TYPE,
-                    'parent_id' => $occurrenceId,
-                    'group_key' => $groupId,
-                    'doc_type' => self::DOC_TYPE_MEMBER,
-                ],
-                [
-                    '$set' => [
-                        'group_order' => (int) $group['order'],
-                        'updated_at' => $now,
-                    ],
-                ],
-            );
         }
 
-        $this->collection()->deleteMany([
+        $context->collection(self::COLLECTION)->deleteMany([
             ...$filter,
             'group_key' => ['$nin' => array_values(array_unique($keepGroupIds))],
-        ]);
+        ], $context->rawOptions());
     }
 
     /**
@@ -252,6 +233,85 @@ final class EventOccurrenceNestedAccountStore
             'parent_id' => $occurrenceId,
             'group_key' => (string) $head['group_key'],
         ], $context->rawOptions());
+        $context->collection(self::COLLECTION)->updateMany([
+            'tenant_id' => $this->tenantId(),
+            'event_id' => $eventId,
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $occurrenceId,
+            'doc_type' => self::DOC_TYPE_HEAD,
+            'group_order' => ['$gt' => (int) ($head['group_order'] ?? 0)],
+        ], ['$inc' => ['group_order' => -1]], $context->rawOptions());
+    }
+
+    /** @return array<int, array{id:string,order:int}> */
+    public function orderedGroupPositionsWithinContext(
+        EventTransactionContext $context,
+        string $eventId,
+        string $occurrenceId,
+    ): array {
+        $rows = $context->collection(self::COLLECTION)->find([
+            'tenant_id' => $this->tenantId(),
+            'event_id' => trim($eventId),
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => trim($occurrenceId),
+            'doc_type' => self::DOC_TYPE_HEAD,
+        ], [
+            ...$context->rawOptions(),
+            'projection' => ['group_key' => 1, 'group_order' => 1],
+            'sort' => ['group_order' => 1, '_id' => 1],
+        ]);
+
+        return array_values(array_map(function (array|object $row): array {
+            $document = $this->documentToArray($row);
+
+            return [
+                'id' => trim((string) ($document['group_key'] ?? '')),
+                'order' => (int) ($document['group_order'] ?? -1),
+            ];
+        }, iterator_to_array($rows)));
+    }
+
+    public function swapAdjacentGroupOrdersWithinContext(
+        EventTransactionContext $context,
+        string $eventId,
+        string $occurrenceId,
+        array $moved,
+        array $neighbor,
+    ): void {
+        $eventId = trim($eventId);
+        $occurrenceId = trim($occurrenceId);
+        $movedId = trim((string) ($moved['id'] ?? ''));
+        $neighborId = trim((string) ($neighbor['id'] ?? ''));
+        if ($eventId === '' || $occurrenceId === '' || $movedId === '' || $neighborId === '') {
+            throw new NotFoundHttpException;
+        }
+
+        $result = $context->collection(self::COLLECTION)->updateMany([
+            'tenant_id' => $this->tenantId(),
+            'event_id' => $eventId,
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $occurrenceId,
+            'doc_type' => self::DOC_TYPE_HEAD,
+            '$or' => [
+                ['group_key' => $movedId, 'group_order' => (int) $moved['order']],
+                ['group_key' => $neighborId, 'group_order' => (int) $neighbor['order']],
+            ],
+        ], [[
+            '$set' => [
+                'group_order' => [
+                    '$cond' => [
+                        ['$eq' => ['$group_key', ['$literal' => $movedId]]],
+                        (int) $neighbor['order'],
+                        (int) $moved['order'],
+                    ],
+                ],
+                'updated_at' => '$$NOW',
+            ],
+        ]], $context->rawOptions());
+
+        if ($result->getMatchedCount() !== 2 || $result->getModifiedCount() !== 2) {
+            throw new RuntimeException('Event occurrence nested group heads changed during reorder.');
+        }
     }
 
     /**
@@ -269,27 +329,15 @@ final class EventOccurrenceNestedAccountStore
             return [];
         }
 
-        $rows = iterator_to_array($this->collection()->find(
+        return $this->normalizedStrings($this->collection()->distinct(
+            'parent_id',
             [
                 'tenant_id' => $this->tenantId(),
                 'parent_type' => self::PARENT_TYPE,
                 'doc_type' => self::DOC_TYPE_MEMBER,
                 'nested_profile.id' => ['$in' => $normalizedProfileIds],
             ],
-            [
-                'projection' => ['parent_id' => 1],
-            ],
         ));
-
-        $occurrenceIds = [];
-        foreach ($rows as $row) {
-            $occurrenceId = trim((string) (($this->documentToArray($row)['parent_id'] ?? null) ?: ''));
-            if ($occurrenceId !== '' && ! in_array($occurrenceId, $occurrenceIds, true)) {
-                $occurrenceIds[] = $occurrenceId;
-            }
-        }
-
-        return $occurrenceIds;
     }
 
     /**
@@ -298,46 +346,39 @@ final class EventOccurrenceNestedAccountStore
      */
     public function eventIdsForMemberProfiles(array $profileIds): array
     {
-        $occurrenceIds = $this->occurrenceIdsForMemberProfiles($profileIds);
-        if ($occurrenceIds === []) {
+        $normalizedProfileIds = $this->normalizedStrings($profileIds);
+        if ($normalizedProfileIds === []) {
             return [];
         }
 
-        $rows = iterator_to_array($this->collection()->find(
+        return $this->normalizedStrings($this->collection()->distinct(
+            'event_id',
             [
                 'tenant_id' => $this->tenantId(),
                 'parent_type' => self::PARENT_TYPE,
                 'doc_type' => self::DOC_TYPE_MEMBER,
-                'parent_id' => ['$in' => $occurrenceIds],
-            ],
-            [
-                'projection' => ['event_id' => 1],
+                'nested_profile.id' => ['$in' => $normalizedProfileIds],
             ],
         ));
-
-        $eventIds = [];
-        foreach ($rows as $row) {
-            $eventId = trim((string) (($this->documentToArray($row)['event_id'] ?? null) ?: ''));
-            if ($eventId !== '' && ! in_array($eventId, $eventIds, true)) {
-                $eventIds[] = $eventId;
-            }
-        }
-
-        return $eventIds;
     }
 
     /**
      * @return array<int, array{id:string,label:string,order:int,member_count:int,members_path:string}>
      */
-    public function adminOccurrenceGroupMetadata(EventOccurrence $occurrence, string $eventRouteKey): array
-    {
+    public function adminOccurrenceGroupMetadata(
+        EventOccurrence $occurrence,
+        string $eventRouteKey,
+        ?EventTransactionContext $context = null,
+    ): array {
         $eventId = trim((string) ($occurrence->event_id ?? ''));
         $occurrenceId = trim((string) $occurrence->getKey());
         if ($eventId === '' || $occurrenceId === '') {
             return [];
         }
 
-        $headRows = iterator_to_array($this->collection()->find(
+        $collection = $context?->collection(self::COLLECTION) ?? $this->collection();
+        $rawOptions = $context?->rawOptions() ?? [];
+        $headRows = iterator_to_array($collection->find(
             [
                 'tenant_id' => $this->tenantId(),
                 'event_id' => $eventId,
@@ -346,6 +387,7 @@ final class EventOccurrenceNestedAccountStore
                 'doc_type' => self::DOC_TYPE_HEAD,
             ],
             [
+                ...$rawOptions,
                 'sort' => ['group_order' => 1, '_id' => 1],
             ],
         ));
@@ -359,33 +401,28 @@ final class EventOccurrenceNestedAccountStore
             return [];
         }
 
-        $memberRows = iterator_to_array($this->collection()->find(
-            [
+        $memberRows = $collection->aggregate([
+            ['$match' => [
                 'tenant_id' => $this->tenantId(),
                 'event_id' => $eventId,
                 'parent_type' => self::PARENT_TYPE,
                 'parent_id' => $occurrenceId,
                 'doc_type' => self::DOC_TYPE_MEMBER,
-            ],
-            [
-                'projection' => ['group_key' => 1, 'nested_profile.id' => 1],
-                'sort' => ['item_order' => 1, '_id' => 1],
-            ],
-        ));
+            ]],
+            ['$group' => [
+                '_id' => ['group_key' => '$group_key', 'member_id' => '$nested_profile.id'],
+            ]],
+            ['$group' => ['_id' => '$_id.group_key', 'member_count' => ['$sum' => 1]]],
+        ], $rawOptions);
 
-        $memberIdsByGroup = [];
+        $memberCountsByGroup = [];
         foreach ($memberRows as $row) {
             $document = $this->documentToArray($row);
-            $groupKey = trim((string) ($document['group_key'] ?? ''));
-            $memberId = trim((string) (($this->normalizeArray($document['nested_profile'] ?? [])['id'] ?? null) ?: ''));
-            if ($groupKey === '' || $memberId === '') {
+            $groupKey = trim((string) ($document['_id'] ?? ''));
+            if ($groupKey === '') {
                 continue;
             }
-
-            $memberIdsByGroup[$groupKey] ??= [];
-            if (! in_array($memberId, $memberIdsByGroup[$groupKey], true)) {
-                $memberIdsByGroup[$groupKey][] = $memberId;
-            }
+            $memberCountsByGroup[$groupKey] = max(0, (int) ($document['member_count'] ?? 0));
         }
 
         $eventRouteKey = trim($eventRouteKey);
@@ -406,7 +443,7 @@ final class EventOccurrenceNestedAccountStore
                 'id' => $groupKey,
                 'label' => $label,
                 'order' => (int) ($document['group_order'] ?? count($groups)),
-                'member_count' => count($memberIdsByGroup[$groupKey] ?? []),
+                'member_count' => (int) ($memberCountsByGroup[$groupKey] ?? 0),
                 'members_path' => "/admin/api/v1/events/{$eventRouteKey}/occurrences/{$occurrenceId}/profile_groups/{$groupKey}/members",
             ];
         }
@@ -475,6 +512,7 @@ final class EventOccurrenceNestedAccountStore
         int $defaultPerPage,
         ?int $suppliedPerPage,
         ?string $cursor,
+        ?string $search = null,
     ): array {
         $eventId = trim((string) ($occurrence->event_id ?? ''));
         $occurrenceId = trim((string) $occurrence->getKey());
@@ -484,14 +522,17 @@ final class EventOccurrenceNestedAccountStore
 
         $group = $this->findOccurrenceGroupHeadOrFail($eventId, $occurrenceId, $groupId);
         $perPage = max(1, $defaultPerPage);
-        $offset = 0;
+        $lastItemOrder = null;
+        $lastRowId = null;
 
         if ($cursor !== null) {
             $payload = $this->decodeAdminCursor($cursor);
             if (($payload['scope'] ?? null) !== self::ADMIN_CURSOR_SCOPE
+                || ($payload['tenant_id'] ?? null) !== $this->tenantId()
                 || ($payload['event_id'] ?? null) !== $eventId
                 || ($payload['occurrence_id'] ?? null) !== $occurrenceId
-                || ($payload['group_id'] ?? null) !== (string) ($group['group_key'] ?? '')) {
+                || ($payload['group_id'] ?? null) !== (string) ($group['group_key'] ?? '')
+                || ($payload['search'] ?? null) !== $search) {
                 throw ValidationException::withMessages([
                     'cursor' => ['Event related-account member cursor is invalid for this occurrence or group.'],
                 ]);
@@ -505,26 +546,91 @@ final class EventOccurrenceNestedAccountStore
             }
 
             $perPage = max(1, $cursorPerPage);
-            $offset = max(0, (int) ($payload['offset'] ?? 0));
+            $lastItemOrder = (int) ($payload['last_item_order'] ?? -1);
+            $lastRowId = trim((string) ($payload['last_row_id'] ?? ''));
         } elseif ($suppliedPerPage !== null) {
             $perPage = max(1, $suppliedPerPage);
         }
 
-        $memberIds = $this->occurrenceGroupMemberIds($eventId, $occurrenceId, (string) ($group['group_key'] ?? ''));
-        $pageIds = array_slice($memberIds, $offset, $perPage + 1);
+        $scope = [
+            'tenant_id' => $this->tenantId(),
+            'event_id' => $eventId,
+            'parent_type' => self::PARENT_TYPE,
+            'parent_id' => $occurrenceId,
+            'group_key' => (string) ($group['group_key'] ?? ''),
+            'doc_type' => self::DOC_TYPE_MEMBER,
+        ];
+        if ($search !== null) {
+            $scope = $this->eventProfileResolver->memberSearchPredicate($scope, $search);
+        }
+        $constraints = [$scope];
+        if ($lastItemOrder !== null && $lastRowId !== null) {
+            $constraints[] = ['$or' => [
+                ['item_order' => ['$gt' => $lastItemOrder]],
+                ['item_order' => $lastItemOrder, '_id' => ['$gt' => $lastRowId]],
+            ]];
+        }
+        $scope = count($constraints) === 1 ? $scope : ['$and' => $constraints];
+        $pageRows = iterator_to_array($this->collection()->aggregate([
+            ['$match' => $scope],
+            ['$sort' => ['item_order' => 1, '_id' => 1]],
+            ['$limit' => $perPage + 1],
+            ['$lookup' => [
+                'from' => 'account_profiles',
+                'let' => ['member_profile_id' => '$nested_profile.id'],
+                'pipeline' => [
+                    ['$match' => [
+                        '$expr' => [
+                            '$eq' => [
+                                '$_id',
+                                [
+                                    '$convert' => [
+                                        'input' => '$$member_profile_id',
+                                        'to' => 'objectId',
+                                        'onError' => null,
+                                        'onNull' => null,
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ]],
+                    ['$project' => ['_id' => 1, 'display_name' => 1]],
+                ],
+                'as' => 'profile',
+            ]],
+        ]));
+        $pageIds = array_values(array_filter(array_map(function (mixed $row): string {
+            $document = $this->documentToArray($row);
+
+            return trim((string) (($this->normalizeArray($document['nested_profile'] ?? [])['id'] ?? null) ?: ''));
+        }, $pageRows)));
         $visibleIds = array_slice($pageIds, 0, $perPage);
-        $profilesById = $this->eventProfileResolver->resolveExistingEventPartyDisplayProfilesByIds($visibleIds);
+        $profilesById = [];
+        foreach (array_slice($pageRows, 0, $perPage) as $row) {
+            $document = $this->documentToArray($row);
+            $nestedProfile = $this->normalizeArray($document['nested_profile'] ?? []);
+            $profileId = trim((string) ($nestedProfile['id'] ?? ''));
+            $profileRows = $this->normalizeArray($document['profile'] ?? []);
+            $profile = $this->normalizeArray($profileRows[0] ?? []);
+            if ($profileId !== '' && $profile !== []) {
+                $profilesById[$profileId] = $profile;
+            }
+        }
 
         $nextCursor = null;
-        if (count($pageIds) > $perPage) {
+        if (count($pageIds) > $perPage && count($pageRows) >= $perPage) {
+            $last = $this->documentToArray($pageRows[$perPage - 1]);
             $nextCursor = Crypt::encryptString(json_encode([
                 'version' => self::CURSOR_VERSION,
                 'scope' => self::ADMIN_CURSOR_SCOPE,
+                'tenant_id' => $this->tenantId(),
                 'event_id' => $eventId,
                 'occurrence_id' => $occurrenceId,
                 'group_id' => (string) ($group['group_key'] ?? ''),
                 'per_page' => $perPage,
-                'offset' => $offset + $perPage,
+                'search' => $search,
+                'last_item_order' => (int) ($last['item_order'] ?? -1),
+                'last_row_id' => (string) ($last['_id'] ?? ''),
                 'expires_at' => now()->addMinutes(15)->toIso8601String(),
             ], JSON_THROW_ON_ERROR));
         }
@@ -547,134 +653,192 @@ final class EventOccurrenceNestedAccountStore
     }
 
     /**
-     * @param  array<int, string>  $memberIds
+     * @param  array<int, string>  $addIds
+     * @param  array<int, string>  $removeIds
      */
-    public function replaceOccurrenceGroupMembers(
+    public function patchOccurrenceGroupMembersWithinContext(
+        EventTransactionContext $context,
         EventOccurrence $occurrence,
         string $groupId,
-        array $memberIds,
-    ): int {
+        array $addIds,
+        array $removeIds,
+    ): void {
         $eventId = trim((string) ($occurrence->event_id ?? ''));
         $occurrenceId = trim((string) $occurrence->getKey());
         if ($eventId === '' || $occurrenceId === '') {
             throw new NotFoundHttpException;
         }
-
-        $group = $this->findOccurrenceGroupHeadOrFail($eventId, $occurrenceId, $groupId);
-        $normalizedIds = array_values(array_unique(array_filter(array_map(
-            static fn (mixed $memberId): string => trim((string) $memberId),
-            $memberIds,
-        ), static fn (string $memberId): bool => $memberId !== '')));
-
-        $profilesById = $this->profilesByIdForIds($normalizedIds);
-        $now = new UTCDateTime((int) now()->getTimestampMs());
+        $group = $this->findOccurrenceGroupHeadOrFail($eventId, $occurrenceId, $groupId, $context);
         $groupKey = (string) ($group['group_key'] ?? '');
+        $removeIds = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $id): string => trim((string) $id),
+            $removeIds,
+        ), static fn (string $id): bool => $id !== '')));
+        if ($removeIds !== []) {
+            $context->collection(self::COLLECTION)->deleteMany([
+                '_id' => ['$in' => array_map(
+                    fn (string $memberId): string => $this->memberId($occurrenceId, $groupKey, $memberId),
+                    $removeIds,
+                )],
+            ], $context->rawOptions());
+        }
 
-        $this->collection()->deleteMany([
+        $addIds = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $id): string => trim((string) $id),
+            $addIds,
+        ), static fn (string $id): bool => $id !== '')));
+        if ($addIds === []) {
+            return;
+        }
+        $profilesById = $this->profilesByIdForIds($addIds);
+        $lastMember = $this->documentToArray($context->collection(self::COLLECTION)->findOne([
             'tenant_id' => $this->tenantId(),
             'event_id' => $eventId,
             'parent_type' => self::PARENT_TYPE,
             'parent_id' => $occurrenceId,
             'group_key' => $groupKey,
             'doc_type' => self::DOC_TYPE_MEMBER,
-        ]);
-
-        $this->collection()->updateOne(
-            [
-                '_id' => $group['_id'] ?? $this->headId($occurrenceId, $groupKey),
-            ],
-            [
-                '$set' => [
+        ], [
+            ...$context->rawOptions(),
+            'projection' => ['item_order' => 1],
+            'sort' => ['item_order' => -1, '_id' => -1],
+        ]));
+        $baseOrder = $lastMember === null ? 0 : ((int) ($lastMember['item_order'] ?? -1) + 1);
+        $now = new UTCDateTime((int) now()->getTimestampMs());
+        foreach ($addIds as $offset => $memberId) {
+            $context->collection(self::COLLECTION)->updateOne(
+                ['_id' => $this->memberId($occurrenceId, $groupKey, $memberId)],
+                ['$setOnInsert' => [
                     'tenant_id' => $this->tenantId(),
                     'event_id' => $eventId,
                     'parent_type' => self::PARENT_TYPE,
                     'parent_id' => $occurrenceId,
                     'group_key' => $groupKey,
-                    'group_order' => (int) ($group['group_order'] ?? 0),
-                    'doc_type' => self::DOC_TYPE_HEAD,
-                    'updated_at' => $now,
-                ],
-            ],
-            ['upsert' => true],
-        );
-
-        if ($normalizedIds !== []) {
-            $rows = [];
-            foreach ($normalizedIds as $itemOrder => $memberId) {
-                $rows[] = [
-                    '_id' => $this->memberId($occurrenceId, $groupKey, $memberId),
-                    'tenant_id' => $this->tenantId(),
-                    'event_id' => $eventId,
-                    'parent_type' => self::PARENT_TYPE,
-                    'parent_id' => $occurrenceId,
-                    'group_key' => $groupKey,
-                    'group_order' => (int) ($group['group_order'] ?? 0),
-                    'item_order' => $itemOrder,
+                    'item_order' => $baseOrder + $offset,
                     'doc_type' => self::DOC_TYPE_MEMBER,
                     'nested_profile' => $this->nestedProfileDocument(
                         $memberId,
                         $profilesById[$memberId] ?? null,
                     ),
                     'updated_at' => $now,
-                ];
-            }
-            $this->collection()->insertMany($rows);
+                ]],
+                [...$context->rawOptions(), 'upsert' => true],
+            );
         }
-
-        return count($normalizedIds);
     }
 
     /**
-     * @return array<int, string>
-     */
-    public function adminOccurrenceGroupMemberIds(
-        EventOccurrence $occurrence,
-        string $groupId,
-    ): array {
-        $eventId = trim((string) ($occurrence->event_id ?? ''));
-        $occurrenceId = trim((string) $occurrence->getKey());
-        if ($eventId === '' || $occurrenceId === '') {
-            return [];
-        }
-
-        $this->findOccurrenceGroupHeadOrFail($eventId, $occurrenceId, $groupId);
-
-        return $this->occurrenceGroupMemberIds($eventId, $occurrenceId, trim($groupId));
-    }
-
-    /**
-     * Return the only related-account data needed by public event cards: a
-     * count and the first non-venue member per occurrence. Member rows remain
-     * lazy and are never expanded into the Event/Occurrence transport.
+     * Return the only related-account data needed by event cards: a count and
+     * the first non-venue member per occurrence. Public reads apply profile and
+     * account publication eligibility inside MongoDB before counting; management
+     * reads retain every non-venue member. Member rows remain lazy and are never
+     * expanded into the Event/Occurrence transport.
      *
      * @param  iterable<int, EventOccurrence>  $occurrences
-     * @return array<string, array{first_profile_id: ?string, counterpart_count: int}>
+     * @return array<string, array{first_profile_id: ?string, first_profile: array<string, mixed>|null, counterpart_count: int}>
      */
-    public function publicCounterpartSummariesByOccurrence(iterable $occurrences): array
-    {
+    public function publicCounterpartSummariesByOccurrence(
+        iterable $occurrences,
+        bool $publicOnly = true,
+    ): array {
         $occurrenceOrderById = $this->occurrenceOrderById($occurrences);
         if ($occurrenceOrderById === []) {
             return [];
         }
 
-        $rows = $this->collection()->aggregate([
+        $profileLookupPipeline = [
+            ['$match' => ['$expr' => ['$eq' => [
+                '$_id',
+                ['$convert' => [
+                    'input' => '$$member_profile_id',
+                    'to' => 'objectId',
+                    'onError' => null,
+                    'onNull' => null,
+                ]],
+            ]]]],
+            ['$match' => ['profile_type' => ['$ne' => 'venue']]],
+        ];
+        if ($publicOnly) {
+            $profileLookupPipeline[] = [
+                '$match' => $this->eventProfileResolver->publicMemberProfileMatchExpression(),
+            ];
+        }
+        $profileLookupPipeline[] = ['$project' => [
+            '_id' => 1,
+            'account_id' => 1,
+            'display_name' => 1,
+            'profile_type' => 1,
+            'slug' => 1,
+            'avatar_url' => 1,
+            'cover_url' => 1,
+            'taxonomy_terms' => 1,
+        ]];
+
+        $pipeline = [
             ['$match' => [
                 'tenant_id' => $this->tenantId(),
                 'parent_type' => self::PARENT_TYPE,
                 'doc_type' => self::DOC_TYPE_MEMBER,
                 'parent_id' => ['$in' => array_keys($occurrenceOrderById)],
                 'nested_profile.id' => ['$nin' => [null, '']],
-                'nested_profile.profile_type' => ['$ne' => 'venue'],
             ]],
-            ['$sort' => ['parent_id' => 1, 'group_order' => 1, 'item_order' => 1, '_id' => 1]],
+            ['$lookup' => [
+                'from' => self::COLLECTION,
+                'let' => ['member_parent_id' => '$parent_id', 'member_group_key' => '$group_key'],
+                'pipeline' => [
+                    ['$match' => ['$expr' => ['$and' => [
+                        ['$eq' => ['$tenant_id', $this->tenantId()]],
+                        ['$eq' => ['$parent_type', self::PARENT_TYPE]],
+                        ['$eq' => ['$doc_type', self::DOC_TYPE_HEAD]],
+                        ['$eq' => ['$parent_id', '$$member_parent_id']],
+                        ['$eq' => ['$group_key', '$$member_group_key']],
+                    ]]]],
+                    ['$project' => ['group_order' => 1]],
+                ],
+                'as' => 'group_head',
+            ]],
+            ['$unwind' => '$group_head'],
+            ['$lookup' => [
+                'from' => 'account_profiles',
+                'let' => ['member_profile_id' => '$nested_profile.id'],
+                'pipeline' => $profileLookupPipeline,
+                'as' => 'profile',
+            ]],
+            ['$unwind' => '$profile'],
+        ];
+        if ($publicOnly) {
+            $pipeline[] = ['$lookup' => [
+                'from' => 'accounts',
+                'let' => ['profile_account_id' => '$profile.account_id'],
+                'pipeline' => [
+                    ['$match' => ['$expr' => ['$eq' => [
+                        '$_id',
+                        ['$convert' => [
+                            'input' => '$$profile_account_id',
+                            'to' => 'objectId',
+                            'onError' => null,
+                            'onNull' => null,
+                        ]],
+                    ]]]],
+                    ['$match' => $this->eventProfileResolver->publicMemberAccountMatchExpression()],
+                    ['$project' => ['_id' => 1]],
+                ],
+                'as' => 'published_account',
+            ]];
+            $pipeline[] = ['$match' => ['published_account.0' => ['$exists' => true]]];
+        }
+        array_push(
+            $pipeline,
+            ['$sort' => ['parent_id' => 1, 'group_head.group_order' => 1, 'item_order' => 1, '_id' => 1]],
             ['$group' => [
                 '_id' => [
                     'parent_id' => '$parent_id',
                     'profile_id' => '$nested_profile.id',
                 ],
-                'group_order' => ['$first' => '$group_order'],
+                'group_order' => ['$first' => '$group_head.group_order'],
                 'item_order' => ['$first' => '$item_order'],
                 'row_id' => ['$first' => '$_id'],
+                'profile' => ['$first' => '$profile'],
             ]],
             ['$sort' => [
                 '_id.parent_id' => 1,
@@ -685,9 +849,12 @@ final class EventOccurrenceNestedAccountStore
             ['$group' => [
                 '_id' => '$_id.parent_id',
                 'first_profile_id' => ['$first' => '$_id.profile_id'],
+                'first_profile' => ['$first' => '$profile'],
                 'counterpart_count' => ['$sum' => 1],
             ]],
-        ]);
+        );
+
+        $rows = $this->collection()->aggregate($pipeline);
 
         $summaries = [];
         foreach ($rows as $row) {
@@ -697,119 +864,23 @@ final class EventOccurrenceNestedAccountStore
                 continue;
             }
 
+            $profileId = trim((string) ($document['first_profile_id'] ?? ''));
+            $firstProfile = $this->documentToArray($document['first_profile'] ?? null);
+            if ($firstProfile !== [] && $profileId !== '') {
+                $firstProfile['id'] = $profileId;
+                unset($firstProfile['_id']);
+            }
+
             $summaries[$occurrenceId] = [
-                'first_profile_id' => ($profileId = trim((string) ($document['first_profile_id'] ?? ''))) === ''
+                'first_profile_id' => $profileId === ''
                     ? null
                     : $profileId,
+                'first_profile' => $firstProfile === [] ? null : $firstProfile,
                 'counterpart_count' => max(0, (int) ($document['counterpart_count'] ?? 0)),
             ];
         }
 
         return $summaries;
-    }
-
-    /**
-     * Repair-only compatibility reader for legacy nested-account rows.
-     *
-     * @return array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>
-     */
-    public function legacyGroupsForOwner(
-        string $eventId,
-        string $parentType,
-        string $parentId,
-        bool $includeEmptyGroups = false,
-    ): array {
-        $eventId = trim($eventId);
-        $parentType = trim($parentType);
-        $parentId = trim($parentId);
-        if ($eventId === '' || $parentType === '' || $parentId === '') {
-            return [];
-        }
-
-        $headRows = iterator_to_array($this->collection()->find(
-            [
-                'tenant_id' => $this->tenantId(),
-                'event_id' => $eventId,
-                'parent_type' => $parentType,
-                'parent_id' => $parentId,
-                'doc_type' => self::DOC_TYPE_HEAD,
-            ],
-            [
-                'sort' => ['group_order' => 1, '_id' => 1],
-            ],
-        ));
-
-        $memberRows = iterator_to_array($this->collection()->find(
-            [
-                'tenant_id' => $this->tenantId(),
-                'event_id' => $eventId,
-                'parent_type' => $parentType,
-                'parent_id' => $parentId,
-                'doc_type' => self::DOC_TYPE_MEMBER,
-            ],
-            [
-                'sort' => ['group_order' => 1, 'item_order' => 1, '_id' => 1],
-            ],
-        ));
-
-        if ($headRows === [] && $memberRows === []) {
-            return [];
-        }
-
-        $groupsByKey = [];
-        $groupOrderIndex = 0;
-
-        foreach ($headRows as $row) {
-            $document = $this->documentToArray($row);
-            $groupKey = trim((string) ($document['group_key'] ?? ''));
-            $groupLabel = trim((string) ($document['group_label'] ?? ''));
-            if ($groupKey === '' || $groupLabel === '') {
-                continue;
-            }
-
-            $groupsByKey[$groupKey] = [
-                'id' => $groupKey,
-                'label' => $groupLabel,
-                'order' => isset($document['group_order'])
-                    ? (int) $document['group_order']
-                    : $groupOrderIndex,
-                'account_profile_ids' => [],
-            ];
-            $groupOrderIndex++;
-        }
-
-        foreach ($memberRows as $row) {
-            $document = $this->documentToArray($row);
-            $groupKey = trim((string) ($document['group_key'] ?? ''));
-            $nestedProfile = $this->normalizeArray($document['nested_profile'] ?? []);
-            $memberId = trim((string) ($nestedProfile['id'] ?? ''));
-            if ($groupKey === '' || $memberId === '') {
-                continue;
-            }
-
-            if (! isset($groupsByKey[$groupKey])) {
-                throw new RuntimeException('Event nested-group repair found a member row without a canonical head.');
-            }
-
-            if (! in_array($memberId, $groupsByKey[$groupKey]['account_profile_ids'], true)) {
-                $groupsByKey[$groupKey]['account_profile_ids'][] = $memberId;
-            }
-        }
-
-        $groups = array_values($includeEmptyGroups
-            ? $groupsByKey
-            : array_filter(
-                $groupsByKey,
-                static fn (array $group): bool => $group['account_profile_ids'] !== [],
-            ));
-
-        usort(
-            $groups,
-            static fn (array $left, array $right): int => [$left['order'], $left['label'], $left['id']]
-                <=> [$right['order'], $right['label'], $right['id']],
-        );
-
-        return array_values($groups);
     }
 
     /**
@@ -835,42 +906,13 @@ final class EventOccurrenceNestedAccountStore
         }
 
         $occurrenceOrderById = $this->occurrenceOrderById($occurrences);
-        $headRows = $this->headRowsForEvent($eventId);
+        $headRows = $this->headRowsForEvent($eventId, array_keys($occurrenceOrderById));
         if ($headRows === []) {
             return [];
         }
 
-        $memberRows = iterator_to_array($this->collection()->find(
-            [
-                'tenant_id' => $this->tenantId(),
-                'event_id' => $eventId,
-                'parent_type' => self::PARENT_TYPE,
-                'doc_type' => self::DOC_TYPE_MEMBER,
-            ],
-            [
-                'projection' => ['parent_id' => 1, 'group_key' => 1, 'nested_profile.id' => 1],
-                'sort' => ['item_order' => 1, '_id' => 1],
-            ],
-        ));
-
-        $memberIdsByHead = [];
-        foreach ($memberRows as $row) {
-            $document = $this->documentToArray($row);
-            $parentId = trim((string) ($document['parent_id'] ?? ''));
-            $groupKey = trim((string) ($document['group_key'] ?? ''));
-            $memberId = trim((string) (($this->normalizeArray($document['nested_profile'] ?? [])['id'] ?? null) ?: ''));
-            if ($parentId === '' || $groupKey === '' || $memberId === '') {
-                continue;
-            }
-
-            $headKey = $this->headKey($parentId, $groupKey);
-            $memberIdsByHead[$headKey] ??= [];
-            if (! in_array($memberId, $memberIdsByHead[$headKey], true)) {
-                $memberIdsByHead[$headKey][] = $memberId;
-            }
-        }
-
         $buckets = [];
+        $tabIdByHead = [];
         foreach ($headRows as $row) {
             $document = $this->documentToArray($row);
             $parentId = trim((string) ($document['parent_id'] ?? ''));
@@ -882,9 +924,10 @@ final class EventOccurrenceNestedAccountStore
 
             $normalizedLabel = $this->normalizedLabel($label);
             $tabId = $this->tabId($normalizedLabel);
-            $occurrenceOrder = $occurrenceOrderById[$parentId] ?? PHP_INT_MAX;
+            $occurrenceOrder = $occurrenceOrderById[$parentId];
             $groupOrder = (int) ($document['group_order'] ?? 0);
             $headKey = $this->headKey($parentId, $groupKey);
+            $tabIdByHead[$headKey] = $tabId;
 
             if (! isset($buckets[$tabId])) {
                 $buckets[$tabId] = [
@@ -893,7 +936,6 @@ final class EventOccurrenceNestedAccountStore
                     'normalized_label' => $normalizedLabel,
                     'first_occurrence_order' => $occurrenceOrder,
                     'group_order' => $groupOrder,
-                    'member_ids' => [],
                 ];
             }
 
@@ -906,16 +948,13 @@ final class EventOccurrenceNestedAccountStore
                 $groupOrder,
             );
 
-            foreach ($memberIdsByHead[$headKey] ?? [] as $memberId) {
-                if (! in_array($memberId, $buckets[$tabId]['member_ids'], true)) {
-                    $buckets[$tabId]['member_ids'][] = $memberId;
-                }
-            }
         }
 
+        $memberCountsByTab = $this->mergedRelationshipCountsByTab($eventId, $tabIdByHead);
+
         $groups = array_values(array_filter(array_map(
-            function (array $bucket) use ($eventRouteKey): ?array {
-                $memberCount = count($bucket['member_ids']);
+            function (array $bucket) use ($eventRouteKey, $memberCountsByTab): ?array {
+                $memberCount = (int) ($memberCountsByTab[(string) $bucket['id']] ?? 0);
                 if ($memberCount === 0) {
                     return null;
                 }
@@ -951,6 +990,73 @@ final class EventOccurrenceNestedAccountStore
     }
 
     /**
+     * @param  array<string, string>  $tabIdByHead
+     * @return array<string, int>
+     */
+    private function mergedRelationshipCountsByTab(string $eventId, array $tabIdByHead): array
+    {
+        if ($tabIdByHead === []) {
+            return [];
+        }
+
+        $headPredicatesByTab = [];
+        foreach ($tabIdByHead as $headKey => $tabId) {
+            [$parentId, $groupKey] = explode('::', $headKey, 2);
+            $headPredicatesByTab[$tabId][] = ['$and' => [
+                ['$eq' => ['$parent_id', $parentId]],
+                ['$eq' => ['$group_key', $groupKey]],
+            ]];
+        }
+        uksort($headPredicatesByTab, static function (string $left, string $right) use ($headPredicatesByTab): int {
+            return count($headPredicatesByTab[$right]) <=> count($headPredicatesByTab[$left])
+                ?: $left <=> $right;
+        });
+
+        $branches = [];
+        foreach ($headPredicatesByTab as $tabId => $headPredicates) {
+            $branches[] = [
+                'case' => count($headPredicates) === 1
+                    ? $headPredicates[0]
+                    : ['$or' => $headPredicates],
+                'then' => $tabId,
+            ];
+        }
+
+        $rows = $this->collection()->aggregate([
+            ['$match' => [
+                'tenant_id' => $this->tenantId(),
+                'event_id' => $eventId,
+                'parent_type' => self::PARENT_TYPE,
+                'doc_type' => self::DOC_TYPE_MEMBER,
+            ]],
+            ['$set' => ['resolved_tab_id' => ['$switch' => [
+                'branches' => $branches,
+                'default' => null,
+            ]]]],
+            ['$match' => ['resolved_tab_id' => ['$ne' => null]]],
+            ['$group' => ['_id' => [
+                'tab_id' => '$resolved_tab_id',
+                'member_id' => '$nested_profile.id',
+            ]]],
+            ['$group' => [
+                '_id' => '$_id.tab_id',
+                'member_count' => ['$sum' => 1],
+            ]],
+        ]);
+
+        $counts = [];
+        foreach ($rows as $row) {
+            $document = $this->documentToArray($row);
+            $tabId = trim((string) ($document['_id'] ?? ''));
+            if ($tabId !== '') {
+                $counts[$tabId] = max(0, (int) ($document['member_count'] ?? 0));
+            }
+        }
+
+        return $counts;
+    }
+
+    /**
      * @param  iterable<int, EventOccurrence>  $occurrences
      * @return array{data: array<int, array<string, mixed>>, next_cursor: ?string}
      */
@@ -961,6 +1067,7 @@ final class EventOccurrenceNestedAccountStore
         int $defaultPerPage,
         ?int $suppliedPerPage,
         ?string $cursor,
+        ?string $search = null,
     ): array {
         $eventId = trim((string) $event->getKey());
         if ($eventId === '') {
@@ -973,12 +1080,16 @@ final class EventOccurrenceNestedAccountStore
         }
 
         $perPage = max(1, $defaultPerPage);
-        $offset = 0;
+        $lastBackingOrder = null;
+        $lastItemOrder = null;
+        $lastRowId = null;
         if ($cursor !== null) {
             $payload = $this->decodeCursor($cursor);
             if (($payload['scope'] ?? null) !== self::CURSOR_SCOPE
+                || ($payload['tenant_id'] ?? null) !== $this->tenantId()
                 || ($payload['event_id'] ?? null) !== $eventId
-                || ($payload['tab_id'] ?? null) !== $resolvedTabId) {
+                || ($payload['tab_id'] ?? null) !== $resolvedTabId
+                || ($payload['search'] ?? null) !== $search) {
                 throw ValidationException::withMessages([
                     'cursor' => ['Event related-profile cursor is invalid for this event or tab.'],
                 ]);
@@ -992,54 +1103,139 @@ final class EventOccurrenceNestedAccountStore
             }
 
             $perPage = max(1, $cursorPerPage);
-            $offset = max(0, (int) ($payload['offset'] ?? 0));
+            $lastBackingOrder = (int) ($payload['last_backing_order'] ?? -1);
+            $lastItemOrder = (int) ($payload['last_item_order'] ?? -1);
+            $lastRowId = trim((string) ($payload['last_row_id'] ?? ''));
         } elseif ($suppliedPerPage !== null) {
             $perPage = max(1, $suppliedPerPage);
         }
 
-        $bucket = $this->memberRowsForTab($eventId, $occurrences, $resolvedTabId);
-        if ($bucket === []) {
+        $backings = $this->tabBackingsForEvent($eventId, $occurrences, $resolvedTabId);
+        if ($backings === []) {
             throw new NotFoundHttpException;
         }
 
-        $currentProfilesById = $this->eventProfileResolver->resolveExistingEventPartyDisplayProfilesByIds(
-            array_values(array_filter(array_map(
-                function (array $row): string {
-                    $nestedProfile = $this->normalizeArray($row['nested_profile'] ?? []);
-
-                    return trim((string) ($nestedProfile['id'] ?? ''));
-                },
-                $bucket,
-            )))
-        );
-
-        $visibleBucket = array_values(array_filter(array_map(
-            function (array $row) use ($currentProfilesById): ?array {
-                $nestedProfile = $this->normalizeArray($row['nested_profile'] ?? []);
-                $profileId = trim((string) ($nestedProfile['id'] ?? ''));
-                if ($profileId === '') {
-                    return null;
-                }
-
-                $profile = $currentProfilesById[$profileId] ?? null;
-
-                return is_array($profile) ? $profile : null;
-            },
-            $bucket,
+        $pairs = [];
+        $orderBranches = [];
+        foreach (array_values($backings) as $backingOrder => $backing) {
+            $pair = [
+                'parent_id' => (string) $backing['parent_id'],
+                'group_key' => (string) $backing['group_key'],
+            ];
+            $pairs[] = $pair;
+            $orderBranches[] = [
+                'case' => ['$and' => [
+                    ['$eq' => ['$parent_id', $pair['parent_id']]],
+                    ['$eq' => ['$group_key', $pair['group_key']]],
+                ]],
+                'then' => $backingOrder,
+            ];
+        }
+        $publiclyNavigableTypes = $this->eventProfileResolver->publiclyNavigableProfileTypes();
+        $memberScope = [
+            'tenant_id' => $this->tenantId(),
+            'event_id' => $eventId,
+            'parent_type' => self::PARENT_TYPE,
+            'doc_type' => self::DOC_TYPE_MEMBER,
+            '$or' => $pairs,
+        ];
+        if ($search !== null) {
+            $memberScope = $this->eventProfileResolver->memberSearchPredicate($memberScope, $search);
+        }
+        $pipeline = [
+            ['$match' => $memberScope],
+            ['$set' => ['_backing_order' => ['$switch' => [
+                'branches' => $orderBranches,
+                'default' => PHP_INT_MAX,
+            ]]]],
+            ['$sort' => ['_backing_order' => 1, 'item_order' => 1, '_id' => 1]],
+            ['$group' => ['_id' => '$nested_profile.id', 'member' => ['$first' => '$$ROOT']]],
+            ['$replaceRoot' => ['newRoot' => '$member']],
+            ...($lastBackingOrder === null || $lastItemOrder === null || $lastRowId === null ? [] : [[
+                '$match' => ['$or' => [
+                    ['_backing_order' => ['$gt' => $lastBackingOrder]],
+                    [
+                        '_backing_order' => $lastBackingOrder,
+                        'item_order' => ['$gt' => $lastItemOrder],
+                    ],
+                    [
+                        '_backing_order' => $lastBackingOrder,
+                        'item_order' => $lastItemOrder,
+                        '_id' => ['$gt' => $lastRowId],
+                    ],
+                ]],
+            ]]),
+            ['$lookup' => [
+                'from' => 'account_profiles',
+                'let' => ['member_profile_id' => '$nested_profile.id'],
+                'pipeline' => [
+                    ['$match' => ['$expr' => ['$eq' => [
+                        '$_id',
+                        ['$convert' => [
+                            'input' => '$$member_profile_id',
+                            'to' => 'objectId',
+                            'onError' => null,
+                            'onNull' => null,
+                        ]],
+                    ]]]],
+                    ['$match' => $this->eventProfileResolver->publicMemberProfileMatchExpression()],
+                ],
+                'as' => 'profile',
+            ]],
+            ['$unwind' => '$profile'],
+            ['$lookup' => [
+                'from' => 'accounts',
+                'let' => ['profile_account_id' => '$profile.account_id'],
+                'pipeline' => [
+                    ['$match' => ['$expr' => ['$eq' => [
+                        '$_id',
+                        ['$convert' => [
+                            'input' => '$$profile_account_id',
+                            'to' => 'objectId',
+                            'onError' => null,
+                            'onNull' => null,
+                        ]],
+                    ]]]],
+                    ['$match' => $this->eventProfileResolver->publicMemberAccountMatchExpression()],
+                    ['$project' => ['_id' => 1]],
+                ],
+                'as' => 'published_account',
+            ]],
+            ['$match' => ['published_account.0' => ['$exists' => true]]],
+            ['$set' => ['profile._can_open_public_detail' => ['$and' => [
+                ['$eq' => ['$profile.is_active', true]],
+                ['$eq' => ['$profile.visibility', 'public']],
+                ['$in' => ['$profile.profile_type', $publiclyNavigableTypes]],
+            ]]]],
+            ['$sort' => ['_backing_order' => 1, 'item_order' => 1, '_id' => 1]],
+            ['$limit' => $perPage + 1],
+            ['$project' => ['profile' => 1, '_backing_order' => 1, 'item_order' => 1]],
+        ];
+        $pageDocuments = array_values(array_filter(array_map(
+            fn (mixed $row): ?array => $this->documentToArray($row) ?: null,
+            iterator_to_array($this->collection()->aggregate($pipeline)),
         )));
+        $visibleDocuments = array_slice($pageDocuments, 0, $perPage);
+        $visibleRows = array_values(array_filter(array_map(function (array $document): ?array {
+            $profile = $this->normalizeArray($document['profile'] ?? []);
 
-        $pageRows = array_slice($visibleBucket, $offset, $perPage + 1);
-        $visibleRows = array_slice($pageRows, 0, $perPage);
+            return $profile === [] ? null : $profile;
+        }, $visibleDocuments)));
 
         $nextCursor = null;
-        if (count($pageRows) > $perPage) {
+        if (count($pageDocuments) > $perPage && $visibleDocuments !== []) {
+            $last = $visibleDocuments[array_key_last($visibleDocuments)];
             $nextCursor = Crypt::encryptString(json_encode([
                 'version' => self::CURSOR_VERSION,
                 'scope' => self::CURSOR_SCOPE,
+                'tenant_id' => $this->tenantId(),
                 'event_id' => $eventId,
                 'tab_id' => $resolvedTabId,
                 'per_page' => $perPage,
-                'offset' => $offset + $perPage,
+                'search' => $search,
+                'last_backing_order' => (int) ($last['_backing_order'] ?? -1),
+                'last_item_order' => (int) ($last['item_order'] ?? -1),
+                'last_row_id' => (string) ($last['_id'] ?? ''),
                 'expires_at' => now()->addMinutes(15)->toIso8601String(),
             ], JSON_THROW_ON_ERROR));
         }
@@ -1051,80 +1247,6 @@ final class EventOccurrenceNestedAccountStore
             )),
             'next_cursor' => $nextCursor,
         ];
-    }
-
-    /**
-     * @param  iterable<int, EventOccurrence>  $occurrences
-     * @return array<int, array<string, mixed>>
-     */
-    private function memberRowsForTab(string $eventId, iterable $occurrences, string $tabId): array
-    {
-        $backings = $this->tabBackingsForEvent($eventId, $occurrences, $tabId);
-        if ($backings === []) {
-            return [];
-        }
-
-        $backingOrderByHead = [];
-        foreach ($backings as $index => $backing) {
-            $backingOrderByHead[$this->headKey($backing['parent_id'], $backing['group_key'])] = [
-                'occurrence_order' => (int) $backing['occurrence_order'],
-                'group_order' => (int) $backing['group_order'],
-                'backing_order' => $index,
-            ];
-        }
-
-        $candidateRows = [];
-        $memberRows = $this->memberRowsForBackings($eventId, $backings);
-        foreach ($memberRows as $row) {
-            $document = $this->documentToArray($row);
-            $parentId = trim((string) ($document['parent_id'] ?? ''));
-            $groupKey = trim((string) ($document['group_key'] ?? ''));
-            $headKey = $this->headKey($parentId, $groupKey);
-            $backingOrder = $backingOrderByHead[$headKey] ?? null;
-            if (! is_array($backingOrder)) {
-                continue;
-            }
-
-            $nestedProfile = $this->normalizeArray($document['nested_profile'] ?? []);
-            $profileId = trim((string) ($nestedProfile['id'] ?? ''));
-            if ($profileId === '') {
-                continue;
-            }
-
-            $document['_occurrence_order'] = (int) $backingOrder['occurrence_order'];
-            $document['_backing_order'] = (int) $backingOrder['backing_order'];
-            $candidateRows[] = $document;
-        }
-
-        usort(
-            $candidateRows,
-            static fn (array $left, array $right): int => [
-                (int) ($left['_occurrence_order'] ?? PHP_INT_MAX),
-                (int) ($left['_backing_order'] ?? PHP_INT_MAX),
-                (int) ($left['item_order'] ?? 0),
-                (string) ($left['_id'] ?? ''),
-            ] <=> [
-                (int) ($right['_occurrence_order'] ?? PHP_INT_MAX),
-                (int) ($right['_backing_order'] ?? PHP_INT_MAX),
-                (int) ($right['item_order'] ?? 0),
-                (string) ($right['_id'] ?? ''),
-            ],
-        );
-
-        $deduped = [];
-        $seenProfileIds = [];
-        foreach ($candidateRows as $document) {
-            $nestedProfile = $this->normalizeArray($document['nested_profile'] ?? []);
-            $profileId = trim((string) ($nestedProfile['id'] ?? ''));
-            if ($profileId === '' || isset($seenProfileIds[$profileId])) {
-                continue;
-            }
-
-            $seenProfileIds[$profileId] = true;
-            $deduped[] = $document;
-        }
-
-        return $deduped;
     }
 
     /**
@@ -1150,7 +1272,10 @@ final class EventOccurrenceNestedAccountStore
             'doc_type' => self::DOC_TYPE_HEAD,
         ];
         $row = $context === null
-            ? $this->collection()->findOne($filter)
+            ? iterator_to_array($this->collection()->aggregate([
+                ['$match' => $filter],
+                ['$limit' => 1],
+            ]))[0] ?? null
             : $context->collection(self::COLLECTION)->findOne($filter, $context->rawOptions());
 
         $document = $this->documentToArray($row);
@@ -1162,53 +1287,25 @@ final class EventOccurrenceNestedAccountStore
     }
 
     /**
-     * @return array<int, string>
-     */
-    private function occurrenceGroupMemberIds(string $eventId, string $occurrenceId, string $groupId): array
-    {
-        $rows = iterator_to_array($this->collection()->find(
-            [
-                'tenant_id' => $this->tenantId(),
-                'event_id' => $eventId,
-                'parent_type' => self::PARENT_TYPE,
-                'parent_id' => $occurrenceId,
-                'group_key' => $groupId,
-                'doc_type' => self::DOC_TYPE_MEMBER,
-            ],
-            [
-                'projection' => ['nested_profile.id' => 1],
-                'sort' => ['item_order' => 1, '_id' => 1],
-            ],
-        ));
-
-        $ids = [];
-        foreach ($rows as $row) {
-            $document = $this->documentToArray($row);
-            $profileId = trim((string) (($this->normalizeArray($document['nested_profile'] ?? [])['id'] ?? null) ?: ''));
-            if ($profileId !== '' && ! in_array($profileId, $ids, true)) {
-                $ids[] = $profileId;
-            }
-        }
-
-        return $ids;
-    }
-
-    /**
      * @return array<int, array<string, mixed>>
      */
-    private function headRowsForEvent(string $eventId): array
+    private function headRowsForEvent(string $eventId, array $occurrenceIds): array
     {
-        return array_values(iterator_to_array($this->collection()->find(
-            [
+        $occurrenceIds = $this->normalizedStrings($occurrenceIds);
+        if ($occurrenceIds === []) {
+            return [];
+        }
+
+        return array_values(iterator_to_array($this->collection()->aggregate([
+            ['$match' => [
                 'tenant_id' => $this->tenantId(),
                 'event_id' => $eventId,
                 'parent_type' => self::PARENT_TYPE,
+                'parent_id' => ['$in' => $occurrenceIds],
                 'doc_type' => self::DOC_TYPE_HEAD,
-            ],
-            [
-                'sort' => ['group_order' => 1, '_id' => 1],
-            ],
-        )));
+            ]],
+            ['$sort' => ['group_order' => 1, '_id' => 1]],
+        ])));
     }
 
     /**
@@ -1220,7 +1317,7 @@ final class EventOccurrenceNestedAccountStore
         $occurrenceOrderById = $this->occurrenceOrderById($occurrences);
         $backings = [];
 
-        foreach ($this->headRowsForEvent($eventId) as $row) {
+        foreach ($this->headRowsForEvent($eventId, array_keys($occurrenceOrderById)) as $row) {
             $document = $this->documentToArray($row);
             $parentId = trim((string) ($document['parent_id'] ?? ''));
             $groupKey = trim((string) ($document['group_key'] ?? ''));
@@ -1238,7 +1335,7 @@ final class EventOccurrenceNestedAccountStore
                 'parent_id' => $parentId,
                 'group_key' => $groupKey,
                 'group_order' => (int) ($document['group_order'] ?? 0),
-                'occurrence_order' => $occurrenceOrderById[$parentId] ?? PHP_INT_MAX,
+                'occurrence_order' => $occurrenceOrderById[$parentId],
             ];
         }
 
@@ -1261,188 +1358,26 @@ final class EventOccurrenceNestedAccountStore
     }
 
     /**
-     * @param  array<int, array{parent_id:string,group_key:string,group_order:int,occurrence_order:int}>  $backings
-     * @return array<int, array<string, mixed>>
-     */
-    private function memberRowsForBackings(string $eventId, array $backings): array
-    {
-        $scopedPairs = [];
-        $seenPairs = [];
-        foreach ($backings as $backing) {
-            $parentId = trim((string) ($backing['parent_id'] ?? ''));
-            $groupKey = trim((string) ($backing['group_key'] ?? ''));
-            if ($parentId === '' || $groupKey === '') {
-                continue;
-            }
-
-            $pairKey = $this->headKey($parentId, $groupKey);
-            if (isset($seenPairs[$pairKey])) {
-                continue;
-            }
-
-            $seenPairs[$pairKey] = true;
-            $scopedPairs[] = [
-                'parent_id' => $parentId,
-                'group_key' => $groupKey,
-            ];
-        }
-
-        if ($scopedPairs === []) {
-            return [];
-        }
-
-        return array_values(iterator_to_array($this->collection()->find(
-            [
-                'tenant_id' => $this->tenantId(),
-                'event_id' => $eventId,
-                'parent_type' => self::PARENT_TYPE,
-                'doc_type' => self::DOC_TYPE_MEMBER,
-                '$or' => $scopedPairs,
-            ],
-            [
-                'sort' => ['item_order' => 1, '_id' => 1],
-            ],
-        )));
-    }
-
-    /**
      * @return array<string, mixed>
      */
     private function formatPublicMemberRow(array $row): array
     {
         $profile = $this->normalizeArray($row);
         $slug = trim((string) ($profile['slug'] ?? ''));
+        $profileId = trim((string) (($profile['id'] ?? null) ?: ($profile['_id'] ?? '')));
+        $canOpenPublicDetail = ($profile['_can_open_public_detail'] ?? false) === true && $slug !== '';
 
         return [
-            'id' => trim((string) ($profile['id'] ?? '')),
+            'id' => $profileId,
             'display_name' => trim((string) ($profile['display_name'] ?? '')),
             'profile_type' => trim((string) ($profile['profile_type'] ?? '')),
             'slug' => $slug === '' ? null : $slug,
             'avatar_url' => is_string($profile['avatar_url'] ?? null) ? $profile['avatar_url'] : null,
             'cover_url' => is_string($profile['cover_url'] ?? null) ? $profile['cover_url'] : null,
             'taxonomy_terms' => is_array($profile['taxonomy_terms'] ?? null) ? array_values($profile['taxonomy_terms']) : [],
-            'can_open_public_detail' => (bool) ($profile['can_open_public_detail'] ?? false),
-            'public_detail_path' => is_string($profile['public_detail_path'] ?? null)
-                ? $profile['public_detail_path']
-                : null,
+            'can_open_public_detail' => $canOpenPublicDetail,
+            'public_detail_path' => $canOpenPublicDetail ? '/parceiro/'.$slug : null,
         ];
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $eventGroups
-     * @param  array<int, array<string, mixed>>  $ownGroups
-     * @return array<int, array{id:string,label:string,order:int,account_profile_ids:array<int,string>}>
-     */
-    private function mergeGroups(array $eventGroups, array $ownGroups): array
-    {
-        $merged = [];
-        $indexById = [];
-        foreach ([$eventGroups, $ownGroups] as $groupSet) {
-            foreach ($groupSet as $group) {
-                $id = trim((string) ($group['id'] ?? ''));
-                $label = trim((string) ($group['label'] ?? ''));
-                if ($id === '' || $label === '') {
-                    continue;
-                }
-
-                if (! isset($indexById[$id])) {
-                    $indexById[$id] = count($merged);
-                    $merged[] = [
-                        'id' => $id,
-                        'label' => $label,
-                        'order' => count($merged),
-                        'account_profile_ids' => [],
-                    ];
-                }
-
-                foreach ($this->normalizeArray($group['account_profile_ids'] ?? []) as $rawMemberId) {
-                    $memberId = trim((string) $rawMemberId);
-                    if (
-                        $memberId !== ''
-                        && ! in_array($memberId, $merged[$indexById[$id]]['account_profile_ids'], true)
-                    ) {
-                        $merged[$indexById[$id]]['account_profile_ids'][] = $memberId;
-                    }
-                }
-            }
-        }
-
-        return $merged;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $groups
-     * @return array<int, array<string, mixed>>
-     */
-    private function rowsForOccurrence(string $eventId, string $occurrenceId, array $groups): array
-    {
-        $normalizedGroups = array_values(array_filter(array_map(
-            function (array $group): ?array {
-                $groupId = trim((string) ($group['id'] ?? ''));
-                $label = trim((string) ($group['label'] ?? ''));
-                if ($groupId === '' || $label === '') {
-                    return null;
-                }
-
-                return [
-                    'id' => $groupId,
-                    'label' => $label,
-                    'order' => (int) ($group['order'] ?? 0),
-                    'account_profile_ids' => array_values(array_unique(array_filter(array_map(
-                        static fn (mixed $memberId): string => trim((string) $memberId),
-                        $this->normalizeArray($group['account_profile_ids'] ?? []),
-                    ), static fn (string $memberId): bool => $memberId !== ''))),
-                ];
-            },
-            $groups,
-        )));
-
-        if ($normalizedGroups === []) {
-            return [];
-        }
-
-        $profilesById = $this->profilesByIdForIds(array_values(array_unique(array_merge(
-            ...array_map(static fn (array $group): array => $group['account_profile_ids'], $normalizedGroups),
-        ))));
-        $now = new UTCDateTime((int) now()->getTimestampMs());
-        $tenantId = $this->tenantId();
-        $rows = [];
-
-        foreach ($normalizedGroups as $group) {
-            $rows[] = [
-                '_id' => $this->headId($occurrenceId, $group['id']),
-                'tenant_id' => $tenantId,
-                'event_id' => $eventId,
-                'parent_type' => self::PARENT_TYPE,
-                'parent_id' => $occurrenceId,
-                'group_key' => $group['id'],
-                'group_label' => $group['label'],
-                'group_order' => $group['order'],
-                'doc_type' => self::DOC_TYPE_HEAD,
-                'updated_at' => $now,
-            ];
-
-            foreach (array_values($group['account_profile_ids']) as $itemOrder => $memberId) {
-                $rows[] = [
-                    '_id' => $this->memberId($occurrenceId, $group['id'], $memberId),
-                    'tenant_id' => $tenantId,
-                    'event_id' => $eventId,
-                    'parent_type' => self::PARENT_TYPE,
-                    'parent_id' => $occurrenceId,
-                    'group_key' => $group['id'],
-                    'group_order' => $group['order'],
-                    'item_order' => $itemOrder,
-                    'doc_type' => self::DOC_TYPE_MEMBER,
-                    'nested_profile' => $this->nestedProfileDocument(
-                        $memberId,
-                        $profilesById[$memberId] ?? null,
-                    ),
-                    'updated_at' => $now,
-                ];
-            }
-        }
-
-        return $rows;
     }
 
     /**
@@ -1481,25 +1416,22 @@ final class EventOccurrenceNestedAccountStore
     private function nestedProfileDocument(string $memberProfileId, ?array $profile): array
     {
         $memberProfileId = trim($memberProfileId);
-        $profileType = trim((string) ($profile['profile_type'] ?? ''));
-        $label = trim((string) ($profile['label'] ?? ''));
         $searchKey = trim((string) ($profile['search_key'] ?? ''));
-        $slug = trim((string) ($profile['slug'] ?? ''));
-
-        return [
+        $searchTerms = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $term): string => trim((string) $term),
+            (array) ($profile['search_terms'] ?? []),
+        ), static fn (string $term): bool => $term !== '')));
+        $document = [
             'id' => $memberProfileId,
-            'label' => $label === '' ? null : $label,
-            'search_key' => $searchKey === '' ? null : $searchKey,
-            'profile_type' => $profileType === '' ? null : $profileType,
-            'category' => $profileType === '' ? null : $profileType,
-            'taxonomy_terms_flat' => array_values(array_filter(array_map(
-                static fn (mixed $term): string => trim((string) $term),
-                (array) ($profile['taxonomy_terms_flat'] ?? []),
-            ), static fn (string $term): bool => $term !== '')),
-            'slug' => $slug === '' ? null : $slug,
-            'avatar_url' => is_string($profile['avatar_url'] ?? null) ? $profile['avatar_url'] : null,
-            'cover_url' => is_string($profile['cover_url'] ?? null) ? $profile['cover_url'] : null,
         ];
+        if ($searchKey !== '') {
+            $document['search_key'] = $searchKey;
+        }
+        if ($searchTerms !== []) {
+            $document['search_terms'] = $searchTerms;
+        }
+
+        return $document;
     }
 
     /**
@@ -1646,6 +1578,20 @@ final class EventOccurrenceNestedAccountStore
         }
 
         return is_array($document) ? $document : [];
+    }
+
+    /** @param array<int, mixed> $values @return array<int, string> */
+    private function normalizedStrings(array $values): array
+    {
+        $normalized = [];
+        foreach ($values as $value) {
+            $candidate = trim((string) $value);
+            if ($candidate !== '') {
+                $normalized[$candidate] = $candidate;
+            }
+        }
+
+        return array_values($normalized);
     }
 
     private function tenantId(): string
