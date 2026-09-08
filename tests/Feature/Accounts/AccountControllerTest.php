@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Accounts;
 
-use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountManagementService;
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Accounts\AccountUserService;
-use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
-use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
@@ -20,8 +18,6 @@ use App\Models\Tenants\TenantProfileType;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
-use Mockery\MockInterface;
-use RuntimeException;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
@@ -624,7 +620,7 @@ class AccountControllerTest extends TestCase
         $this->assertNull(data_get($publishedAccount->getAttribute('publication'), 'publish_at'));
     }
 
-    public function test_update_rolls_back_publication_when_nested_public_projection_rebuild_fails(): void
+    public function test_update_ignores_and_preserves_retired_nested_public_projection_rows(): void
     {
         [$account, $parentProfile] = $this->createDraftPersonalAccountAggregate();
         $accountSlug = (string) $account->slug;
@@ -637,9 +633,9 @@ class AccountControllerTest extends TestCase
 
         $projectionCollection = DB::connection('tenant')
             ->getDatabase()
-            ->selectCollection(AccountProfileNestedPublicMembersProjectionService::COLLECTION);
+            ->selectCollection('account_profile_nested_public_member_projection');
         $baselineUpdatedAt = new \MongoDB\BSON\UTCDateTime((int) now()->getTimestampMs());
-        $baselineMemberId = (string) new \MongoDB\BSON\ObjectId();
+        $baselineMemberId = (string) new \MongoDB\BSON\ObjectId;
         $projectionCollection->insertMany([
             [
                 '_id' => 'head:'.(string) $parentProfile->_id.':parceiros',
@@ -695,32 +691,16 @@ class AccountControllerTest extends TestCase
             $beforeDocs,
         ))));
 
-        $this->partialMock(AccountProfileQueryService::class, function (MockInterface $mock): void {
-            $mock->shouldReceive('isPublicNestedParent')
-                ->once()
-                ->andThrow(new RuntimeException('forced nested public projection rebuild failure'));
-        });
-        $this->app->forgetInstance(AccountManagementService::class);
-        $this->app->forgetInstance(AccountProfileNestedPublicMembersProjectionService::class);
-
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
-        try {
-            $this->app->make(AccountManagementService::class)->update($account->fresh(), [
-                'publication' => [
-                    'status' => AccountPublicationStateService::DRAFT,
-                ],
-            ]);
-            $this->fail('Expected the publication update boundary to raise after save.');
-        } catch (RuntimeException $exception) {
-            $this->assertSame(
-                'forced nested public projection rebuild failure',
-                $exception->getMessage(),
-            );
-        }
+        $this->app->make(AccountManagementService::class)->update($account->fresh(), [
+            'publication' => [
+                'status' => AccountPublicationStateService::DRAFT,
+            ],
+        ]);
 
         $reloadedAccount = Account::query()->where('slug', $accountSlug)->firstOrFail();
         $this->assertSame(
-            AccountPublicationStateService::PUBLISHED,
+            AccountPublicationStateService::DRAFT,
             data_get($reloadedAccount->getAttribute('publication'), 'status'),
         );
 

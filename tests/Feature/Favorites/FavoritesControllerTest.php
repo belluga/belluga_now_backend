@@ -14,6 +14,7 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
+use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Favorites\Models\Tenants\FavoriteEdge;
 use Belluga\PushHandler\Contracts\PushTopicTransportContract;
@@ -21,18 +22,20 @@ use Belluga\PushHandler\Models\Tenants\PushCredential;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
-use Laravel\Sanctum\Sanctum;
+use Illuminate\Support\Str;
 use Tests\Fakes\FakePushTopicTransport;
 use Tests\Helpers\TenantLabels;
+use Tests\Helpers\TenantScopedSanctum as Sanctum;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
+use Tests\Traits\RestoresTenantContextAfterRequest;
 use Tests\Traits\SeedsTenantAccounts;
 
 class FavoritesControllerTest extends TestCaseTenant
 {
     use RefreshLandlordAndTenantDatabases;
+    use RestoresTenantContextAfterRequest;
     use SeedsTenantAccounts;
 
     protected TenantLabels $tenant {
@@ -65,6 +68,21 @@ class FavoritesControllerTest extends TestCaseTenant
 
         $tenant = Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail();
         $tenant->makeCurrent();
+
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'artist'],
+            [
+                'label' => 'Artist',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => true,
+                    'is_publicly_navigable' => true,
+                    'is_favoritable' => true,
+                    'is_publicly_discoverable' => true,
+                    'is_poi_enabled' => false,
+                ],
+            ],
+        );
 
         FavoriteEdge::query()->delete();
         AccountProfile::query()->withTrashed()->forceDelete();
@@ -128,6 +146,7 @@ class FavoritesControllerTest extends TestCaseTenant
         $this->createEdge((string) $profilePastOnly->_id, Carbon::parse('2026-03-13T12:00:00Z'));
         $this->createEdge((string) $profileNoEvent->_id, Carbon::parse('2026-03-19T12:00:00Z'));
 
+        Sanctum::actingAs($this->user, ['account-users:view']);
         $response = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=10&registry_key=account_profile&target_type=account_profile");
 
         $response->assertStatus(200);

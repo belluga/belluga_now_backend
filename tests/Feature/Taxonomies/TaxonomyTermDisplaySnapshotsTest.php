@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Taxonomies;
 
+use App\Application\AccountProfiles\AccountProfileManagementService;
+use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Taxonomies\TaxonomySnapshotBackfillService;
@@ -15,11 +17,13 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
+use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -59,6 +63,15 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
         MapPoi::query()->delete();
         TaxonomyTerm::query()->delete();
         Taxonomy::query()->delete();
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'artist'],
+            [
+                'label' => 'Artist',
+                'labels' => ['singular' => 'Artist', 'plural' => 'Artists'],
+                'allowed_taxonomies' => ['style'],
+                'capabilities' => [],
+            ],
+        );
     }
 
     public function test_repair_backfills_legacy_snapshots_across_document_read_models_idempotently(): void
@@ -228,7 +241,10 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
             }
         };
 
-        $summary = (new TaxonomySnapshotBackfillService($resolver))->repair('style', 'samba');
+        $summary = (new TaxonomySnapshotBackfillService(
+            $resolver,
+            app(AccountProfileManagementService::class),
+        ))->repair('style', 'samba');
 
         $this->assertSame(0, (int) data_get($summary, 'totals.failed'));
         $this->assertSame(1, $resolver->resolveCalls, 'Repeated taxonomy snapshots must be resolved once per unique term, not once per document or nested payload.');
@@ -267,6 +283,63 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
         $this->assertSame(['style:samba'], $profile->fresh()->taxonomy_terms_flat);
     }
 
+    public function test_deleted_taxonomy_term_is_removed_from_profile_and_account_parent_member_search_atomically(): void
+    {
+        [, $term] = $this->createTaxonomyAndTerm(asTuple: true);
+        $account = Account::query()->create([
+            'name' => 'Deleted Term Account',
+            'document' => (string) Str::uuid(),
+        ]);
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'Maria Silva',
+            'bio' => 'must remain',
+            'taxonomy_terms' => [[
+                'type' => 'style',
+                'value' => 'samba',
+                'name' => 'Samba',
+                'taxonomy_name' => 'Style',
+                'label' => 'Samba',
+            ]],
+            'taxonomy_terms_flat' => ['style:samba'],
+            'name_search_key' => 'maria silva',
+            'search_terms' => ['maria', 'silva', 'artist', 'artists', 'style', 'samba'],
+            'is_active' => true,
+        ]);
+        DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->insertOne([
+            '_id' => 'deleted-term-member-row',
+            'tenant_id' => (string) Tenant::current()?->getKey(),
+            'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
+            'parent_id' => 'parent-profile',
+            'group_key' => 'artists',
+            'doc_type' => 'member_row',
+            'nested_profile' => [
+                'id' => (string) $profile->_id,
+                'search_key' => 'maria silva',
+                'search_terms' => ['maria', 'silva', 'artist', 'artists', 'style', 'samba'],
+            ],
+            'item_order' => 0,
+        ]);
+
+        $term->delete();
+        $summary = $this->app->make(TaxonomySnapshotBackfillService::class)->repair('style', 'samba');
+
+        $this->assertSame(0, (int) data_get($summary, 'totals.failed'));
+        $refreshed = $profile->fresh();
+        $this->assertSame([], $refreshed->taxonomy_terms);
+        $this->assertSame([], $refreshed->taxonomy_terms_flat);
+        $this->assertSame('must remain', $refreshed->bio);
+        $this->assertContains('silva', $refreshed->search_terms);
+        $this->assertNotContains('samba', $refreshed->search_terms);
+        $row = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            '_id' => 'deleted-term-member-row',
+        ]);
+        $memberTerms = json_decode(json_encode($row['nested_profile']['search_terms'], JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertContains('silva', $memberTerms);
+        $this->assertNotContains('samba', $memberTerms);
+    }
+
     public function test_taxonomy_snapshot_backfill_reports_and_logs_document_failures(): void
     {
         Log::spy();
@@ -290,7 +363,10 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
             }
         };
 
-        $summary = (new TaxonomySnapshotBackfillService($resolver))->repair('style', 'samba');
+        $summary = (new TaxonomySnapshotBackfillService(
+            $resolver,
+            app(AccountProfileManagementService::class),
+        ))->repair('style', 'samba');
 
         $this->assertSame(1, (int) data_get($summary, 'totals.failed'));
         $this->assertSame(AccountProfile::class, data_get($summary, 'collections.account_profiles.failures.0.model'));
@@ -370,6 +446,28 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
             $this->getHeaders()
         );
         $slugUpdate->assertStatus(422);
+
+        $termDelete = $this->deleteJson(
+            "{$this->base_tenant_api_admin}taxonomies/{$taxonomy->_id}/terms/{$term->_id}",
+            [],
+            $this->getHeaders(),
+        );
+        $termDelete->assertStatus(200);
+        Queue::assertPushed(RepairTaxonomyTermSnapshotsJob::class, function (RepairTaxonomyTermSnapshotsJob $job): bool {
+            return $this->readPrivateProperty($job, 'taxonomyType') === 'style'
+                && $this->readPrivateProperty($job, 'termValue') === 'samba';
+        });
+
+        $taxonomyDelete = $this->deleteJson(
+            "{$this->base_tenant_api_admin}taxonomies/{$taxonomy->_id}",
+            [],
+            $this->getHeaders(),
+        );
+        $taxonomyDelete->assertStatus(200);
+        Queue::assertPushed(RepairTaxonomyTermSnapshotsJob::class, function (RepairTaxonomyTermSnapshotsJob $job): bool {
+            return $this->readPrivateProperty($job, 'taxonomyType') === 'style'
+                && $this->readPrivateProperty($job, 'termValue') === null;
+        });
     }
 
     public function test_taxonomy_snapshot_backfill_uses_cursor_iteration_not_full_collection_materialization(): void

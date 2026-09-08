@@ -18,6 +18,8 @@ final class InputConstraints
 
     public const PUBLIC_PAGE_SIZE_MAX = 50;
 
+    public const PAGINATION_CURSOR_MAX = 4096;
+
     public const PUBLIC_PAGE_MAX = 200;
 
     public const PUBLIC_STREAM_DELTA_LIMIT = 50;
@@ -40,10 +42,6 @@ final class InputConstraints
 
     public const EVENT_OCCURRENCE_TAXONOMY_UNIQUE_TERMS_MAX = 64;
 
-    public const EVENT_OCCURRENCE_PARTIES_MAX = 64;
-
-    public const EVENT_OCCURRENCE_PARTIES_TOTAL_MAX = 240;
-
     public const EVENT_PROGRAMMING_ITEMS_MAX = 96;
 
     public const EVENT_PROGRAMMING_ITEMS_TOTAL_MAX = 240;
@@ -53,8 +51,6 @@ final class InputConstraints
     public const EVENT_PROGRAMMING_REFERENCES_TOTAL_MAX = 480;
 
     public const EVENT_PROFILE_GROUPS_MAX = 12;
-
-    public const EVENT_PROFILE_GROUP_MEMBERS_MAX = 50;
 
     public const EVENT_PROFILE_GROUP_KEY_MAX = 64;
 

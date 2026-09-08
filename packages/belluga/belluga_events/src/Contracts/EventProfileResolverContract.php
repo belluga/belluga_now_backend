@@ -90,6 +90,7 @@ interface EventProfileResolverContract
      *   id: string,
      *   label: ?string,
      *   search_key: ?string,
+     *   search_terms: array<int, string>,
      *   profile_type: ?string,
      *   category: ?string,
      *   taxonomy_terms_flat: array<int, string>,
@@ -132,4 +133,24 @@ interface EventProfileResolverContract
     public function isProfileTypeQueryable(string $profileType): bool;
 
     public function isProfileTypePubliclyNavigable(string $profileType): bool;
+
+    /** @return array<int, string> */
+    public function publicCatalogProfileTypes(): array;
+
+    /** @return array<int, string> */
+    public function publiclyNavigableProfileTypes(): array;
+
+    /** @return array<string, mixed> */
+    public function publicMemberProfileMatchExpression(): array;
+
+    /** @return array<string, mixed> */
+    public function publicMemberAccountMatchExpression(): array;
+
+    public function normalizeMemberSearch(mixed $rawSearch): ?string;
+
+    /**
+     * @param  array<string, mixed>  $scope
+     * @return array<string, mixed>
+     */
+    public function memberSearchPredicate(array $scope, string $normalizedSearch): array;
 }

@@ -88,7 +88,9 @@ class LandlordRoleServiceTest extends TestCase
 
         $service->deleteWithReassignment($role, (string) $fallback->_id);
 
-        $this->assertSoftDeleted('landlord_roles', ['name' => 'Disposable']);
+        $deleted = LandlordRole::withTrashed()->where('name', 'Disposable')->first();
+        $this->assertNotNull($deleted);
+        $this->assertTrue($deleted->trashed());
     }
 
     public function test_paginate_returns_roles(): void
@@ -115,7 +117,9 @@ class LandlordRoleServiceTest extends TestCase
 
         $service->deleteById((string) $role->_id, (string) $fallback->_id);
 
-        $this->assertSoftDeleted('landlord_roles', ['name' => 'Disposable By Id']);
+        $deleted = LandlordRole::withTrashed()->where('name', 'Disposable By Id')->first();
+        $this->assertNotNull($deleted);
+        $this->assertTrue($deleted->trashed());
     }
 
     public function test_restore_by_id_revives_role(): void

@@ -5,22 +5,24 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Application\AccountProfiles\AccountProfileCandidateDiscoveryService;
+use App\Application\AccountProfiles\AccountProfileExternalLinkService;
 use App\Application\AccountProfiles\AccountProfileFormatterService;
+use App\Application\AccountProfiles\AccountProfileGalleryMutationService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileNameSearchKey;
 use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
-use App\Application\AccountProfiles\AccountProfileNestedGroupService;
-use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
-use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\RuntimeDiscoveryFilterCatalogService;
 use App\Http\Api\v1\Requests\AccountProfileCandidatesRequest;
+use App\Http\Api\v1\Requests\AccountProfileExternalLinkStoreRequest;
+use App\Http\Api\v1\Requests\AccountProfileExternalLinkUpdateRequest;
 use App\Http\Api\v1\Requests\AccountProfileNearRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupDeleteRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupLabelPatchRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersPatchRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersRequest;
+use App\Http\Api\v1\Requests\AccountProfileNestedGroupOrderPatchRequest;
 use App\Http\Api\v1\Requests\AccountProfileNestedGroupStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicIndexRequest;
 use App\Http\Api\v1\Requests\AccountProfilePublicNestedGroupMembersRequest;
@@ -29,7 +31,7 @@ use App\Http\Api\v1\Requests\AccountProfileUpdateRequest;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class AccountProfilesController extends Controller
 {
@@ -39,26 +41,24 @@ class AccountProfilesController extends Controller
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileQueryService $profileQueryService,
         private readonly AccountProfileFormatterService $formatter,
-        private readonly AccountProfileNestedGroupService $nestedGroupService,
+        private readonly AccountProfileGalleryMutationService $galleryMutations,
         private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
-        private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly RuntimeDiscoveryFilterCatalogService $runtimeDiscoveryFilterCatalogService,
+        private readonly AccountProfileExternalLinkService $externalLinks,
     ) {}
 
     public function index(Request $request): JsonResponse
     {
-        $ownershipStates = AccountOwnershipStateService::allowedStates();
-
         $validated = $request->validate([
             'account_id' => ['sometimes', 'string', 'regex:/^[a-f0-9]{24}$/i'],
             'profile_type' => ['sometimes', 'string', 'max:255'],
-            'ownership_state' => ['sometimes', 'string', Rule::in($ownershipStates)],
+            'ownership_state' => ['prohibited'],
             'filter' => ['sometimes', 'array'],
-            'filter.ownership_state' => ['sometimes', 'string', Rule::in($ownershipStates)],
-            'contact_mode' => ['sometimes', 'string', 'in:own,mirrored_account_profile'],
-            'contact_channels_enabled_only' => ['sometimes', 'boolean'],
-            'queryable_only' => ['sometimes', 'boolean'],
-            'exclude_account_profile_id' => ['sometimes', 'string', 'regex:/^[a-f0-9]{24}$/i'],
+            'filter.ownership_state' => ['prohibited'],
+            'contact_mode' => ['prohibited'],
+            'contact_channels_enabled_only' => ['prohibited'],
+            'queryable_only' => ['prohibited'],
+            'exclude_account_profile_id' => ['prohibited'],
             'search' => [
                 'bail',
                 'sometimes',
@@ -148,6 +148,7 @@ class AccountProfilesController extends Controller
                 $profile,
                 includeAgendaOccurrences: true,
                 publicContactProjection: true,
+                includeExternalLinks: true,
             ),
         ]);
     }
@@ -158,17 +159,23 @@ class AccountProfilesController extends Controller
         string $account_profile_slug,
         string $group_id,
     ): JsonResponse {
-        return response()->json($this->nestedPublicMembersProjectionService->publicMemberPage(
-            $account_profile_slug,
+        $profile = $this->profileQueryService->publicFindBySlugOrFail($account_profile_slug);
+
+        return response()->json($this->nestedGroupMemberStore->publicMemberPage(
+            $profile,
             $group_id,
             $request->perPage(),
             $request->suppliedPerPage(),
             $request->cursor(),
+            $request->normalizedSearch(),
         ));
     }
 
     public function store(AccountProfileStoreRequest $request): JsonResponse
     {
+        if ($request->exists('gallery_groups')) {
+            throw ValidationException::withMessages(['gallery_groups' => ['Gallery must be changed through its granular endpoints.']]);
+        }
         $validated = $request->validated();
         unset($validated['avatar'], $validated['cover']);
         $actor = $request->user();
@@ -203,7 +210,11 @@ class AccountProfilesController extends Controller
         );
 
         return response()->json([
-            'data' => $this->formatter->format($profile),
+            'data' => $this->formatter->format(
+                $profile,
+                includeExternalLinks: true,
+                includeExternalLinksLimit: true,
+            ),
         ], 201);
     }
 
@@ -211,9 +222,14 @@ class AccountProfilesController extends Controller
     {
         $profile = $this->profileQueryService->findOrFail($account_profile_id);
 
-        return response()->json([
-            'data' => $this->formatter->format($profile),
-        ]);
+        $data = $this->formatter->format(
+            $profile,
+            includeExternalLinks: true,
+            includeExternalLinksLimit: true,
+        );
+        $data['gallery_capabilities'] = $this->galleryMutations->capabilities();
+
+        return response()->json(['data' => $data]);
     }
 
     public function nestedGroupMembers(
@@ -230,6 +246,7 @@ class AccountProfilesController extends Controller
             $request->perPage(),
             $request->suppliedPerPage(),
             $request->cursor(),
+            $request->normalizedSearch(),
             $this->candidateDiscoveryService,
         ));
     }
@@ -286,6 +303,23 @@ class AccountProfilesController extends Controller
         ]);
     }
 
+    public function patchNestedGroupOrder(
+        AccountProfileNestedGroupOrderPatchRequest $request,
+        string $tenant_domain,
+        string $account_profile_id,
+        string $group_id,
+    ): JsonResponse {
+        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+
+        return response()->json([
+            'data' => $this->profileService->moveNestedGroup(
+                $profile,
+                $group_id,
+                $request->direction(),
+            ),
+        ]);
+    }
+
     public function patchNestedGroupMembers(
         AccountProfileNestedGroupMembersPatchRequest $request,
         string $tenant_domain,
@@ -307,6 +341,9 @@ class AccountProfilesController extends Controller
 
     public function update(AccountProfileUpdateRequest $request, string $tenant_domain, string $account_profile_id): JsonResponse
     {
+        if ($request->exists('gallery_groups')) {
+            throw ValidationException::withMessages(['gallery_groups' => ['Gallery must be changed through its granular endpoints.']]);
+        }
         $profile = $this->profileQueryService->findOrFail($account_profile_id);
 
         $validated = $request->validated();
@@ -334,8 +371,89 @@ class AccountProfilesController extends Controller
         );
 
         return response()->json([
-            'data' => $this->formatter->format($updated),
+            'data' => $this->formatter->format(
+                $updated,
+                includeExternalLinks: true,
+                includeExternalLinksLimit: true,
+            ),
         ]);
+    }
+
+    public function storeExternalLink(
+        AccountProfileExternalLinkStoreRequest $request,
+        string $tenant_domain,
+        string $account_profile_id,
+    ): JsonResponse {
+        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+        $updated = $this->externalLinks->create(
+            $profile,
+            $request->validated(),
+            $request->header('X-Request-Id'),
+            $this->auditAttributes($request),
+        );
+
+        return response()->json(['data' => $this->formatter->format(
+            $updated,
+            includeExternalLinks: true,
+            includeExternalLinksLimit: true,
+        )], 201);
+    }
+
+    public function updateExternalLink(
+        AccountProfileExternalLinkUpdateRequest $request,
+        string $tenant_domain,
+        string $account_profile_id,
+        string $external_link_id,
+    ): JsonResponse {
+        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+        $updated = $this->externalLinks->update(
+            $profile,
+            $external_link_id,
+            $request->validated(),
+            $request->header('X-Request-Id'),
+            $this->auditAttributes($request),
+        );
+
+        return response()->json(['data' => $this->formatter->format(
+            $updated,
+            includeExternalLinks: true,
+            includeExternalLinksLimit: true,
+        )]);
+    }
+
+    public function deleteExternalLink(
+        Request $request,
+        string $tenant_domain,
+        string $account_profile_id,
+        string $external_link_id,
+    ): JsonResponse {
+        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+        $updated = $this->externalLinks->delete(
+            $profile,
+            $external_link_id,
+            $request->header('X-Request-Id'),
+            $this->auditAttributes($request),
+        );
+
+        return response()->json(['data' => $this->formatter->format(
+            $updated,
+            includeExternalLinks: true,
+            includeExternalLinksLimit: true,
+        )]);
+    }
+
+    /** @return array<string, string> */
+    private function auditAttributes(Request $request): array
+    {
+        $actor = $request->user();
+        if ($actor === null) {
+            return [];
+        }
+
+        return [
+            'updated_by' => (string) $actor->_id,
+            'updated_by_type' => $actor instanceof \App\Models\Landlord\LandlordUser ? 'landlord' : 'tenant',
+        ];
     }
 
     public function destroy(string $tenant_domain, string $account_profile_id): JsonResponse
@@ -352,7 +470,11 @@ class AccountProfilesController extends Controller
         $restored = $this->profileService->restore($profile, request()->header('X-Request-Id'));
 
         return response()->json([
-            'data' => $this->formatter->format($restored),
+            'data' => $this->formatter->format(
+                $restored,
+                includeExternalLinks: true,
+                includeExternalLinksLimit: true,
+            ),
         ]);
     }
 

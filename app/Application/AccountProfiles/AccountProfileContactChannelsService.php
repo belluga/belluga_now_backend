@@ -21,6 +21,7 @@ final class AccountProfileContactChannelsService
 
     public function __construct(
         private readonly AccountProfileRegistryService $registryService,
+        private readonly AccountProfileTypeSetProvider $profileTypeSetProvider,
         private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
         private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
         private readonly ContactChannelDefinitionRegistry $definitionRegistry,
@@ -198,6 +199,66 @@ final class AccountProfileContactChannelsService
         $source = $this->resolveSameTenantOwnContactSource($stored['contact_source_account_profile_id']);
 
         return $source ? $this->readStoredContactState($source)['contact_channels'] : [];
+    }
+
+    /**
+     * Resolves list readback without querying a mirrored source per row.
+     *
+     * @param  iterable<AccountProfile>  $profiles
+     * @return array<string, array<int, array<string, mixed>>>
+     */
+    public function resolveEffectiveContactChannelsByProfileId(iterable $profiles): array
+    {
+        $channelsByProfileId = [];
+        $sourceIdByProfileId = [];
+        $contactChannelsEnabledTypes = array_fill_keys(
+            $this->profileTypeSetProvider->contactChannelsEnabledTypes(),
+            true,
+        );
+
+        foreach ($profiles as $profile) {
+            $profileId = (string) $profile->getKey();
+            if (! isset($contactChannelsEnabledTypes[trim((string) $profile->profile_type)])) {
+                $channelsByProfileId[$profileId] = [];
+
+                continue;
+            }
+
+            $stored = $this->readStoredContactState($profile);
+            if ($this->normalizeMode($stored['contact_mode']) === self::CONTACT_MODE_OWN) {
+                $channelsByProfileId[$profileId] = $stored['contact_channels'];
+
+                continue;
+            }
+
+            $sourceId = $stored['contact_source_account_profile_id'];
+            if ($sourceId === null || $sourceId === '') {
+                $channelsByProfileId[$profileId] = [];
+
+                continue;
+            }
+            $sourceIdByProfileId[$profileId] = $sourceId;
+        }
+
+        if ($sourceIdByProfileId === []) {
+            return $channelsByProfileId;
+        }
+
+        $sourcesById = $this->candidateDiscoveryService
+            ->eligibleProfilesByIds(
+                AccountProfileCandidateDiscoveryService::SCOPE_CONTACT_CAPABLE,
+                array_values(array_unique($sourceIdByProfileId)),
+            )
+            ->keyBy(static fn (AccountProfile $profile): string => (string) $profile->getKey());
+
+        foreach ($sourceIdByProfileId as $profileId => $sourceId) {
+            $source = $sourcesById->get($sourceId);
+            $channelsByProfileId[$profileId] = $source instanceof AccountProfile
+                ? $this->readStoredContactState($source)['contact_channels']
+                : [];
+        }
+
+        return $channelsByProfileId;
     }
 
     public function resolveEffectiveContactSourceProfile(AccountProfile $profile): ?AccountProfile

@@ -12,7 +12,6 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\DeepLinks\Application\WebToAppPromotionService;
-use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Application\Events\EventQueryService;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
@@ -23,10 +22,12 @@ use Mockery;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
+use Tests\Traits\SeedsOccurrenceProfileGroups;
 
 class PublicWebMetadataShellTest extends TestCaseTenant
 {
     use RefreshLandlordAndTenantDatabases;
+    use SeedsOccurrenceProfileGroups;
 
     protected TenantLabels $tenant {
         get {
@@ -332,8 +333,8 @@ class PublicWebMetadataShellTest extends TestCaseTenant
             'starts_at' => now()->subHour(),
             'ends_at' => now()->addHours(2),
         ]);
-        app(EventOccurrenceNestedAccountStore::class)->syncOccurrenceGroups(
-            (string) $event->_id,
+        $this->seedOccurrenceProfileGroups(
+            $event,
             $occurrence,
             [[
                 'id' => 'artists',

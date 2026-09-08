@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace Tests\Feature\AccountProfiles;
 
 use App\Application\AccountProfiles\AccountProfileAgendaOccurrencesService;
+use App\Application\AccountProfiles\AccountProfileContactChannelsService;
 use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileLifecycleService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMapPoiOutboxConsumer;
 use App\Application\AccountProfiles\AccountProfileNestedGroupMemberStore;
-use App\Application\AccountProfiles\AccountProfileNestedPublicMembersProjectionService;
 use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
 use App\Application\AccountProfiles\AccountProfileOutboxPublisher;
 use App\Application\AccountProfiles\AccountProfileQueryService;
@@ -24,6 +24,7 @@ use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use App\Http\Api\v1\Requests\AccountProfileNestedGroupMembersPatchRequest;
 use App\Integration\Events\AccountProfileResolverAdapter;
 use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\LandlordUser;
@@ -38,31 +39,38 @@ use App\Models\Tenants\TenantProfileType;
 use App\Support\RichText\RichTextReadCanonicalizer;
 use App\Support\RichText\SafeRichTextHtmlSanitizer;
 use App\Support\Validation\InputConstraints;
+use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
+use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event as EventBus;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
 use MongoDB\BSON\ObjectId;
+use MongoDB\BSON\Regex;
 use MongoDB\Laravel\Connection;
 use RuntimeException;
 use Tests\Helpers\TenantLabels;
 use Tests\Support\MongoCommandTrace;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
+use Tests\Traits\RestoresTenantContextAfterRequest;
 use Tests\Traits\SeedsTenantAccounts;
 
 class AccountProfilesControllerTest extends TestCaseTenant
 {
     use RefreshLandlordAndTenantDatabases;
+    use RestoresTenantContextAfterRequest;
     use SeedsTenantAccounts;
 
     protected TenantLabels $tenant {
@@ -369,45 +377,28 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_gallery_update_persists_an_outbox_event_and_conflicts_while_deletion_gated(): void
+    public function test_granular_gallery_mutation_persists_an_outbox_event_and_conflicts_while_deletion_gated(): void
     {
-        Storage::fake('public');
-
         $profile = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
             'profile_type' => 'venue',
             'display_name' => 'Outbox Gallery Venue',
             'is_active' => true,
         ]);
-        $commandId = 'u07a-gallery-update-'.uniqid('', true);
-        $url = "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}/gallery";
-        $payload = [
-            '_method' => 'PATCH',
-            'gallery_groups' => json_encode([
-                [
-                    'group_id' => 'main',
-                    'subtitle' => 'Main',
-                    'items' => [
-                        [
-                            'item_id' => 'entry',
-                            'upload' => 'gallery_entry',
-                        ],
-                    ],
-                ],
-            ], JSON_THROW_ON_ERROR),
-            'gallery_entry' => UploadedFile::fake()->image('entry.jpg', 1200, 800),
-        ];
-
-        $this->withHeaders([
-            ...$this->getMultipartHeaders(),
-            'X-Request-Id' => $commandId,
-        ])->post($url, $payload)->assertOk();
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}/gallery/groups";
+        $response = $this->postJson(
+            $url,
+            ['subtitle' => 'Main'],
+            $this->getHeaders(),
+        )->assertOk();
+        $groupId = (string) $response->json('data.gallery_groups.0.group_id');
+        $this->assertNotSame('', $groupId);
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $outbox = DB::connection('tenant')
             ->getDatabase()
             ->selectCollection('account_profile_outbox')
-            ->findOne(['command_id' => $commandId]);
+            ->findOne(['profile_id' => (string) $profile->getKey(), 'operation' => 'upsert']);
         $this->assertNotNull($outbox);
         $this->assertSame('upsert', $outbox['operation'] ?? null);
 
@@ -418,16 +409,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ]);
         $this->account->save();
 
-        $this->withHeaders([
-            ...$this->getMultipartHeaders(),
-            'X-Request-Id' => 'u07a-gallery-gated-'.uniqid('', true),
-        ])->post($url, [
-            '_method' => 'PATCH',
-            'gallery_groups' => json_encode([], JSON_THROW_ON_ERROR),
-        ])->assertConflict();
+        $this->patchJson(
+            "{$url}/{$groupId}",
+            ['subtitle' => 'Must Not Persist'],
+            [...$this->getHeaders(), 'X-Request-Id' => 'u07a-gallery-gated-'.uniqid('', true)],
+        )->assertConflict();
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
-        $this->assertSame('entry', (string) $profile->fresh()->gallery_groups[0]['items'][0]['item_id']);
+        $this->assertSame('Main', (string) $profile->fresh()->gallery_groups[0]['subtitle']);
     }
 
     public function test_profile_lifecycle_gateway_rejects_all_ordinary_mutations_while_account_is_deletion_gated(): void
@@ -1941,6 +1930,37 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
+    public function test_public_account_profile_index_searches_later_name_category_and_taxonomy_term_prefixes(): void
+    {
+        $this->createAccountUser([]);
+        $profile = $this->createNestedProfileFixture('Casa João Silva', 'casa-joao-silva');
+        $profile->forceFill([
+            'name_search_key' => 'casa joao silva',
+            'search_terms' => ['casa', 'joao', 'silva', 'venue', 'gastronomia', 'italiana'],
+        ])->save();
+
+        $storedProfile = AccountProfile::query()->findOrFail((string) $profile->_id);
+        $this->assertSame(
+            ['casa', 'joao', 'silva', 'venue', 'gastronomia', 'italiana'],
+            $storedProfile->search_terms,
+        );
+        $this->assertSame(1, AccountProfile::raw(
+            static fn ($collection): int => $collection->countDocuments([
+                'name_search_key' => 'casa joao silva',
+                'search_terms' => ['$type' => 'array', '$all' => [new Regex('^sil')]],
+            ]),
+        ));
+
+        foreach (['sil', 'ven', 'ita'] as $search) {
+            $response = $this->getJson("{$this->base_api_tenant}account_profiles?search={$search}")->assertOk();
+            $this->assertContains(
+                (string) $profile->_id,
+                collect($response->json('data'))->pluck('id')->all(),
+                "Expected semantic search [{$search}] to match the indexed terms branch.",
+            );
+        }
+    }
+
     public function test_public_account_profile_index_returns_runtime_facets_for_the_full_filtered_universe_before_pagination(): void
     {
         $this->createAccountUser([]);
@@ -3446,6 +3466,28 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'profile_groups' => $profileGroups,
         ]], (string) ($event->content ?? ''));
 
+        if ($viaLinkedParticipation) {
+            $occurrence = EventOccurrence::query()
+                ->where('event_id', (string) $event->_id)
+                ->firstOrFail();
+            $store = app(EventOccurrenceNestedAccountStore::class);
+            app(EventTransactionRunner::class)->run(function ($context) use ($event, $occurrence, $profile, $profileGroups, $store): void {
+                $store->syncOccurrenceGroupMetadataWithinContext(
+                    $context,
+                    (string) $event->_id,
+                    $occurrence,
+                    $profileGroups,
+                );
+                $store->patchOccurrenceGroupMembersWithinContext(
+                    $context,
+                    $occurrence,
+                    (string) $profileGroups[0]['id'],
+                    [(string) $profile->_id],
+                    [],
+                );
+            });
+        }
+
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
 
         return $event;
@@ -4114,7 +4156,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertCount(0, $partialItems);
     }
 
-    public function test_admin_account_profile_index_filters_by_ownership_state(): void
+    public function test_admin_account_profile_index_rejects_ownership_state_filter(): void
     {
         AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -4140,14 +4182,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         );
 
-        $response->assertStatus(200);
-        $items = collect($response->json('data'));
-        $this->assertTrue(
-            $items->every(static fn (array $item): bool => ($item['ownership_state'] ?? null) === 'unmanaged')
-        );
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['ownership_state']);
     }
 
-    public function test_admin_account_profile_index_filters_by_nested_ownership_state(): void
+    public function test_admin_account_profile_index_rejects_nested_ownership_state_filter(): void
     {
         AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -4179,11 +4218,337 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         );
 
-        $response->assertStatus(200);
-        $items = collect($response->json('data'));
-        $this->assertTrue(
-            $items->every(static fn (array $item): bool => ($item['ownership_state'] ?? null) === 'unmanaged')
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['filter.ownership_state']);
+    }
+
+    public function test_admin_account_profile_index_searches_name_and_semantic_terms_prefixes(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Casa João Silva',
+            'slug' => 'casa-joao-silva',
+            'is_active' => true,
+            'name_search_key' => 'casa joao silva',
+            'search_terms' => ['casa', 'joao', 'silva', 'venue', 'gastronomia', 'italiana'],
+        ]);
+
+        foreach (['sil', 'ven', 'ita'] as $search) {
+            $response = $this->getJson(
+                "{$this->base_tenant_api_admin}account_profiles?search={$search}",
+                $this->getHeaders(),
+            )->assertOk();
+
+            $this->assertContains(
+                (string) $profile->_id,
+                collect($response->json('data'))->pluck('id')->all(),
+                "Expected admin semantic search [{$search}] to match the indexed terms branch.",
+            );
+            $this->assertSame(
+                (string) $this->account->slug,
+                collect($response->json('data'))->first()['account_slug'] ?? null,
+            );
+        }
+
+        $legacyAccount = Account::create([
+            'name' => 'Legacy Search Account',
+            'document' => 'DOC-LEGACY-SEARCH-ACCOUNT',
+        ]);
+        $legacyProfile = AccountProfile::create([
+            'account_id' => (string) $legacyAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Maria Souza',
+            'slug' => 'maria-souza',
+            'is_active' => true,
+        ]);
+        $legacyProfile->forceFill(['name_search_key' => 'maria souza']);
+        $legacyProfile->offsetUnset('search_terms');
+        $legacyProfile->save();
+
+        $legacyResponse = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?search=mar",
+            $this->getHeaders(),
+        )->assertOk();
+        $this->assertContains(
+            (string) $legacyProfile->_id,
+            collect($legacyResponse->json('data'))->pluck('id')->all(),
         );
+
+        $this->account->forceFill([
+            'name' => 'Account Only Secret Token',
+            'slug' => 'account-only-secret-token',
+            'document' => 'DOC-ACCOUNT-ONLY-SECRET-TOKEN',
+        ])->save();
+        $accountOnlyResponse = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?search=secret",
+            $this->getHeaders(),
+        )->assertOk();
+        $this->assertNotContains(
+            (string) $profile->_id,
+            collect($accountOnlyResponse->json('data'))->pluck('id')->all(),
+        );
+    }
+
+    public function test_admin_account_profile_index_keeps_dangling_profile_with_nullable_account_metadata(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => str_repeat('f', 24),
+            'profile_type' => 'venue',
+            'display_name' => 'Dangling Profile',
+            'slug' => 'dangling-profile',
+            'is_active' => true,
+            'name_search_key' => 'dangling profile',
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?search=dang",
+            $this->getHeaders(),
+        )->assertOk();
+        $item = collect($response->json('data'))->firstWhere(
+            'id',
+            (string) $profile->_id,
+        );
+
+        $this->assertIsArray($item);
+        $this->assertNull($item['account_slug'] ?? null);
+        $this->assertNull($item['ownership_state'] ?? null);
+    }
+
+    public function test_admin_account_profile_index_uses_id_as_stable_page_tie_breaker(): void
+    {
+        $createdAt = Carbon::parse('2026-09-06T12:00:00Z');
+        $profiles = collect(range(1, 3))->map(function (int $suffix) use ($createdAt): AccountProfile {
+            $account = Account::create([
+                'name' => "Stable page account {$suffix}",
+                'document' => "DOC-STABLE-PAGE-{$suffix}",
+            ]);
+            $profile = AccountProfile::create([
+                'account_id' => (string) $account->_id,
+                'profile_type' => 'venue',
+                'display_name' => "Stable page profile {$suffix}",
+                'is_active' => true,
+                'name_search_key' => "stable page profile {$suffix}",
+            ]);
+            $profile->forceFill([
+                'created_at' => $createdAt,
+                'updated_at' => $createdAt,
+            ])->save();
+
+            return $profile;
+        });
+
+        $expectedIds = $profiles
+            ->map(static fn (AccountProfile $profile): string => (string) $profile->_id)
+            ->sortDesc()
+            ->values()
+            ->all();
+
+        $firstPage = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?search=stable&page=1&per_page=2",
+            $this->getHeaders(),
+        )->assertOk();
+        $secondPage = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles?search=stable&page=2&per_page=2",
+            $this->getHeaders(),
+        )->assertOk();
+
+        $actualIds = collect($firstPage->json('data'))
+            ->concat($secondPage->json('data'))
+            ->pluck('id')
+            ->all();
+
+        $this->assertSame($expectedIds, $actualIds);
+        $this->assertCount(3, array_unique($actualIds));
+    }
+
+    public function test_admin_account_profile_index_hydrates_only_the_returned_page(): void
+    {
+        $secondAccount = Account::create([
+            'name' => 'Second bounded account',
+            'document' => 'DOC-BOUNDED-SECOND',
+        ]);
+        $firstProfile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'First bounded profile',
+            'slug' => 'first-bounded-profile',
+            'is_active' => true,
+        ]);
+        $secondProfile = AccountProfile::create([
+            'account_id' => (string) $secondAccount->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Second bounded profile',
+            'slug' => 'second-bounded-profile',
+            'is_active' => true,
+        ]);
+
+        $operator = AccountUser::create([
+            'identity_state' => 'registered',
+            'name' => 'Bounded list operator',
+            'phones' => ['+5527999990123'],
+            'credentials' => [],
+        ]);
+        $operator->account_roles = [[
+            'account_id' => (string) $firstProfile->account_id,
+            'slug' => 'admin',
+        ]];
+        $operator->save();
+        $this->assertNotNull($operator->_id);
+
+        $paginator = null;
+        $trace = $this->captureMongoCommands(function () use (&$paginator): void {
+            $paginator = app(AccountProfileQueryService::class)->paginate(
+                ['sort' => 'created_at'],
+                includeArchived: false,
+                perPage: 2,
+            );
+        });
+
+        $this->assertNotNull($paginator);
+        $pageAccountIds = collect($paginator->getCollection())
+            ->pluck('account_id')
+            ->map(static fn (mixed $id): string => (string) $id)
+            ->sort()
+            ->values()
+            ->all();
+        $this->assertSame(
+            collect([(string) $firstProfile->account_id, (string) $secondProfile->account_id])
+                ->sort()
+                ->values()
+                ->all(),
+            $pageAccountIds,
+        );
+        $accountUserFinds = array_values(array_filter(
+            $trace->commands(),
+            static fn (array $entry): bool => $entry['name'] === 'find'
+                && ($entry['command']['find'] ?? null) === 'account_users',
+        ));
+        $this->assertCount(1, $accountUserFinds);
+        $filter = $accountUserFinds[0]['command']['filter'] ?? [];
+        $clauses = isset($filter['$and']) && is_array($filter['$and'])
+            ? $filter['$and']
+            : [$filter];
+        $accountIdClause = collect($clauses)->first(
+            static fn (mixed $clause): bool => is_array($clause)
+                && isset($clause['account_roles.account_id']['$in']),
+        );
+        $candidateIds = is_array($accountIdClause)
+            ? $accountIdClause['account_roles.account_id']['$in']
+            : null;
+        $this->assertEqualsCanonicalizing(
+            $pageAccountIds,
+            array_map(static fn (mixed $id): string => (string) $id, $candidateIds ?? []),
+            json_encode($accountUserFinds, JSON_INVALID_UTF8_SUBSTITUTE),
+        );
+
+        $accountFinds = array_values(array_filter(
+            $trace->commands(),
+            static fn (array $entry): bool => $entry['name'] === 'find'
+                && ($entry['command']['find'] ?? null) === 'accounts',
+        ));
+        $this->assertCount(1, $accountFinds);
+        $accountFilter = $accountFinds[0]['command']['filter'] ?? [];
+        $accountClauses = isset($accountFilter['$and']) && is_array($accountFilter['$and'])
+            ? $accountFilter['$and']
+            : [$accountFilter];
+        $accountIdClause = collect($accountClauses)->first(
+            static fn (mixed $clause): bool => is_array($clause)
+                && isset($clause['_id']['$in']),
+        );
+        $hydratedAccountIds = is_array($accountIdClause) ? $accountIdClause['_id']['$in'] : [];
+        $this->assertEqualsCanonicalizing(
+            $pageAccountIds,
+            array_map(static fn (mixed $id): string => (string) $id, $hydratedAccountIds),
+            json_encode($accountFinds, JSON_INVALID_UTF8_SUBSTITUTE),
+        );
+
+        $profileTypeFinds = array_values(array_filter(
+            $trace->commands(),
+            static fn (array $entry): bool => $entry['name'] === 'find'
+                && ($entry['command']['find'] ?? null) === 'account_profile_types',
+        ));
+        $this->assertCount(3, $profileTypeFinds);
+        $contactCapabilityFinds = array_values(array_filter(
+            $profileTypeFinds,
+            static fn (array $entry): bool => ($entry['command']['filter'] ?? null) === [
+                'capabilities.has_contact_channels' => true,
+            ],
+        ));
+        $this->assertCount(1, $contactCapabilityFinds);
+
+        $profileFinds = array_values(array_filter(
+            $trace->commands(),
+            static fn (array $entry): bool => $entry['name'] === 'find'
+                && ($entry['command']['find'] ?? null) === 'account_profiles',
+        ));
+        $this->assertCount(1, $profileFinds);
+    }
+
+    public function test_admin_account_profile_list_batches_mirrored_contact_sources(): void
+    {
+        $this->enableContactChannelsCapability('venue');
+        $source = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Batched contact source',
+            'slug' => 'batched-contact-source',
+            'is_active' => true,
+            'contact_mode' => 'own',
+            'contact_channels' => [[
+                'id' => 'source-email',
+                'type' => 'email',
+                'value' => 'source@example.test',
+            ]],
+        ]);
+        $mirrors = collect([1, 2])->map(function (int $suffix) use ($source): AccountProfile {
+            $account = Account::create([
+                'name' => "Batched mirror account {$suffix}",
+                'document' => "DOC-BATCHED-MIRROR-{$suffix}",
+            ]);
+
+            return AccountProfile::create([
+                'account_id' => (string) $account->_id,
+                'profile_type' => 'venue',
+                'display_name' => "Batched mirror {$suffix}",
+                'slug' => "batched-mirror-{$suffix}",
+                'is_active' => true,
+                'contact_mode' => 'mirrored_account_profile',
+                'contact_source_account_profile_id' => (string) $source->_id,
+            ]);
+        });
+
+        $channelsByProfileId = [];
+        $trace = $this->captureMongoCommands(function () use ($mirrors, &$channelsByProfileId): void {
+            $channelsByProfileId = app(AccountProfileContactChannelsService::class)
+                ->resolveEffectiveContactChannelsByProfileId($mirrors);
+        });
+
+        foreach ($mirrors as $mirror) {
+            $this->assertSame(
+                'source-email',
+                $channelsByProfileId[(string) $mirror->_id][0]['id'] ?? null,
+            );
+        }
+        $profileFinds = array_values(array_filter(
+            $trace->commands(),
+            static fn (array $entry): bool => $entry['name'] === 'find'
+                && ($entry['command']['find'] ?? null) === 'account_profiles',
+        ));
+        $this->assertCount(1, $profileFinds);
+        $filter = $profileFinds[0]['command']['filter'] ?? [];
+        $clauses = isset($filter['$and']) && is_array($filter['$and'])
+            ? $filter['$and']
+            : [$filter];
+        $sourceIdClause = collect($clauses)->first(
+            static fn (mixed $clause): bool => is_array($clause)
+                && isset($clause['_id']['$in']),
+        );
+        $sourceIds = is_array($sourceIdClause) ? $sourceIdClause['_id']['$in'] : [];
+        $this->assertSame([(string) $source->_id], array_map(
+            static fn (mixed $id): string => (string) $id,
+            $sourceIds,
+        ));
     }
 
     public function test_account_profile_types_returns_registry(): void
@@ -4908,43 +5273,41 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertMediaUrlHealthy($createResponse->json('data.account_profile.avatar_url'));
         $this->assertMediaUrlHealthy($createResponse->json('data.account_profile.cover_url'));
 
+        $galleryBaseUrl = "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery/groups";
+        $groupResponse = $this->postJson(
+            $galleryBaseUrl,
+            ['subtitle' => 'Ambientes'],
+            $this->getHeaders(),
+        )->assertOk();
+        $groupId = (string) $groupResponse->json('data.gallery_groups.0.group_id');
+        $this->assertNotSame('', $groupId);
+
         $galleryResponse = $this->withHeaders($this->getMultipartHeaders())->post(
-            "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery",
+            "{$galleryBaseUrl}/{$groupId}/items",
             [
-                '_method' => 'PATCH',
-                'gallery_groups' => json_encode([
-                    [
-                        'group_id' => 'ambientes',
-                        'subtitle' => 'Ambientes',
-                        'items' => [
-                            [
-                                'item_id' => 'hall-principal',
-                                'description' => 'Hall principal',
-                                'upload' => 'upload_hall',
-                            ],
-                        ],
-                    ],
-                ], JSON_THROW_ON_ERROR),
-                'upload_hall' => UploadedFile::fake()->image('hall.jpg', 2200, 1400),
+                'type' => 'photo',
+                'description' => 'Hall principal',
+                'image' => UploadedFile::fake()->image('hall.jpg', 2200, 1400),
             ],
         );
 
         $galleryResponse->assertOk();
-        $galleryResponse->assertJsonPath('data.gallery_groups.0.group_id', 'ambientes');
-        $galleryResponse->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+        $galleryResponse->assertJsonPath('data.gallery_groups.0.group_id', $groupId);
+        $itemId = (string) $galleryResponse->json('data.gallery_groups.0.items.0.item_id');
+        $this->assertNotSame('', $itemId);
 
         $adminShow = $this->getJson(
             "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
             $this->getHeaders()
         );
         $adminShow->assertOk();
-        $adminShow->assertJsonPath('data.gallery_groups.0.group_id', 'ambientes');
-        $adminShow->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+        $adminShow->assertJsonPath('data.gallery_groups.0.group_id', $groupId);
+        $adminShow->assertJsonPath('data.gallery_groups.0.items.0.item_id', $itemId);
 
         $publicShow = $this->getJson("{$this->base_api_tenant}account_profiles/{$slug}");
         $publicShow->assertOk();
-        $publicShow->assertJsonPath('data.gallery_groups.0.group_id', 'ambientes');
-        $publicShow->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+        $publicShow->assertJsonPath('data.gallery_groups.0.group_id', $groupId);
+        $publicShow->assertJsonPath('data.gallery_groups.0.items.0.item_id', $itemId);
         $publicShow->assertJsonPath(
             'data.gallery_groups.0.items.0.modal_url',
             $adminShow->json('data.gallery_groups.0.items.0.modal_url')
@@ -4962,7 +5325,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             collect($files)->first(fn (string $path): bool => str_contains(basename($path), 'cover.'))
         );
         $this->assertNotEmpty(
-            collect($files)->first(fn (string $path): bool => str_contains(basename($path), 'gallery-item-hall-principal.'))
+            collect($files)->first(fn (string $path): bool => str_contains(basename($path), "gallery-item-{$itemId}."))
         );
     }
 
@@ -5523,28 +5886,25 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $profileId = (string) $profile->_id;
         $this->assertNotEmpty($profileId);
 
+        $galleryBaseUrl = "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery/groups";
+        $groupResponse = $this->postJson(
+            $galleryBaseUrl,
+            ['subtitle' => 'Ambientes'],
+            $this->getHeaders(),
+        )->assertOk();
+        $groupId = (string) $groupResponse->json('data.gallery_groups.0.group_id');
+        $this->assertNotSame('', $groupId);
+
         $seedGalleryResponse = $this->withHeaders($this->getMultipartHeaders())->post(
-            "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery",
+            "{$galleryBaseUrl}/{$groupId}/items",
             [
-                '_method' => 'PATCH',
-                'gallery_groups' => json_encode([
-                    [
-                        'group_id' => 'ambientes',
-                        'subtitle' => 'Ambientes',
-                        'items' => [
-                            [
-                                'item_id' => 'hall-principal',
-                                'description' => 'Hall principal',
-                                'upload' => 'upload_hall',
-                            ],
-                        ],
-                    ],
-                ], JSON_THROW_ON_ERROR),
-                'upload_hall' => UploadedFile::fake()->image('hall.jpg', 2200, 1400),
+                'type' => 'photo',
+                'description' => 'Hall principal',
+                'image' => UploadedFile::fake()->image('hall.jpg', 2200, 1400),
             ],
         );
         $seedGalleryResponse->assertOk();
-        $seedGalleryResponse->assertJsonPath('data.gallery_groups.0.items.0.item_id', 'hall-principal');
+        $this->assertNotSame('', (string) $seedGalleryResponse->json('data.gallery_groups.0.items.0.item_id'));
 
         $updateResponse = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
@@ -5557,16 +5917,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $updateResponse->assertOk();
         $updateResponse->assertJsonPath('data.display_name', 'Renamed Journey Venue');
 
-        $clearGalleryResponse = $this->withHeaders($this->getMultipartHeaders())->post(
-            "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery",
-            [
-                '_method' => 'PATCH',
-                'gallery_groups' => json_encode([], JSON_THROW_ON_ERROR),
-            ],
+        $clearGalleryResponse = $this->deleteJson(
+            "{$galleryBaseUrl}/{$groupId}",
+            [],
+            $this->getHeaders(),
         );
 
         $clearGalleryResponse->assertOk();
-        $clearGalleryResponse->assertJsonPath('data.display_name', 'Renamed Journey Venue');
         $clearGalleryResponse->assertJsonPath('data.gallery_groups', []);
 
         $adminShow = $this->getJson(
@@ -5843,6 +6200,237 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame($snapshotUpdatedAt, (string) $parent->fresh()->updated_at);
     }
 
+    public function test_nested_profile_group_delete_compacts_every_later_group_order(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Compact nested parent',
+            'slug' => 'compact-nested-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $this->createNestedGroupHead($parent, 'Partners')->assertCreated();
+        $this->createNestedGroupHead($parent, 'Sponsors')->assertCreated();
+
+        $this->deleteJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/partners",
+            [],
+            $this->getHeaders(),
+        )->assertOk();
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $sponsorsHead = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            '_id' => 'accounts-nested:head:account_profile:'.$parent->_id.':sponsors',
+        ]);
+        $this->assertSame(1, $sponsorsHead['group_order'] ?? null);
+        $groups = collect($parent->fresh()?->nested_profile_groups)->keyBy('id');
+        $this->assertSame(1, $groups['sponsors']['order'] ?? null);
+    }
+
+    public function test_nested_profile_group_order_patch_swaps_adjacent_heads_and_returns_only_the_order_permutation(): void
+    {
+        $parent = $this->createNestedProfileFixture('Reorder nested parent', 'reorder-nested-parent');
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $this->createNestedGroupHead($parent, 'Partners')->assertCreated();
+        $this->createNestedGroupHead($parent, 'Sponsors')->assertCreated();
+
+        $response = null;
+        $trace = $this->captureMongoCommands(function () use ($parent, &$response): void {
+            $response = $this->patchJson(
+                "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/partners/order",
+                ['direction' => 'up'],
+                $this->getHeaders(),
+            );
+        });
+
+        $response->assertOk()->assertExactJson(['data' => [
+            'account_profile_id' => (string) $parent->_id,
+            'groups' => [
+                ['id' => 'partners', 'order' => 0],
+                ['id' => 'artists', 'order' => 1],
+                ['id' => 'sponsors', 'order' => 2],
+            ],
+        ]]);
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'aggregate'));
+        $this->assertFalse($trace->hasFindForDocumentType('accounts_nested', 'member_row'));
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $heads = iterator_to_array(DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->find(
+            ['parent_type' => 'account_profile', 'parent_id' => (string) $parent->_id, 'doc_type' => 'group_head'],
+            ['sort' => ['group_order' => 1]],
+        ));
+        $this->assertSame(['partners', 'artists', 'sponsors'], array_map(
+            static fn (array|object $head): string => (string) ($head['group_key'] ?? ''),
+            $heads,
+        ));
+        $this->assertSame(
+            ['partners', 'artists', 'sponsors'],
+            collect($parent->fresh()?->nested_profile_groups)->sortBy('order')->pluck('id')->values()->all(),
+        );
+    }
+
+    public function test_nested_profile_group_order_regression_moves_after_delete_middle_and_create(): void
+    {
+        $parent = $this->createNestedProfileFixture('Reorder lifecycle parent', 'reorder-lifecycle-parent');
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $this->createNestedGroupHead($parent, 'Partners')->assertCreated();
+        $this->createNestedGroupHead($parent, 'Sponsors')->assertCreated();
+        $this->deleteJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/partners",
+            [],
+            $this->getHeaders(),
+        )->assertOk();
+        $this->createNestedGroupHead($parent, 'Donors')->assertCreated();
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/donors/order",
+            ['direction' => 'up'],
+            $this->getHeaders(),
+        )->assertOk()->assertExactJson(['data' => [
+            'account_profile_id' => (string) $parent->_id,
+            'groups' => [
+                ['id' => 'artists', 'order' => 0],
+                ['id' => 'donors', 'order' => 1],
+                ['id' => 'sponsors', 'order' => 2],
+            ],
+        ]]);
+    }
+
+    public function test_nested_profile_group_order_patch_validates_exact_body_and_boundary_is_zero_write(): void
+    {
+        $parent = $this->createNestedProfileFixture('Reorder boundary parent', 'reorder-boundary-parent');
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $this->createNestedGroupHead($parent, 'Partners')->assertCreated();
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/artists/order";
+
+        foreach ([[], ['direction' => 'left'], ['direction' => 1], ['direction' => 'up', 'extra' => true]] as $body) {
+            $this->patchJson($url, $body, $this->getHeaders())->assertUnprocessable();
+        }
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $revision = (int) $parent->fresh()?->aggregate_revision;
+        $updatedAt = (string) $parent->fresh()?->updated_at;
+        $response = null;
+        $trace = $this->captureMongoCommands(function () use ($url, &$response): void {
+            $response = $this->patchJson($url, ['direction' => 'up'], $this->getHeaders());
+        });
+
+        $response->assertOk()->assertExactJson(['data' => [
+            'account_profile_id' => (string) $parent->_id,
+            'groups' => [
+                ['id' => 'artists', 'order' => 0],
+                ['id' => 'partners', 'order' => 1],
+            ],
+        ]]);
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(0, $trace->countForCollection('account_profiles', 'update'));
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'aggregate'));
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $this->assertSame($revision, (int) $parent->fresh()?->aggregate_revision);
+        $this->assertSame($updatedAt, (string) $parent->fresh()?->updated_at);
+    }
+
+    public function test_nested_profile_group_order_patch_requires_authentication_and_update_ability_without_writes(): void
+    {
+        $parent = $this->createNestedProfileFixture('Reorder authorization parent', 'reorder-authorization-parent');
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $this->createNestedGroupHead($parent, 'Partners')->assertCreated();
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/partners/order";
+
+        auth()->forgetGuards();
+        $anonymousTrace = $this->captureMongoCommands(
+            fn () => $this->patchJson($url, ['direction' => 'up'])->assertUnauthorized(),
+        );
+        $this->assertSame([], $anonymousTrace->collectionCommandMatrix());
+
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
+        $forbiddenTrace = $this->captureMongoCommands(
+            fn () => $this->patchJson($url, ['direction' => 'up'])->assertForbidden(),
+        );
+        $this->assertSame([], $forbiddenTrace->collectionCommandMatrix());
+    }
+
+    public function test_nested_profile_group_order_patch_fails_closed_for_missing_group_or_stale_mirror(): void
+    {
+        $parent = $this->createNestedProfileFixture('Reorder stale parent', 'reorder-stale-parent');
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $this->createNestedGroupHead($parent, 'Partners')->assertCreated();
+        $base = "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups";
+        $this->patchJson("{$base}/missing/order", ['direction' => 'up'], $this->getHeaders())->assertNotFound();
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        DB::connection('tenant')->getDatabase()->selectCollection('account_profiles')->updateOne(
+            ['_id' => new ObjectId((string) $parent->_id)],
+            ['$set' => ['nested_profile_groups.1.order' => 0]],
+        );
+        $trace = $this->captureMongoCommands(fn () => $this->patchJson(
+            "{$base}/partners/order",
+            ['direction' => 'up'],
+            $this->getHeaders(),
+        )->assertConflict());
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(0, $trace->countForCollection('account_profiles', 'update'));
+    }
+
+    public function test_nested_profile_group_order_missing_group_on_empty_owner_returns_not_found(): void
+    {
+        $parent = $this->createNestedProfileFixture('Empty reorder parent', 'empty-reorder-parent');
+
+        $response = null;
+        $trace = $this->captureMongoCommands(function () use ($parent, &$response): void {
+            $response = $this->patchJson(
+                "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/missing/order",
+                ['direction' => 'up'],
+                $this->getHeaders(),
+            );
+        });
+
+        $response->assertNotFound();
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(0, $trace->countForCollection('account_profiles', 'update'));
+    }
+
+    public function test_nested_profile_group_order_empty_heads_with_non_empty_mirror_still_fails_closed(): void
+    {
+        $parent = $this->createNestedProfileFixture('Asymmetric reorder parent', 'asymmetric-reorder-parent');
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        DB::connection('tenant')->getDatabase()->selectCollection('account_profiles')->updateOne(
+            ['_id' => new ObjectId((string) $parent->_id)],
+            ['$set' => ['nested_profile_groups' => [['id' => 'orphan', 'label' => 'Orphan', 'order' => 0]]]],
+        );
+
+        $trace = $this->captureMongoCommands(fn () => $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/missing/order",
+            ['direction' => 'up'],
+            $this->getHeaders(),
+        )->assertConflict());
+
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(0, $trace->countForCollection('account_profiles', 'update'));
+    }
+
+    public function test_nested_profile_group_order_non_empty_heads_with_empty_mirror_still_fails_closed(): void
+    {
+        $parent = $this->createNestedProfileFixture('Missing mirror reorder parent', 'missing-mirror-reorder-parent');
+        $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        DB::connection('tenant')->getDatabase()->selectCollection('account_profiles')->updateOne(
+            ['_id' => new ObjectId((string) $parent->_id)],
+            ['$set' => ['nested_profile_groups' => []]],
+        );
+
+        $trace = $this->captureMongoCommands(fn () => $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/artists/order",
+            ['direction' => 'up'],
+            $this->getHeaders(),
+        )->assertConflict());
+
+        $this->assertSame(0, $trace->countForCollection('accounts_nested', 'update'));
+        $this->assertSame(0, $trace->countForCollection('account_profiles', 'update'));
+    }
+
     public function test_nested_profile_group_label_patch_stays_within_indexed_mongo_command_budget(): void
     {
         $parent = AccountProfile::create([
@@ -5854,6 +6442,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'visibility' => 'public',
         ])->fresh();
         $this->createNestedGroupHead($parent, 'Artists')->assertCreated();
+        $member = $this->createNestedProfileFixture('Rename retained member', 'rename-retained-member');
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/artists/members",
+            ['add_ids' => [(string) $member->_id]],
+            $this->getHeaders(),
+        )->assertOk()->assertJsonPath('data.member_count', 1);
         $url = "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/artists";
         $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $head = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
@@ -5941,6 +6535,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 && ($update[0]['$set']['updated_at']['$cond'][0] ?? null) === ['$ne' => ['$group_label', ['$literal' => 'Artists renamed']]],
         ));
         $this->assertTrue($noOpTrace->hasNonEmptyTenantIdOnSingleUpdate('accounts_nested'));
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $memberRow = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            'parent_type' => 'account_profile',
+            'parent_id' => (string) $parent->_id,
+            'group_key' => 'artists',
+            'doc_type' => 'member_row',
+            'nested_profile.id' => (string) $member->_id,
+        ]);
+        $this->assertNotNull($memberRow, 'Group metadata updates must not replace or delete canonical member rows.');
+        $this->assertSame(0, (int) ($memberRow['item_order'] ?? -1));
     }
 
     public function test_nested_profile_group_label_patch_persists_dollar_prefixed_labels_as_literal_strings(): void
@@ -6680,15 +7284,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
         app(AccountProfileLifecycleService::class)->delete($target, 'owned-graph-profile-delete-'.uniqid('', true));
 
         $nested = $database->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION);
-        $projections = $database->selectCollection(AccountProfileNestedPublicMembersProjectionService::COLLECTION);
         $this->assertSame(0, $nested->countDocuments(['parent_type' => 'account_profile', 'parent_id' => (string) $target->_id]));
-        $this->assertSame(0, $projections->countDocuments(['parent_profile_id' => (string) $target->_id]));
         $this->assertSame(0, $mapPois->countDocuments(['ref_type' => 'account_profile', '$or' => [
             ['ref_id' => (string) $target->_id],
             ['ref_id' => new ObjectId((string) $target->_id)],
         ]]));
         $this->assertGreaterThan(0, $nested->countDocuments(['parent_type' => 'account_profile', 'parent_id' => (string) $sibling->_id]));
-        $this->assertGreaterThan(0, $projections->countDocuments(['parent_profile_id' => (string) $sibling->_id]));
         $this->assertSame(1, $mapPois->countDocuments(['ref_type' => 'account_profile', 'ref_id' => (string) $sibling->_id]));
     }
 
@@ -6715,9 +7316,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         app(AccountManagementService::class)->delete($target->account()->firstOrFail(), 'aggregate-graph-delete-'.uniqid('', true));
 
         $nested = $database->selectCollection(AccountProfileNestedGroupMemberStore::COLLECTION);
-        $projections = $database->selectCollection(AccountProfileNestedPublicMembersProjectionService::COLLECTION);
         $this->assertSame(0, $nested->countDocuments(['parent_type' => 'account_profile', 'parent_id' => (string) $target->_id]));
-        $this->assertSame(0, $projections->countDocuments(['parent_profile_id' => (string) $target->_id]));
         $this->assertSame(0, $database->selectCollection((new MapPoi)->getTable())->countDocuments([
             'ref_type' => 'account_profile', 'ref_id' => new ObjectId((string) $target->_id),
         ]));
@@ -7095,7 +7694,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(422);
     }
 
-    public function test_account_profile_group_delete_purges_unbounded_members_and_public_projection_while_preserving_sibling(): void
+    public function test_account_profile_group_delete_purges_unbounded_members_without_touching_legacy_projection(): void
     {
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -7116,7 +7715,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $parentId = (string) $parent->getKey();
         $memberIds = array_map(
             static fn (): string => (string) new ObjectId,
-            range(1, InputConstraints::ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX + 1),
+            range(1, 51),
         );
 
         $rows = [];
@@ -7141,7 +7740,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ->insertMany($rows);
         $projectionCollection = DB::connection('tenant')
             ->getDatabase()
-            ->selectCollection(AccountProfileNestedPublicMembersProjectionService::COLLECTION);
+            ->selectCollection('account_profile_nested_public_member_projection');
         $projectionCollection->insertMany([
             [
                 '_id' => "nested-public:{$parentId}:{$groupId}:target",
@@ -7190,7 +7789,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                     'doc_type' => 'member_row',
                 ]),
         );
-        $this->assertSame(0, $projectionCollection->countDocuments([
+        $this->assertGreaterThan(0, $projectionCollection->countDocuments([
             'tenant_id' => $tenantId,
             'parent_profile_id' => $parentId,
             'group_id' => $groupId,
@@ -7277,8 +7876,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
         $partnersDelta->assertOk();
 
-        $response = $this->getJson("{$this->base_api_tenant}account_profiles/nested-public-parent");
+        $response = null;
+        $trace = $this->captureMongoCommands(function () use (&$response): void {
+            $response = $this->getJson("{$this->base_api_tenant}account_profiles/nested-public-parent");
+        });
 
+        $this->assertNotNull($response);
         $response->assertStatus(200);
         $response->assertJsonCount(1, 'data.nested_profile_groups');
         $response->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros');
@@ -7288,6 +7891,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
             '/api/v1/account_profiles/nested-public-parent/nested_profile_groups/parceiros/members'
         );
         $response->assertJsonMissingPath('data.nested_profile_groups.0.profiles');
+        $this->assertSame(
+            1,
+            $trace->countForCollection('accounts_nested', 'aggregate'),
+            'Public Account metadata must calculate relationship counts exactly once.',
+        );
 
         $members = $this->getJson(
             "{$this->base_api_tenant}account_profiles/nested-public-parent/nested_profile_groups/parceiros/members",
@@ -7302,7 +7910,430 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_public_account_profile_detail_fails_closed_for_duplicate_projection_logical_heads(): void
+    public function test_public_nested_group_members_page_from_canonical_accounts_nested_without_projection_rows(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Canonical Public Page Parent',
+            'slug' => 'canonical-public-page-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $member = $this->createNestedProfileFixture('Canonical Page Member', 'canonical-page-member');
+        $this->createNestedGroupHead($parent, 'Members')->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/members/members",
+            ['add_ids' => [(string) $member->_id]],
+            $this->getHeaders(),
+        )->assertOk();
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        DB::connection('tenant')->getDatabase()
+            ->selectCollection('account_profile_nested_public_member_projection')
+            ->deleteMany(['parent_profile_id' => (string) $parent->_id]);
+
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/canonical-public-page-parent/nested_profile_groups/members/members?per_page=20",
+            $this->getHeaders(),
+        )->assertOk()
+            ->assertJsonPath('data.0.id', (string) $member->_id);
+    }
+
+    public function test_public_nested_group_member_page_queries_accounts_nested_not_projection_collection(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Canonical Query Parent',
+            'slug' => 'canonical-query-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $member = $this->createNestedProfileFixture('Canonical Query Member', 'canonical-query-member');
+        $this->createNestedGroupHead($parent, 'Members')->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/members/members",
+            ['add_ids' => [(string) $member->_id]],
+            $this->getHeaders(),
+        )->assertOk();
+
+        $response = null;
+        $trace = $this->captureMongoCommands(function () use (&$response): void {
+            $response = $this->getJson(
+                "{$this->base_api_tenant}account_profiles/canonical-query-parent/nested_profile_groups/members/members?per_page=20",
+                $this->getHeaders(),
+            );
+        });
+
+        $this->assertNotNull($response);
+        $response->assertOk()->assertJsonPath('data.0.id', (string) $member->_id);
+        $canonicalReads = $trace->countForCollection('accounts_nested', 'find')
+            + $trace->countForCollection('accounts_nested', 'aggregate');
+        $projectionReads = $trace->countForCollection(
+            'account_profile_nested_public_member_projection',
+            'find',
+        ) + $trace->countForCollection(
+            'account_profile_nested_public_member_projection',
+            'aggregate',
+        );
+        $this->assertSame([
+            'canonical_accounts_nested_was_read' => true,
+            'public_projection_was_read' => false,
+        ], [
+            'canonical_accounts_nested_was_read' => $canonicalReads > 0,
+            'public_projection_was_read' => $projectionReads > 0,
+        ]);
+        $memberPipeline = collect($trace->aggregatePipelinesForCollection('accounts_nested'))
+            ->first(static fn (array $pipeline): bool => collect($pipeline)->contains(
+                static fn (array $stage): bool => isset($stage['$lookup']),
+            ));
+        $this->assertIsArray($memberPipeline, 'The public member page must execute its bounded live-card pipeline in MongoDB.');
+        $pipelineJson = json_encode($memberPipeline, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        foreach (['"doc_type":"member_row"', '"$sort"', '"$lookup"', '"from":"account_profiles"', '"from":"accounts"', '"$unwind"', '"$limit"'] as $requiredFragment) {
+            $this->assertStringContainsString($requiredFragment, $pipelineJson);
+        }
+    }
+
+    public function test_account_group_delta_accepts_more_than_fifty_members_and_paginates_authoritative_order(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Unbounded Delta Parent',
+            'slug' => 'unbounded-delta-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $members = collect(range(1, 51))->map(fn (int $index): AccountProfile => $this->createNestedProfileFixture(
+            sprintf('Unbounded Member %02d', $index),
+            sprintf('unbounded-member-%02d', $index),
+        )
+        );
+        $memberIds = $members->map(static fn (AccountProfile $member): string => (string) $member->_id)->all();
+        $this->createNestedGroupHead($parent, 'Members')->assertCreated();
+
+        $path = "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/members/members";
+        $this->patchJson($path, ['add_ids' => $memberIds], $this->getHeaders())->assertOk();
+        $this->getJson("{$this->base_tenant_api_admin}account_profiles/{$parent->_id}", $this->getHeaders())
+            ->assertOk()
+            ->assertJsonPath('data.nested_profile_groups.0.member_count', 51);
+
+        $loadedIds = [];
+        $cursor = null;
+        $pageSizes = [];
+        do {
+            $url = $path.'?per_page=20'.($cursor === null ? '' : '&cursor='.urlencode($cursor));
+            $page = $this->getJson($url, $this->getHeaders())->assertOk();
+            $rows = $page->json('data') ?? [];
+            $pageSizes[] = count($rows);
+            array_push($loadedIds, ...collect($rows)->pluck('id')->all());
+            $cursor = $page->json('next_cursor');
+        } while (is_string($cursor) && $cursor !== '');
+
+        $this->assertSame([20, 20, 11], $pageSizes);
+        $this->assertSame($memberIds, $loadedIds);
+
+        $this->patchJson($path, ['remove_ids' => [$memberIds[0]]], $this->getHeaders())->assertOk();
+        $this->getJson("{$this->base_tenant_api_admin}account_profiles/{$parent->_id}", $this->getHeaders())
+            ->assertOk()
+            ->assertJsonPath('data.nested_profile_groups.0.member_count', 50);
+        $this->getJson($path.'?per_page=20', $this->getHeaders())
+            ->assertOk()
+            ->assertJsonMissing(['id' => $memberIds[0]])
+            ->assertJsonPath('data.0.id', $memberIds[1]);
+    }
+
+    public function test_account_group_delta_validation_accepts_one_thousand_ids_and_rejects_one_thousand_and_one(): void
+    {
+        $ids = collect(range(1, 1001))
+            ->map(static fn (int $index): string => sprintf('%024x', $index))
+            ->all();
+        $rules = (new AccountProfileNestedGroupMembersPatchRequest)->rules();
+
+        $accepted = Validator::make(['add_ids' => array_slice($ids, 0, 1000)], $rules);
+        $rejected = Validator::make(['add_ids' => $ids], $rules);
+
+        $this->assertFalse($accepted->fails());
+        $this->assertTrue($rejected->fails());
+        $this->assertArrayHasKey('add_ids', $rejected->errors()->toArray());
+    }
+
+    public function test_account_nested_member_rows_do_not_copy_group_order(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Member Order Authority Parent',
+            'slug' => 'member-order-authority-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $member = $this->createNestedProfileFixture('Order Authority Member', 'order-authority-member');
+        $this->createNestedGroupHead($parent, 'Members')->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/members/members",
+            ['add_ids' => [(string) $member->_id]],
+            $this->getHeaders(),
+        )->assertOk();
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $row = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
+            'parent_id' => (string) $parent->_id,
+            'group_key' => 'members',
+            'doc_type' => 'member_row',
+        ]);
+
+        $this->assertNotNull($row);
+        $this->assertFalse(isset($row['group_order']));
+        $this->assertSame(0, $row['item_order'] ?? null);
+    }
+
+    public function test_red_05_account_nested_member_row_is_reference_and_search_only(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'RED 05 Account Parent',
+            'slug' => 'red-05-account-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $member = $this->createNestedProfileFixture('RED 05 Account Member', 'red-05-account-member');
+        $member->forceFill([
+            'name_search_key' => 'red 05 account member',
+            'search_terms' => ['red', 'account', 'member', 'venue'],
+        ])->save();
+        $this->createNestedGroupHead($parent, 'Members')->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/members/members",
+            ['add_ids' => [(string) $member->_id]],
+            $this->getHeaders(),
+        )->assertOk();
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $row = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
+            'parent_id' => (string) $parent->_id,
+            'group_key' => 'members',
+            'doc_type' => 'member_row',
+        ]);
+
+        $this->assertNotNull($row);
+        $this->assertSame(0, $row['item_order'] ?? null);
+        $nestedProfile = json_decode(json_encode($row['nested_profile'] ?? null, JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame([
+            'id' => (string) $member->_id,
+            'search_key' => 'red 05 account member',
+            'search_terms' => ['red', 'account', 'member', 'venue'],
+        ], $nestedProfile, 'RED-05: Account member rows may persist only canonical identity and indexed search access data.');
+        foreach (['group_order', 'eligibility', 'display_name', 'slug', 'avatar_url', 'cover_url'] as $forbiddenField) {
+            $this->assertArrayNotHasKey($forbiddenField, $row, "RED-05: unexpected Account member-row field [{$forbiddenField}].");
+        }
+    }
+
+    public function test_account_nested_member_insert_locks_the_profile_post_image_before_relationship_upsert_in_one_transaction(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Transactional Lock Parent',
+            'slug' => 'transactional-lock-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $member = $this->createNestedProfileFixture('Transactional Lock Member', 'transactional-lock-member');
+        $this->createNestedGroupHead($parent, 'Members')->assertCreated();
+
+        $response = null;
+        $trace = $this->captureMongoCommands(function () use (&$response, $parent, $member): void {
+            $response = $this->patchJson(
+                "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/members/members",
+                ['add_ids' => [(string) $member->_id]],
+                $this->getHeaders(),
+            );
+        });
+        $this->assertNotNull($response);
+        $response->assertOk();
+
+        $commands = $trace->commands();
+        $lockIndexes = array_keys(array_filter($commands, static fn (array $entry): bool => $entry['name'] === 'findAndModify'
+            && ($entry['command']['findAndModify'] ?? null) === 'account_profiles'
+            && (string) data_get($entry, 'command.query._id') === (string) $member->_id
+            && data_get($entry, 'command.update.$set.search_consistency_lock') !== null));
+        $this->assertCount(1, $lockIndexes, 'Each inserted member must lock and read its Profile exactly once.');
+        $lockIndex = $lockIndexes[0];
+        $lock = $commands[$lockIndex]['command'];
+        $this->assertSame((string) $member->_id, (string) data_get($lock, 'query._id'));
+        $this->assertArrayHasKey('deleted_at', (array) ($lock['query'] ?? []));
+        $this->assertTrue((bool) ($lock['new'] ?? false), 'The lock must return the post-update Profile image used for search fields.');
+        $this->assertArrayHasKey('lsid', $lock);
+        $this->assertArrayHasKey('txnNumber', $lock);
+        $this->assertFalse((bool) ($lock['autocommit'] ?? true));
+
+        $relationshipUpdateIndex = collect($commands)->search(static fn (array $entry): bool => $entry['name'] === 'update'
+            && ($entry['command']['update'] ?? null) === 'accounts_nested');
+        $this->assertIsInt($relationshipUpdateIndex);
+        $this->assertLessThan($relationshipUpdateIndex, $lockIndex, 'Profile post-image lock must precede the relationship upsert.');
+    }
+
+    public function test_red_05_account_nested_member_row_accepts_profile_without_search_terms(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'RED 05 Legacy Parent',
+            'slug' => 'red-05-legacy-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $member = $this->createNestedProfileFixture('RED 05 Legacy Member', 'red-05-legacy-member');
+        $member->forceFill(['name_search_key' => 'red 05 legacy member']);
+        $member->offsetUnset('search_terms');
+        $member->save();
+        $this->createNestedGroupHead($parent, 'Members')->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/members/members",
+            ['add_ids' => [(string) $member->_id]],
+            $this->getHeaders(),
+        )->assertOk();
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $row = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested')->findOne([
+            'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
+            'parent_id' => (string) $parent->_id,
+            'group_key' => 'members',
+            'doc_type' => 'member_row',
+        ]);
+
+        $nestedProfile = json_decode(json_encode($row['nested_profile'] ?? null, JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame([
+            'id' => (string) $member->_id,
+            'search_key' => 'red 05 legacy member',
+        ], $nestedProfile, 'RED-05: missing search_terms is valid and must not reintroduce card snapshots.');
+    }
+
+    public function test_red_07_account_public_member_card_reads_current_profile_without_relationship_refresh(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'RED 07 Account Parent',
+            'slug' => 'red-07-account-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $member = $this->createNestedProfileFixture('RED 07 Original Member', 'red-07-member');
+        $this->createNestedGroupHead($parent, 'Members')->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/members/members",
+            ['add_ids' => [(string) $member->_id]],
+            $this->getHeaders(),
+        )->assertOk();
+
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        DB::connection('tenant')->getDatabase()->selectCollection('account_profiles')->updateOne(
+            ['_id' => new ObjectId((string) $member->_id)],
+            ['$set' => [
+                'display_name' => 'RED 07 Current Member',
+                'avatar_url' => '/api/v1/media/account-profiles/'.(string) $member->_id.'/avatar?v=707',
+            ]],
+        );
+
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/red-07-account-parent/nested_profile_groups/members/members",
+            $this->getHeaders(),
+        )->assertOk()
+            ->assertJsonPath('data.0.display_name', 'RED 07 Current Member')
+            ->assertJsonPath('data.0.avatar_url', '/api/v1/media/account-profiles/'.(string) $member->_id.'/avatar?v=707');
+    }
+
+    public function test_nested_group_search_finds_a_later_name_word_and_preserves_live_cards(): void
+    {
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Nested Search Parent',
+            'slug' => 'nested-search-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $member = $this->createNestedProfileFixture('João da Silva', 'joao-da-silva');
+        $member->forceFill([
+            'name_search_key' => 'joao da silva',
+            'search_terms' => ['joao', 'da', 'silva'],
+        ])->save();
+        $secondMember = $this->createNestedProfileFixture('Silvana Costa', 'silvana-costa');
+        $secondMember->forceFill([
+            'name_search_key' => 'silvana costa',
+            'search_terms' => ['silvana', 'costa'],
+        ])->save();
+        $nonMatchingMember = $this->createNestedProfileFixture('Carlos Souza', 'carlos-souza');
+        $this->createNestedGroupHead($parent, 'Members')->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/members/members",
+            ['add_ids' => [
+                (string) $member->_id,
+                (string) $secondMember->_id,
+                (string) $nonMatchingMember->_id,
+            ]],
+            $this->getHeaders(),
+        )->assertOk();
+
+        $oversizedCursor = str_repeat('x', InputConstraints::PAGINATION_CURSOR_MAX + 1);
+        $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/members/members?cursor={$oversizedCursor}",
+            $this->getHeaders(),
+        )->assertUnprocessable();
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/nested-search-parent/nested_profile_groups/members/members?cursor={$oversizedCursor}",
+            $this->getHeaders(),
+        )->assertUnprocessable();
+
+        $adminPath = "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/members/members";
+        $adminFirstPage = $this->getJson("{$adminPath}?search=sil&per_page=1", $this->getHeaders())->assertOk();
+        $adminCursor = (string) $adminFirstPage->json('next_cursor');
+        $this->assertNotSame('', $adminCursor);
+        $foreignAdminPayload = json_decode(Crypt::decryptString($adminCursor), true, flags: JSON_THROW_ON_ERROR);
+        $foreignAdminPayload['tenant_id'] = (string) new ObjectId;
+        $foreignAdminCursor = Crypt::encryptString(json_encode($foreignAdminPayload, JSON_THROW_ON_ERROR));
+        $this->getJson(
+            "{$adminPath}?search=sil&per_page=1&cursor=".urlencode($foreignAdminCursor),
+            $this->getHeaders(),
+        )->assertUnprocessable();
+
+        $firstPage = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/nested-search-parent/nested_profile_groups/members/members?search=sil&per_page=1",
+            $this->getHeaders(),
+        );
+        $firstPage->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', (string) $member->_id)
+            ->assertJsonPath('data.0.display_name', 'João da Silva');
+        $cursor = (string) $firstPage->json('next_cursor');
+        $this->assertNotSame('', $cursor);
+
+        $foreignTenantPayload = json_decode(Crypt::decryptString($cursor), true, flags: JSON_THROW_ON_ERROR);
+        $foreignTenantPayload['tenant_id'] = (string) new ObjectId;
+        $foreignTenantCursor = Crypt::encryptString(json_encode($foreignTenantPayload, JSON_THROW_ON_ERROR));
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/nested-search-parent/nested_profile_groups/members/members?search=sil&per_page=1&cursor=".urlencode($foreignTenantCursor),
+            $this->getHeaders(),
+        )->assertUnprocessable();
+
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/nested-search-parent/nested_profile_groups/members/members?search=sil&per_page=1&cursor=".urlencode($cursor),
+            $this->getHeaders(),
+        )->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', (string) $secondMember->_id)
+            ->assertJsonPath('data.0.display_name', 'Silvana Costa')
+            ->assertJsonPath('next_cursor', null)
+            ->assertJsonMissing(['id' => (string) $nonMatchingMember->_id]);
+    }
+
+    public function test_public_account_profile_detail_ignores_retired_projection_rows(): void
     {
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -7346,11 +8377,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $this->assertSame(
             [],
-            app(AccountProfileNestedPublicMembersProjectionService::class)->publicMetadataGroups($parent->fresh() ?? $parent),
+            app(AccountProfileNestedGroupMemberStore::class)->publicMetadataGroups($parent->fresh() ?? $parent),
         );
     }
 
-    public function test_public_account_profile_detail_keeps_three_duplicate_parent_entries_ambiguous(): void
+    public function test_retired_projection_cannot_supply_missing_canonical_group_heads(): void
     {
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -7359,11 +8390,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'slug' => 'triple-duplicate-parent-metadata',
             'is_active' => true,
             'visibility' => 'public',
-            'nested_profile_groups' => [
-                ['id' => 'artists', 'label' => 'Artists A', 'order' => 0],
-                ['id' => 'artists', 'label' => 'Artists B', 'order' => 1],
-                ['id' => 'artists', 'label' => 'Artists C', 'order' => 2],
-            ],
+            'nested_profile_groups' => [],
         ])->fresh();
         $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $tenantId = (string) Tenant::current()?->getKey();
@@ -7388,11 +8415,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $this->assertSame(
             [],
-            app(AccountProfileNestedPublicMembersProjectionService::class)->publicMetadataGroups($parent),
+            app(AccountProfileNestedGroupMemberStore::class)->publicMetadataGroups($parent),
         );
     }
 
-    public function test_public_account_profile_nested_groups_reject_projection_rows_from_a_different_parent_id(): void
+    public function test_retired_projection_rows_from_another_parent_cannot_create_a_group(): void
     {
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -7401,9 +8428,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'slug' => 'immutable-projection-parent',
             'is_active' => true,
             'visibility' => 'public',
-            'nested_profile_groups' => [
-                ['id' => 'artists', 'label' => 'Artists', 'order' => 0],
-            ],
+            'nested_profile_groups' => [],
         ])->fresh();
         $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
         $tenantId = (string) Tenant::current()?->getKey();
@@ -7429,7 +8454,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $this->assertSame(
             [],
-            app(AccountProfileNestedPublicMembersProjectionService::class)->publicMetadataGroups($parent),
+            app(AccountProfileNestedGroupMemberStore::class)->publicMetadataGroups($parent),
         );
         $this->getJson(
             "{$this->base_api_tenant}account_profiles/immutable-projection-parent/nested_profile_groups/artists/members",
@@ -7437,7 +8462,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         )->assertNotFound();
     }
 
-    public function test_public_nested_group_member_page_fails_closed_for_asymmetric_or_ambiguous_group_state(): void
+    public function test_retired_projection_cannot_make_a_missing_canonical_group_pageable(): void
     {
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -7642,7 +8667,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_public_nested_group_members_return_not_found_for_stale_parent_slug_projection_head(): void
+    public function test_public_nested_group_members_return_not_found_for_stale_parent_slug(): void
     {
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -7689,7 +8714,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ->assertJsonPath('message', 'Resource you are looking for was not found.');
     }
 
-    public function test_public_nested_group_members_preserve_siblings_and_restore_republished_child_accounts_after_account_publication_update(): void
+    public function test_public_nested_group_members_use_live_child_account_publication_without_rewriting_relationships(): void
     {
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -7751,7 +8776,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->getJson("{$this->base_api_tenant}account_profiles/draft-child-nested-parent")
             ->assertOk()
             ->assertJsonCount(1, 'data.nested_profile_groups')
-            ->assertJsonPath('data.nested_profile_groups.0.member_count', 1);
+            ->assertJsonPath('data.nested_profile_groups.0.member_count', 2);
         $this->getJson(
             "{$this->base_api_tenant}account_profiles/draft-child-nested-parent/nested_profile_groups/parceiros/members",
             $this->getHeaders()
@@ -7760,11 +8785,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->getJson(
             "{$this->base_api_tenant}account_profiles/draft-child-nested-parent/nested_profile_groups/parceiros/members?cursor=".urlencode($staleCursor),
             $this->getHeaders()
-        )->assertStatus(409)
-            ->assertJsonPath('message', 'A concurrency conflict occurred. Please try again.');
+        )->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', (string) $survivingMember->_id);
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
-            1,
+            0,
             $this->nestedPublicMembersProjectionCollection()->countDocuments([
                 'parent_profile_id' => (string) $parent->_id,
                 'doc_type' => 'group_head',
@@ -7779,7 +8805,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ])
         );
         $this->assertSame(
-            1,
+            0,
             $this->nestedPublicMembersProjectionCollection()->countDocuments([
                 'parent_profile_id' => (string) $parent->_id,
                 'member_profile_id' => (string) $survivingMember->_id,
@@ -7804,7 +8830,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ->assertJsonPath('data.1.id', (string) $survivingMember->_id);
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
-            1,
+            0,
             $this->nestedPublicMembersProjectionCollection()->countDocuments([
                 'parent_profile_id' => (string) $parent->_id,
                 'member_profile_id' => (string) $draftedMember->_id,
@@ -7813,7 +8839,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_public_nested_group_members_rebuild_multiple_affected_parents_without_touching_unrelated_projections(): void
+    public function test_public_nested_group_members_apply_live_publication_to_all_linked_parents_without_legacy_writes(): void
     {
         $member = $this->createNestedProfileFixture('Shared Nested Member', 'shared-nested-member');
         $unrelatedMember = $this->createNestedProfileFixture('Unrelated Nested Member', 'unrelated-nested-member');
@@ -7875,7 +8901,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
         foreach ($affectedParents as $parent) {
             $this->getJson("{$this->base_api_tenant}account_profiles/{$parent->slug}")
                 ->assertOk()
-                ->assertJsonCount(0, 'data.nested_profile_groups');
+                ->assertJsonCount(1, 'data.nested_profile_groups')
+                ->assertJsonPath('data.nested_profile_groups.0.member_count', 1);
 
             $this->getJson(
                 "{$this->base_api_tenant}account_profiles/{$parent->slug}/nested_profile_groups/parceiros/members",
@@ -7904,7 +8931,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ])
         );
         $this->assertSame(
-            1,
+            0,
             $this->nestedPublicMembersProjectionCollection()->countDocuments([
                 'parent_profile_id' => (string) $unrelatedParent->_id,
                 'member_profile_id' => (string) $unrelatedMember->_id,
@@ -7939,7 +8966,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         }
     }
 
-    public function test_public_nested_group_members_rebuild_canonical_memberships_after_member_account_publication_round_trip(): void
+    public function test_public_nested_group_members_preserve_canonical_memberships_after_member_account_publication_round_trip(): void
     {
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -8066,7 +9093,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $this->getJson("{$this->base_api_tenant}account_profiles/empty-public-group-parent")
             ->assertOk()
-            ->assertJsonCount(0, 'data.nested_profile_groups');
+            ->assertJsonCount(1, 'data.nested_profile_groups')
+            ->assertJsonPath('data.nested_profile_groups.0.member_count', 2);
 
         $this->getJson(
             "{$this->base_api_tenant}account_profiles/empty-public-group-parent/nested_profile_groups/parceiros/members",
@@ -8076,11 +9104,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->getJson(
             "{$this->base_api_tenant}account_profiles/empty-public-group-parent/nested_profile_groups/parceiros/members?cursor=".urlencode($staleCursor),
             $this->getHeaders()
-        )->assertStatus(409)
-            ->assertJsonPath('message', 'A concurrency conflict occurred. Please try again.');
+        )->assertOk()
+            ->assertJsonCount(0, 'data')
+            ->assertJsonPath('next_cursor', null);
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertSame(
-            1,
+            0,
             $this->nestedPublicMembersProjectionCollection()->countDocuments([
                 'parent_profile_id' => (string) $parent->_id,
                 'doc_type' => 'group_head',
@@ -8214,36 +9243,22 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertTrue($items->every(fn (array $item): bool => $item['account_id'] === (string) $this->account->_id));
     }
 
-    public function test_account_profile_index_queryable_only_excludes_non_queryable_profiles(): void
+    public function test_account_profile_index_rejects_candidate_only_query_parameters(): void
     {
-        TenantProfileType::query()->updateOrCreate(
-            ['type' => 'hidden_guest'],
-            ['capabilities' => [
-                'is_queryable' => false,
-                'is_publicly_navigable' => false,
-                'is_publicly_discoverable' => false,
-            ]]
-        );
-
-        $this->createNestedProfileFixture('Queryable Profile', 'queryable-profile');
-        $hiddenProfile = $this->createNestedProfileFixture(
-            'Hidden Profile',
-            'hidden-profile',
-            ['profile_type' => 'hidden_guest']
-        );
-
-        $response = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles?queryable_only=1&exclude_account_profile_id=".(string) $hiddenProfile->_id,
-            $this->getHeaders()
-        );
-
-        $response->assertStatus(200);
-        $slugs = collect($response->json('data'))->pluck('slug')->all();
-        $this->assertContains('queryable-profile', $slugs);
-        $this->assertNotContains('hidden-profile', $slugs);
+        foreach ([
+            'queryable_only=1',
+            'contact_channels_enabled_only=1',
+            'contact_mode=own',
+            'exclude_account_profile_id=507f1f77bcf86cd799439011',
+        ] as $candidateOnlyQuery) {
+            $this->getJson(
+                "{$this->base_tenant_api_admin}account_profiles?{$candidateOnlyQuery}",
+                $this->getHeaders()
+            )->assertUnprocessable();
+        }
     }
 
-    public function test_account_profile_candidates_endpoint_returns_queryable_profiles(): void
+    public function test_account_profile_candidates_terms_search_preserves_contextual_queryable_visibility_and_exclusion_filters(): void
     {
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
 
@@ -8263,6 +9278,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
             [
                 'profile_type' => 'hidden_guest',
                 'name_search_key' => 'hidden candidate',
+                'search_terms' => ['hidden', 'candidate', 'taxonomy'],
             ]
         );
         $private = $this->createNestedProfileFixture(
@@ -8271,12 +9287,21 @@ class AccountProfilesControllerTest extends TestCaseTenant
             [
                 'visibility' => 'private',
                 'name_search_key' => 'private candidate',
+                'search_terms' => ['private', 'candidate', 'taxonomy'],
             ]
         );
-        $queryable->forceFill(['name_search_key' => 'queryable candidate'])->save();
+        $excluded = $this->createNestedProfileFixture('Excluded Candidate', 'excluded-candidate');
+        $queryable->forceFill([
+            'name_search_key' => 'queryable candidate',
+            'search_terms' => ['queryable', 'candidate', 'taxonomy'],
+        ])->save();
+        $excluded->forceFill([
+            'name_search_key' => 'excluded candidate',
+            'search_terms' => ['excluded', 'candidate', 'taxonomy'],
+        ])->save();
 
         $response = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles/candidates?scope=queryable",
+            "{$this->base_tenant_api_admin}account_profiles/candidates?scope=queryable&search=tax&exclude_account_profile_id={$excluded->_id}",
             $this->getHeaders()
         );
 
@@ -8288,43 +9313,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
         $this->assertNotSame((string) $hidden->_id, (string) ($response->json('data.0.id') ?? ''));
         $this->assertNotSame((string) $private->_id, (string) ($response->json('data.0.id') ?? ''));
-    }
-
-    public function test_account_profile_index_supports_contact_eligible_filters_on_the_generic_endpoint(): void
-    {
-        $this->enableContactChannelsCapability('venue');
-
-        $contactOwn = $this->createNestedProfileFixture(
-            'Contact Own Candidate',
-            'contact-own-candidate',
-            [
-                'contact_mode' => 'own',
-            ]
-        );
-        $mirrored = $this->createNestedProfileFixture(
-            'Mirrored Candidate',
-            'mirrored-candidate',
-            [
-                'contact_mode' => 'mirrored_account_profile',
-            ]
-        );
-        $contactOwn->forceFill(['name_search_key' => 'contact own candidate'])->save();
-        $mirrored->forceFill(['name_search_key' => 'mirrored candidate'])->save();
-
-        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
-
-        $response = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profiles?contact_channels_enabled_only=1&contact_mode=own&search=co&exclude_account_profile_id=".(string) $mirrored->_id
-        );
-
-        $response->assertOk();
-        $response->assertJsonPath('data.0.id', (string) $contactOwn->_id);
-        $response->assertJsonPath('data.0.display_name', 'Contact Own Candidate');
-        $response->assertJsonIsArray('data.0.effective_contact_channels');
-        $this->assertSame(
-            [(string) $contactOwn->_id],
-            collect($response->json('data'))->pluck('id')->all(),
-        );
+        $this->assertNotSame((string) $excluded->_id, (string) ($response->json('data.0.id') ?? ''));
     }
 
     /**

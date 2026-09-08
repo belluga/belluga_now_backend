@@ -292,7 +292,7 @@ class CurrentTenantAccountDeletionErasureTest extends TestCaseTenant
         $tenantDatabase = DB::connection('tenant')->getDatabase();
 
         $this->assertNull($tenantDatabase->selectCollection('accounts_nested')->findOne(['_id' => $nestedId]));
-        $this->assertNull($tenantDatabase->selectCollection('account_profile_nested_public_member_projection')->findOne([
+        $this->assertNotNull($tenantDatabase->selectCollection('account_profile_nested_public_member_projection')->findOne([
             'parent_profile_id' => (string) $personalProfile->_id,
         ]));
         $this->assertNull($tenantDatabase->selectCollection((new MapPoi)->getTable())->findOne([

@@ -15,7 +15,9 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
 use App\Models\Tenants\TenantSettings;
+use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Application\Events\EventOccurrenceSyncService;
+use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Invites\Models\Tenants\ContactHashDirectory;
@@ -39,15 +41,18 @@ use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
-use Laravel\Sanctum\Sanctum;
 use Tests\Helpers\TenantLabels;
+use Tests\Helpers\TenantScopedSanctum as Sanctum;
+use Tests\Support\MongoCommandTrace;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
+use Tests\Traits\RestoresTenantContextAfterRequest;
 use Tests\Traits\SeedsTenantAccounts;
 
 class InvitesFlowTest extends TestCaseTenant
 {
     use RefreshLandlordAndTenantDatabases;
+    use RestoresTenantContextAfterRequest;
     use SeedsTenantAccounts;
 
     private const int MAX_CONTACT_IMPORT_ITEMS = 5000;
@@ -1523,6 +1528,43 @@ class InvitesFlowTest extends TestCaseTenant
         $response->assertJsonPath('invite.taxonomy_terms.0.name', 'Showcase');
     }
 
+    public function test_share_preview_uses_someone_fallback_without_changing_legacy_payload_shape(): void
+    {
+        $code = 'UNKNOWN1234';
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+        InviteShareCode::query()->create([
+            'code' => $code,
+            'event_id' => (string) $this->event->_id,
+            'occurrence_id' => $occurrenceId,
+            'inviter_principal' => [
+                'kind' => 'user',
+                'principal_id' => (string) $this->sender->_id,
+            ],
+            'issued_by_user_id' => (string) $this->sender->_id,
+            'account_profile_id' => null,
+            'inviter_display_name' => '',
+            'inviter_avatar_url' => null,
+            'expires_at' => Carbon::now()->addDay(),
+        ]);
+
+        $response = $this->getJson("{$this->base_api_tenant}invites/share/{$code}");
+
+        $response->assertOk();
+        $response->assertJsonPath('invite.inviter_name', 'Alguém');
+        $response->assertJsonPath('invite.inviter_candidates.0.display_name', 'Alguém');
+        $response->assertJsonStructure([
+            'invite' => [
+                'inviter_name',
+                'inviter_candidates' => [[
+                    'invite_id',
+                    'display_name',
+                    'avatar_url',
+                    'status',
+                ]],
+            ],
+        ]);
+    }
+
     public function test_share_preview_rejects_unknown_or_expired_code(): void
     {
         $missingResponse = $this->getJson("{$this->base_api_tenant}invites/share/MISSING1234");
@@ -2139,33 +2181,28 @@ class InvitesFlowTest extends TestCaseTenant
             ])->assertOk();
         }
 
-        DB::connection('tenant')->flushQueryLog();
-        DB::connection('tenant')->enableQueryLog();
-
         $query = http_build_query([
             'occurrence_id' => $occurrenceId,
             'recipient_account_profile_ids' => $profileIds,
         ]);
-        $response = $this->getJson("{$this->base_api_tenant}invites/sent-statuses?{$query}");
+        $response = null;
+        $trace = $this->captureMongoCommands(function () use ($query, &$response): void {
+            $response = $this->getJson("{$this->base_api_tenant}invites/sent-statuses?{$query}");
+        });
 
         $response->assertOk();
         $response->assertJsonCount(3, 'data.items');
 
-        $connection = DB::connection('tenant');
-        $queries = collect($connection->getQueryLog());
-        $connection->disableQueryLog();
-        $connection->flushQueryLog();
-        $profileQueries = $queries->filter(
-            static fn (array $queryLog): bool => str_contains(json_encode($queryLog), 'account_profiles')
-        );
-        $inviteQueries = $queries->filter(
-            static fn (array $queryLog): bool => str_contains(json_encode($queryLog), 'invite_edges')
-        );
+        $profileQueries = collect($trace->commandsForCollection('account_profiles'));
+        $inviteQueries = collect($trace->commandsForCollection('invite_edges'));
 
         $this->assertLessThanOrEqual(1, $profileQueries->count(), 'Recipient profiles must be projected in one bulk lookup.');
         $this->assertGreaterThanOrEqual(1, $inviteQueries->count(), 'Sent-status lookup must query invite_edges directly.');
         $this->assertTrue(
-            $inviteQueries->contains(static fn (array $queryLog): bool => str_contains(json_encode($queryLog), $occurrenceId)),
+            $inviteQueries->contains(static fn (array $queryLog): bool => str_contains(
+                json_encode($queryLog, JSON_PARTIAL_OUTPUT_ON_ERROR),
+                $occurrenceId,
+            )),
             'Sent-status invite_edges query must be occurrence-scoped.',
         );
 
@@ -2872,6 +2909,25 @@ class InvitesFlowTest extends TestCaseTenant
             ],
         ]]);
 
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->firstOrFail();
+        $groups = [
+            ['id' => 'bandas', 'label' => 'Bandas', 'order' => 0],
+            ['id' => 'expositores', 'label' => 'Expositores', 'order' => 1],
+        ];
+        $store = app(EventOccurrenceNestedAccountStore::class);
+        app(EventTransactionRunner::class)->run(function ($context) use ($event, $occurrence, $groups, $bandId, $exhibitorId, $store): void {
+            $store->syncOccurrenceGroupMetadataWithinContext(
+                $context,
+                (string) $event->_id,
+                $occurrence,
+                $groups,
+            );
+            $store->patchOccurrenceGroupMembersWithinContext($context, $occurrence, 'bandas', [$bandId], []);
+            $store->patchOccurrenceGroupMembersWithinContext($context, $occurrence, 'expositores', [$exhibitorId], []);
+        });
+
         return $event->fresh();
     }
 
@@ -2926,6 +2982,23 @@ class InvitesFlowTest extends TestCaseTenant
             $occurrences,
             (string) ($event->content ?? ''),
         );
+    }
+
+    /** @param callable():void $operation */
+    private function captureMongoCommands(callable $operation): MongoCommandTrace
+    {
+        $client = DB::connection('tenant')->getClient();
+        $this->assertNotNull($client);
+        $trace = new MongoCommandTrace;
+        $client->addSubscriber($trace);
+
+        try {
+            $operation();
+        } finally {
+            $client->removeSubscriber($trace);
+        }
+
+        return $trace;
     }
 
     private function createRelatedAccountProfile(

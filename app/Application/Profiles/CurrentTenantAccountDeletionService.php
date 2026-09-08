@@ -223,38 +223,6 @@ final class CurrentTenantAccountDeletionService
             ],
         );
 
-        $profiles->updateMany(
-            ['nested_profile_groups.account_profile_ids' => ['$in' => $profileIds]],
-            [[
-                '$set' => [
-                    'nested_profile_groups' => [
-                        '$map' => [
-                            'input' => ['$ifNull' => ['$nested_profile_groups', []]],
-                            'as' => 'group',
-                            'in' => [
-                                '$mergeObjects' => [
-                                    '$$group',
-                                    [
-                                        'account_profile_ids' => [
-                                            '$filter' => [
-                                                'input' => ['$ifNull' => ['$$group.account_profile_ids', []]],
-                                                'as' => 'profile_id',
-                                                'cond' => [
-                                                    '$not' => [[
-                                                        '$in' => ['$$profile_id', $profileIds],
-                                                    ]],
-                                                ],
-                                            ],
-                                        ],
-                                    ],
-                                ],
-                            ],
-                        ],
-                    ],
-                ],
-            ]],
-        );
-
         $memberRows = $this->tenantCollection(AccountProfileNestedGroupMemberStore::COLLECTION);
         $affectedParentIds = $this->normalizedStrings(array_map(
             static fn (mixed $value): string => trim((string) $value),
@@ -276,21 +244,31 @@ final class CurrentTenantAccountDeletionService
         ]);
 
         $groupCountsByParent = [];
-        foreach ($memberRows->find(
+        foreach ($memberRows->aggregate([
             [
-                'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
-                'doc_type' => 'member_row',
-                'parent_id' => ['$in' => $affectedParentIds],
+                '$match' => [
+                    'parent_type' => AccountProfileNestedGroupMemberStore::PARENT_TYPE,
+                    'doc_type' => 'member_row',
+                    'parent_id' => ['$in' => $affectedParentIds],
+                ],
             ],
-            ['projection' => ['parent_id' => 1, 'group_key' => 1]],
-        ) as $row) {
-            $parentProfileId = trim((string) ($row['parent_id'] ?? ''));
-            $groupId = trim((string) ($row['group_key'] ?? ''));
+            [
+                '$group' => [
+                    '_id' => [
+                        'parent_id' => '$parent_id',
+                        'group_key' => '$group_key',
+                    ],
+                    'member_count' => ['$sum' => 1],
+                ],
+            ],
+        ]) as $row) {
+            $parentProfileId = trim((string) ($row['_id']['parent_id'] ?? ''));
+            $groupId = trim((string) ($row['_id']['group_key'] ?? ''));
             if ($parentProfileId === '' || $groupId === '') {
                 continue;
             }
 
-            $groupCountsByParent[$parentProfileId][$groupId] = ($groupCountsByParent[$parentProfileId][$groupId] ?? 0) + 1;
+            $groupCountsByParent[$parentProfileId][$groupId] = max(0, (int) ($row['member_count'] ?? 0));
         }
 
         foreach (AccountProfile::withTrashed()->whereIn('_id', $affectedParentIds)->get() as $parentProfile) {
