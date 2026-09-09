@@ -189,11 +189,8 @@ return new class extends Migration
         $assertCanonicalHeadsExist($expectedHeadIds);
 
         $nested->updateMany(['doc_type' => 'member_row'], ['$unset' => ['group_label' => true]]);
-        $projection = $database->selectCollection('account_profile_nested_public_member_projection');
-        $projection->updateMany([], ['$unset' => ['group_label' => true]]);
 
-        if ($nested->findOne(['doc_type' => 'member_row', 'group_label' => ['$exists' => true]], ['projection' => ['_id' => 1]]) !== null
-            || $projection->findOne(['group_label' => ['$exists' => true]], ['projection' => ['_id' => 1]]) !== null) {
+        if ($nested->findOne(['doc_type' => 'member_row', 'group_label' => ['$exists' => true]], ['projection' => ['_id' => 1]]) !== null) {
             throw new \RuntimeException('Nested-group label cutover left copied labels behind.');
         }
     }

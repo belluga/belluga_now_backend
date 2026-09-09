@@ -18,8 +18,6 @@ final class InputConstraints
 
     public const ACCOUNT_PROFILE_NESTED_GROUPS_MAX = 12;
 
-    public const ACCOUNT_PROFILE_NESTED_GROUP_MEMBERS_MAX = 50;
-
     public const ACCOUNT_PROFILE_NESTED_GROUP_KEY_MAX = 64;
 
     public const ACCOUNT_PROFILE_GALLERY_GROUPS_MAX = 6;
@@ -27,6 +25,8 @@ final class InputConstraints
     public const ACCOUNT_PROFILE_GALLERY_ITEMS_MAX = 12;
 
     public const ACCOUNT_PROFILE_GALLERY_KEY_MAX = 64;
+
+    public const ACCOUNT_PROFILE_EXTERNAL_LINK_URL_MAX = 2048;
 
     public const EMAIL_MAX = 255;
 
@@ -45,6 +45,8 @@ final class InputConstraints
     public const TAXONOMY_BATCH_MAX_ITEMS = 100;
 
     public const PUBLIC_PAGE_SIZE_MAX = 50;
+
+    public const PAGINATION_CURSOR_MAX = 4096;
 
     public const PUBLIC_PAGE_MAX = 200;
 

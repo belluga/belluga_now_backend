@@ -8,7 +8,6 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
-use MongoDB\BSON\Regex;
 
 final class AccountProfileCandidateDiscoveryService
 {
@@ -42,12 +41,18 @@ final class AccountProfileCandidateDiscoveryService
         int $perPage,
         ?string $excludedProfileId = null,
     ): array {
-        $query = AccountProfile::query()
-            ->where('name_search_key', new Regex('^'.preg_quote($normalizedSearch, '/')));
-
-        if (! $this->applyScopeConstraint($query, $scope)) {
+        $scopeExpression = $this->scopeExpression($scope);
+        if ($scopeExpression === null) {
             return $this->terminalEnvelope($page, $perPage);
         }
+
+        $query = AccountProfile::query()
+            ->whereRaw(AccountProfileSearchV1::mongoScopedOrPredicate(
+                $scopeExpression,
+                'name_search_key',
+                'search_terms',
+                $normalizedSearch,
+            ));
 
         $skip = ($page - 1) * $perPage;
 
@@ -139,14 +144,44 @@ final class AccountProfileCandidateDiscoveryService
             return [];
         }
 
-        $queryablePolicy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
-        $contactCapableTypes = array_flip($this->eligibleTypes(self::SCOPE_CONTACT_CAPABLE));
-
         /** @var Collection<int, AccountProfile> $profiles */
         $profiles = AccountProfile::withTrashed()
             ->whereIn('_id', $profileIds)
             ->get(['_id', 'display_name', 'profile_type', 'is_active', 'visibility', 'contact_mode', 'deleted_at']);
         $profilesById = $profiles->keyBy(static fn (AccountProfile $profile): string => (string) $profile->getKey());
+
+        return $this->selectedSummariesFromProfiles($profileIds, $profilesById);
+    }
+
+    /**
+     * Formats the bounded Profile documents already hydrated by a relationship
+     * aggregation. Missing Profiles deliberately remain visible as unavailable
+     * selections so an administrator can remove a stale relationship.
+     *
+     * @param  array<int, string>  $profileIds
+     * @param  array<string, array<string, mixed>>  $documentsById
+     * @return array<string, array{id: string, display_name: ?string, is_queryable_candidate: bool, is_contact_capable_candidate: bool}>
+     */
+    public function selectedSummariesFromDocuments(array $profileIds, array $documentsById): array
+    {
+        $profilesById = collect($documentsById)->mapWithKeys(static function (array $document, string $profileId): array {
+            $profile = (new AccountProfile)->newFromBuilder($document);
+
+            return [$profileId => $profile];
+        });
+
+        return $this->selectedSummariesFromProfiles($profileIds, $profilesById);
+    }
+
+    /**
+     * @param  array<int, string>  $profileIds
+     * @param  Collection<string, AccountProfile>  $profilesById
+     * @return array<string, array{id: string, display_name: ?string, is_queryable_candidate: bool, is_contact_capable_candidate: bool}>
+     */
+    private function selectedSummariesFromProfiles(array $profileIds, Collection $profilesById): array
+    {
+        $queryablePolicy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
+        $contactCapableTypes = array_flip($this->eligibleTypes(self::SCOPE_CONTACT_CAPABLE));
 
         $summaries = [];
         foreach ($profileIds as $profileId) {
@@ -226,6 +261,34 @@ final class AccountProfileCandidateDiscoveryService
         }
 
         return true;
+    }
+
+    /** @return array<string, mixed>|null */
+    private function scopeExpression(string $scope): ?array
+    {
+        if ($scope === self::SCOPE_QUERYABLE) {
+            $policy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
+
+            return $policy->catalogTypeKeys() === []
+                ? null
+                : $policy->catalogMatchExpression();
+        }
+
+        $eligibleTypes = $this->eligibleTypes($scope);
+        if ($eligibleTypes === []) {
+            return null;
+        }
+
+        $clauses = [
+            ['is_active' => true],
+            ['deleted_at' => null],
+            ['profile_type' => ['$in' => $eligibleTypes]],
+        ];
+        if ($scope === self::SCOPE_CONTACT_CAPABLE) {
+            $clauses[] = ['contact_mode' => AccountProfileContactChannelsService::CONTACT_MODE_OWN];
+        }
+
+        return ['$and' => $clauses];
     }
 
     /**

@@ -103,8 +103,10 @@ class AccountProfileMediaService
         );
     }
 
-    public function captureGalleryMutationBackup(
+    /** @param array<int, string> $itemIds */
+    public function captureGalleryItemMutationBackup(
         AccountProfile $profile,
+        array $itemIds,
         ?string $baseUrl = null,
     ): AccountProfileMediaMutationBackup {
         $directory = $this->modelMediaService->resolveModelBaseDirectory(
@@ -113,9 +115,16 @@ class AccountProfileMediaService
             $baseUrl,
         );
         $disk = Storage::disk('public');
+        $prefixes = array_values(array_map(
+            fn (string $itemId): string => $this->galleryKind($itemId).'.',
+            array_unique($itemIds),
+        ));
         $files = [];
         foreach ($disk->allFiles($directory) as $path) {
-            if (! str_starts_with(basename($path), self::GALLERY_KIND_PREFIX)) {
+            $filename = basename($path);
+            if (! collect($prefixes)->contains(
+                static fn (string $prefix): bool => str_starts_with($filename, $prefix),
+            )) {
                 continue;
             }
             $files[$path] = $disk->get($path);
@@ -123,7 +132,7 @@ class AccountProfileMediaService
 
         return new AccountProfileMediaMutationBackup(
             $directory,
-            [self::GALLERY_KIND_PREFIX],
+            $prefixes,
             $files,
         );
     }

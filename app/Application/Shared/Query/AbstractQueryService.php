@@ -28,10 +28,7 @@ abstract class AbstractQueryService
         $sorted = $this->applySort($query, $extracted['sort']);
 
         if (! $sorted) {
-            $default = $this->defaultSort();
-            if ($default !== null) {
-                $query->orderBy($default['field'], $default['direction']);
-            }
+            $this->applyDefaultSort($query);
         }
 
         return $query->paginate($perPage, ['*'], 'page', $page);
@@ -48,6 +45,14 @@ abstract class AbstractQueryService
             'field' => 'created_at',
             'direction' => 'desc',
         ];
+    }
+
+    protected function applyDefaultSort(Builder $query): void
+    {
+        $default = $this->defaultSort();
+        if ($default !== null) {
+            $query->orderBy($default['field'], $default['direction']);
+        }
     }
 
     /**

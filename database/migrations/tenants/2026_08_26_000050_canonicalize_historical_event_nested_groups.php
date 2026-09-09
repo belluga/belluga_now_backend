@@ -2,16 +2,14 @@
 
 declare(strict_types=1);
 
-use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
 use Illuminate\Database\Migrations\Migration;
 
 return new class extends Migration
 {
     public function up(): void
     {
-        app(LegacyEventPartiesCanonicalizationService::class)->repairNestedGroupsForCutover(
-            failOnError: true,
-        );
+        // Historical cutover is intentionally no longer automated. Runtime
+        // code neither reads nor mutates the retired relationship authorities.
     }
 
     public function down(): void

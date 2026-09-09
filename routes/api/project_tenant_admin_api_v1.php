@@ -19,10 +19,6 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
 
         Route::get('/events/account_profile_candidates', [EventsController::class, 'accountProfileCandidates'])
             ->middleware('ability:events:read,events:create,events:update');
-        Route::get('/events/legacy_event_parties/summary', [EventsController::class, 'legacyEventPartiesSummary'])
-            ->middleware('ability:events:read,events:update');
-        Route::post('/events/legacy_event_parties/repair', [EventsController::class, 'repairLegacyEventParties'])
-            ->middleware('abilities:events:update');
         Route::get('/events', [EventsController::class, 'index'])
             ->middleware('abilities:events:read');
         Route::post('/events/{event_id}/occurrences/{occurrence_id}/profile_groups', [EventsController::class, 'storeOccurrenceProfileGroup'])
@@ -30,6 +26,8 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
         Route::delete('/events/{event_id}/occurrences/{occurrence_id}/profile_groups/{group_id}', [EventsController::class, 'deleteOccurrenceProfileGroup'])
             ->middleware('abilities:events:update');
         Route::patch('/events/{event_id}/occurrences/{occurrence_id}/profile_groups/{group_id}', [EventsController::class, 'patchOccurrenceProfileGroupLabel'])
+            ->middleware('abilities:events:update');
+        Route::patch('/events/{event_id}/occurrences/{occurrence_id}/profile_groups/{group_id}/order', [EventsController::class, 'patchOccurrenceProfileGroupOrder'])
             ->middleware('abilities:events:update');
         Route::get('/events/{event_id}/occurrences/{occurrence_id}/profile_groups/{group_id}/members', [EventsController::class, 'occurrenceProfileGroupMembers'])
             ->middleware('abilities:events:read');

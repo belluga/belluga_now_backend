@@ -25,17 +25,19 @@ use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\Validation\InputConstraints;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event as EventBus;
+use Illuminate\Support\Str;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
+use Tests\Traits\SeedsOccurrenceProfileGroups;
 use Tests\Traits\SeedsTenantAccounts;
 
 class AgendaAndEventsControllerTest extends TestCaseTenant
 {
     use RefreshLandlordAndTenantDatabases;
+    use SeedsOccurrenceProfileGroups;
     use SeedsTenantAccounts;
 
     protected TenantLabels $tenant {
@@ -157,9 +159,23 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 ],
                 'gallery_groups' => [
                     [
-                        'id' => 'venue-gallery',
+                        'group_id' => 'venue-gallery',
+                        'subtitle' => 'Ambientes',
+                        'order' => 0,
                         'items' => [
-                            ['url' => 'https://example.org/venue-gallery.jpg'],
+                            [
+                                'item_id' => 'venue-gallery-photo',
+                                'type' => 'photo',
+                                'order' => 0,
+                                'image_url' => 'https://example.org/venue-gallery.jpg',
+                            ],
+                            [
+                                'item_id' => 'venue-gallery-youtube',
+                                'type' => 'youtube',
+                                'order' => 1,
+                                'youtube_video_id' => 'dQw4w9WgXcQ',
+                                'player_aspect_ratio' => 16 / 9,
+                            ],
                         ],
                     ],
                 ],
@@ -192,7 +208,16 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $this->assertSame('https://example.org/venue-cover.jpg', $detailVenue['hero_image_url'] ?? null);
         $this->assertSame('https://example.org/venue-avatar.jpg', $detailVenue['logo_url'] ?? null);
         $this->assertNotEmpty($detailVenue['taxonomy_terms'] ?? []);
-        $this->assertNotEmpty($detailVenue['gallery_groups'] ?? []);
+        $this->assertSame(
+            ['photo', 'youtube'],
+            collect($detailVenue['gallery_groups'][0]['items'] ?? [])
+                ->pluck('type')
+                ->all(),
+        );
+        $this->assertSame(
+            'dQw4w9WgXcQ',
+            $detailVenue['gallery_groups'][0]['items'][1]['youtube_video_id'] ?? null,
+        );
     }
 
     public function test_agenda_default_includes_live_now_and_excludes_past_events(): void
@@ -330,13 +355,12 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ->where('display_name', $title.' Artist')
             ->value('_id');
         $this->assertNotSame('', $profileId);
-        app(\Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore::class)
-            ->syncOccurrenceGroups((string) $event->_id, $occurrence, [[
-                'id' => 'artists',
-                'label' => 'Artists',
-                'order' => 0,
-                'account_profile_ids' => [$profileId],
-            ]]);
+        $this->seedOccurrenceProfileGroups($event, $occurrence, [[
+            'id' => 'artists',
+            'label' => 'Artists',
+            'order' => 0,
+            'account_profile_ids' => [$profileId],
+        ]]);
         $occurrence->forceFill([
             'thumb' => null,
             'event_parties' => [],
@@ -397,13 +421,12 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ->values();
         $selectedOccurrence = $occurrences->last();
         $this->assertInstanceOf(EventOccurrence::class, $selectedOccurrence);
-        app(\Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore::class)
-            ->syncOccurrenceGroups((string) $event->_id, $selectedOccurrence, [[
-                    'id' => 'artists',
-                    'label' => 'Artists',
-                    'order' => 0,
-                    'account_profile_ids' => [$profileId],
-                ]]);
+        $this->seedOccurrenceProfileGroups($event, $selectedOccurrence, [[
+            'id' => 'artists',
+            'label' => 'Artists',
+            'order' => 0,
+            'account_profile_ids' => [$profileId],
+        ]]);
         $selectedOccurrence->forceFill([
             'thumb' => null,
             'event_parties' => [],
@@ -498,22 +521,10 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             [
                 'date_time_start' => $now->copy()->addDays(1),
                 'date_time_end' => $now->copy()->addDays(1)->addHours(2),
-                '_profile_groups_explicit' => true,
-                'profile_groups' => [[
-                    'id' => 'headline',
-                    'label' => 'Headline',
-                    'order' => 0,
-                ]],
             ],
             [
                 'date_time_start' => $now->copy()->addDays(2),
                 'date_time_end' => $now->copy()->addDays(2)->addHours(2),
-                '_profile_groups_explicit' => true,
-                'profile_groups' => [[
-                    'id' => 'guest',
-                    'label' => 'Guest',
-                    'order' => 0,
-                ]],
             ],
         ]);
 
@@ -532,6 +543,15 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             ->plainTextToken;
         auth()->forgetGuards();
         $this->withToken($adminToken);
+
+        $this->postJson(
+            "{$this->base_tenant_api_admin}events/{$event->_id}/occurrences/{$storedOccurrences[0]->_id}/profile_groups",
+            ['label' => 'Headline'],
+        )->assertCreated();
+        $this->postJson(
+            "{$this->base_tenant_api_admin}events/{$event->_id}/occurrences/{$storedOccurrences[1]->_id}/profile_groups",
+            ['label' => 'Guest'],
+        )->assertCreated();
 
         $this->patchJson(
             "{$this->base_tenant_api_admin}events/{$event->_id}/occurrences/{$storedOccurrences[0]->_id}/profile_groups/headline/members",
@@ -651,21 +671,20 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $liveOccurrence = EventOccurrence::query()
             ->where('event_id', (string) $liveEvent->_id)
             ->firstOrFail();
-        app(\Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore::class)
-            ->syncOccurrenceGroups((string) $liveEvent->_id, $liveOccurrence, [
-                [
-                    'id' => 'artists',
-                    'label' => 'Artists',
-                    'order' => 0,
-                    'account_profile_ids' => [(string) $liveArtistOne->_id],
-                ],
-                [
-                    'id' => 'bands',
-                    'label' => 'Bands',
-                    'order' => 1,
-                    'account_profile_ids' => [(string) $liveArtistTwo->_id],
-                ],
-            ]);
+        $this->seedOccurrenceProfileGroups($liveEvent, $liveOccurrence, [
+            [
+                'id' => 'artists',
+                'label' => 'Artists',
+                'order' => 0,
+                'account_profile_ids' => [(string) $liveArtistOne->_id],
+            ],
+            [
+                'id' => 'bands',
+                'label' => 'Bands',
+                'order' => 1,
+                'account_profile_ids' => [(string) $liveArtistTwo->_id],
+            ],
+        ]);
 
         $this->createEvent([
             'title' => 'Upcoming Hidden In Live',
@@ -2000,13 +2019,12 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $occurrence = EventOccurrence::query()
             ->where('event_id', (string) $event->_id)
             ->firstOrFail();
-        app(\Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore::class)
-            ->syncOccurrenceGroups((string) $event->_id, $occurrence, [[
-                'id' => 'bands',
-                'label' => 'Bands',
-                'order' => 0,
-                'account_profile_ids' => [(string) $profile->_id],
-            ]]);
+        $this->seedOccurrenceProfileGroups($event, $occurrence, [[
+            'id' => 'bands',
+            'label' => 'Bands',
+            'order' => 0,
+            'account_profile_ids' => [(string) $profile->_id],
+        ]]);
 
         $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
         $response->assertStatus(200);

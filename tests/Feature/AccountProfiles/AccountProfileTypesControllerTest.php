@@ -5,16 +5,22 @@ declare(strict_types=1);
 namespace Tests\Feature\AccountProfiles;
 
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Jobs\AccountProfiles\RefreshAccountProfileSearchForTypeJob;
 use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\Tenant;
+use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\MapPois\Models\Tenants\MapPoi;
+use Closure;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use MongoDB\BSON\ObjectId;
@@ -40,7 +46,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
     {
         parent::setUp();
 
-        Queue::fake([RebuildTenantEnvironmentSnapshotJob::class]);
+        Queue::fake([
+            RebuildTenantEnvironmentSnapshotJob::class,
+            RefreshAccountProfileSearchForTypeJob::class,
+        ]);
 
         if (! self::$bootstrapped) {
             $this->refreshLandlordAndTenantDatabases();
@@ -133,6 +142,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                     'is_poi_enabled' => true,
                     'is_reference_location_enabled' => true,
                     'has_nested_profile_groups' => true,
+                    'has_external_links' => true,
                 ],
             ],
             $this->getHeaders()
@@ -146,6 +156,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
         $response->assertJsonPath('data.capabilities.is_reference_location_enabled', true);
         $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
+        $response->assertJsonPath('data.capabilities.has_external_links', true);
         $response->assertJsonPath('data.poi_visual.mode', 'icon');
         $response->assertJsonPath('data.poi_visual.icon', 'place');
         $response->assertJsonPath('data.poi_visual.color', '#FF8800');
@@ -673,6 +684,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 'is_poi_enabled' => true,
                 'has_events' => true,
                 'has_nested_profile_groups' => false,
+                'has_external_links' => false,
             ],
         ]);
 
@@ -681,6 +693,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             [
                 'capabilities' => [
                     'has_nested_profile_groups' => true,
+                    'has_external_links' => true,
                 ],
             ],
             $this->getHeaders()
@@ -692,6 +705,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
         $response->assertJsonPath('data.capabilities.has_events', true);
         $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
+        $response->assertJsonPath('data.capabilities.has_external_links', true);
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
@@ -700,6 +714,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $this->assertTrue((bool) ($model->capabilities['is_poi_enabled'] ?? false));
         $this->assertTrue((bool) ($model->capabilities['has_events'] ?? false));
         $this->assertTrue((bool) ($model->capabilities['has_nested_profile_groups'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['has_external_links'] ?? false));
     }
 
     public function test_profile_type_map_poi_projection_impact_returns_projection_count(): void
@@ -953,6 +968,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('data.type', 'metadata-reference');
         $response->assertJsonPath('data.label', 'Updated Metadata Reference');
+        Queue::assertPushed(
+            RefreshAccountProfileSearchForTypeJob::class,
+            fn (RefreshAccountProfileSearchForTypeJob $job): bool => $this->readPrivateProperty($job, 'profileType') === 'metadata-reference',
+        );
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $this->assertTrue(
@@ -960,6 +979,154 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 ->whereKey($profile->getKey())
                 ->where('profile_type', 'metadata-reference')
                 ->exists()
+        );
+    }
+
+    public function test_profile_type_search_refresh_job_updates_every_matching_profile_and_only_account_parent_rows(): void
+    {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'refreshable-search'],
+            [
+                'label' => 'Refreshed Category',
+                'labels' => ['singular' => 'Refreshed Category', 'plural' => 'Refreshed Categories'],
+                'allowed_taxonomies' => [],
+                'capabilities' => [],
+            ],
+        );
+        $first = AccountProfile::create([
+            'account_id' => (string) $this->createAccountProfileFixtureAccount('first-refresh-target')->getKey(),
+            'profile_type' => 'refreshable-search',
+            'display_name' => 'First Refresh Target',
+            'is_active' => true,
+            'name_search_key' => 'old first',
+            'search_terms' => ['old'],
+        ]);
+        $second = AccountProfile::create([
+            'account_id' => (string) $this->createAccountProfileFixtureAccount('second-refresh-target')->getKey(),
+            'profile_type' => 'refreshable-search',
+            'display_name' => 'Second Refresh Target',
+            'is_active' => true,
+            'name_search_key' => 'old second',
+            'search_terms' => ['old'],
+        ]);
+        AccountProfile::create([
+            'account_id' => (string) $this->createAccountProfileFixtureAccount('unrelated-profile-type')->getKey(),
+            'profile_type' => 'venue',
+            'display_name' => 'Unrelated Profile Type',
+            'is_active' => true,
+            'name_search_key' => 'unrelated sentinel',
+            'search_terms' => ['unrelated', 'sentinel'],
+        ]);
+
+        $tenantId = (string) Tenant::current()->getKey();
+        $collection = DB::connection('tenant')->getDatabase()->selectCollection('accounts_nested');
+        $collection->insertMany([
+            [
+                '_id' => 'refresh-job-account-parent',
+                'tenant_id' => $tenantId,
+                'parent_type' => 'account_profile',
+                'parent_id' => (string) new ObjectId,
+                'group_key' => 'members',
+                'doc_type' => 'member_row',
+                'item_order' => 0,
+                'nested_profile' => ['id' => (string) $first->getKey(), 'search_key' => 'old first', 'search_terms' => ['old']],
+            ],
+            [
+                '_id' => 'refresh-job-event-parent',
+                'tenant_id' => $tenantId,
+                'event_id' => (string) new ObjectId,
+                'parent_type' => 'event_occurrence',
+                'parent_id' => (string) new ObjectId,
+                'group_key' => 'members',
+                'doc_type' => 'member_row',
+                'item_order' => 0,
+                'nested_profile' => ['id' => (string) $first->getKey(), 'search_key' => 'old first', 'search_terms' => ['old']],
+            ],
+        ]);
+
+        $job = new RefreshAccountProfileSearchForTypeJob('refreshable-search');
+        $job->handle(app(AccountProfileManagementService::class));
+        $job->handle(app(AccountProfileManagementService::class));
+
+        foreach ([$first, $second] as $profile) {
+            $terms = AccountProfile::query()->findOrFail($profile->getKey())->search_terms;
+            $this->assertContains('refreshed', $terms);
+            $this->assertContains('category', $terms);
+        }
+        $this->assertSame(
+            ['unrelated', 'sentinel'],
+            AccountProfile::query()->where('display_name', 'Unrelated Profile Type')->firstOrFail()->search_terms,
+        );
+        $this->assertSame(
+            ['first', 'refresh', 'target', 'refreshed', 'category', 'categories'],
+            collect($collection->findOne(['_id' => 'refresh-job-account-parent'])['nested_profile']['search_terms'])->values()->all(),
+        );
+        $this->assertSame(
+            ['old'],
+            collect($collection->findOne(['_id' => 'refresh-job-event-parent'])['nested_profile']['search_terms'])->values()->all(),
+        );
+    }
+
+    public function test_profile_type_search_refresh_job_continues_after_profile_failure_then_reports_the_batch_failure(): void
+    {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'failing-refresh'],
+            ['label' => 'Failing Refresh', 'allowed_taxonomies' => [], 'capabilities' => []],
+        );
+        $first = AccountProfile::create([
+            'account_id' => (string) $this->createAccountProfileFixtureAccount('failing-refresh-target')->getKey(),
+            'profile_type' => 'failing-refresh',
+            'display_name' => 'Failing Target',
+            'is_active' => true,
+        ]);
+        $second = AccountProfile::create([
+            'account_id' => (string) $this->createAccountProfileFixtureAccount('successful-refresh-target')->getKey(),
+            'profile_type' => 'failing-refresh',
+            'display_name' => 'Successful Target',
+            'is_active' => true,
+        ]);
+
+        $service = new class((string) $first->getKey()) extends AccountProfileManagementService
+        {
+            /** @var array<int, string> */
+            public array $seen = [];
+
+            public function __construct(private readonly string $failingId) {}
+
+            public function update(
+                AccountProfile $profile,
+                array $attributes,
+                ?string $commandId = null,
+                ?Closure $mutateWithinTransaction = null,
+                array $fingerprintSupplement = [],
+                bool $dispatchOutboxImmediately = true,
+                ?Closure $compensateKnownRollback = null,
+                bool $useAggregateRevisionCas = true,
+                bool $forceSearchRefresh = false,
+            ): AccountProfile {
+                $profileId = (string) $profile->getKey();
+                $this->seen[] = $profileId;
+                if ($profileId === $this->failingId) {
+                    throw new \RuntimeException('intentional refresh failure');
+                }
+
+                return $profile;
+            }
+        };
+        Log::spy();
+
+        try {
+            (new RefreshAccountProfileSearchForTypeJob('failing-refresh'))->handle($service);
+            $this->fail('Expected the batch to report the collected Profile failure.');
+        } catch (\RuntimeException $error) {
+            $this->assertSame('Account Profile search refresh failed for 1 profile(s).', $error->getMessage());
+        }
+
+        $this->assertEqualsCanonicalizing([(string) $first->getKey(), (string) $second->getKey()], $service->seen);
+        Log::shouldHaveReceived('warning')->once()->withArgs(
+            fn (string $message, array $context): bool => $message === 'Account Profile search refresh failed for a Profile Type.'
+                && $context['failed'] === 1
+                && $context['failures'][0]['profile_id'] === (string) $first->getKey(),
         );
     }
 
@@ -1506,6 +1673,24 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             ...$this->getHeaders(),
             'Content-Type' => 'multipart/form-data',
         ];
+    }
+
+    private function readPrivateProperty(object $object, string $property): mixed
+    {
+        $reflection = new \ReflectionProperty($object, $property);
+
+        return $reflection->getValue($object);
+    }
+
+    private function createAccountProfileFixtureAccount(string $suffix): Account
+    {
+        $identity = (string) new ObjectId;
+
+        return Account::create([
+            'name' => "Account Profile Fixture {$suffix} {$identity}",
+            'slug' => "account-profile-fixture-{$suffix}-{$identity}",
+            'document' => "PROFILE-FIXTURE-{$identity}",
+        ]);
     }
 
     private function assertTypeAssetStored(string $typeId, string $directory): string

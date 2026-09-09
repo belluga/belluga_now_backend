@@ -6,12 +6,14 @@ namespace App\Application\AccountProfiles;
 
 use App\Application\Shared\MapPois\MapPoiProjectionRefService;
 use App\Application\Shared\MapPois\PoiVisualNormalizer;
+use App\Jobs\AccountProfiles\RefreshAccountProfileSearchForTypeJob;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromAccountProfileJob;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -71,6 +73,7 @@ class AccountProfileRegistryManagementService
             ? trim((string) $payload['type'])
             : (string) ($model->type ?? '');
         $currentType = (string) ($model->type ?? '');
+        $currentLabels = $this->normalizeLabels([], $model);
 
         if ($nextType !== $currentType) {
             $this->ensureTypeIsNotReferenced($currentType);
@@ -128,6 +131,12 @@ class AccountProfileRegistryManagementService
 
         $this->mediaService->applyUploads($request, $model);
         $model = $model->fresh() ?? $model;
+        $nextLabels = $this->normalizeLabels([], $model);
+        if ($nextType === $currentType && $nextLabels !== $currentLabels) {
+            DB::connection('tenant')->afterCommit(
+                static fn () => RefreshAccountProfileSearchForTypeJob::dispatch($nextType),
+            );
+        }
         $nextTypeAssetUrl = $this->normalizeTypeAssetUrl($model->type_asset_url ?? null);
         $typeAssetChanged = $currentTypeAssetUrl !== $nextTypeAssetUrl;
         $forcedCheckpoint = $this->toCheckpoint($model->updated_at ?? null);

@@ -7,7 +7,6 @@ namespace Belluga\Events\Http\Api\v1\Controllers;
 use Belluga\Events\Application\Events\EventManagementService;
 use Belluga\Events\Application\Events\EventMediaService;
 use Belluga\Events\Application\Events\EventQueryService;
-use Belluga\Events\Application\Events\LegacyEventPartiesCanonicalizationService;
 use Belluga\Events\Contracts\EventAccountResolverContract;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Contracts\EventTenantContextContract;
@@ -17,6 +16,7 @@ use Belluga\Events\Http\Api\v1\Requests\EventIndexRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupLabelPatchRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupMembersPatchRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupMembersRequest;
+use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupOrderPatchRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventOccurrenceGroupStoreRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventStoreRequest;
 use Belluga\Events\Http\Api\v1\Requests\EventUpdateRequest;
@@ -36,7 +36,6 @@ class EventsController extends Controller
         private readonly EventProfileResolverContract $profileResolver,
         private readonly EventTenantContextContract $tenantContext,
         private readonly EventMediaService $eventMediaService,
-        private readonly LegacyEventPartiesCanonicalizationService $legacyEventPartiesCanonicalizationService,
     ) {}
 
     public function index(EventIndexRequest $request): JsonResponse
@@ -83,20 +82,6 @@ class EventsController extends Controller
         );
 
         return response()->json($candidates->toArray());
-    }
-
-    public function legacyEventPartiesSummary(): JsonResponse
-    {
-        return response()->json([
-            'data' => $this->legacyEventPartiesCanonicalizationService->inspect(),
-        ]);
-    }
-
-    public function repairLegacyEventParties(): JsonResponse
-    {
-        return response()->json([
-            'data' => $this->legacyEventPartiesCanonicalizationService->repair(),
-        ]);
     }
 
     public function store(EventStoreRequest $request): JsonResponse
@@ -224,6 +209,7 @@ class EventsController extends Controller
                 $request->perPage(),
                 $request->suppliedPerPage(),
                 $request->cursor(),
+                $this->normalizeMemberSearchOrAbort($request->input('search')),
             )
         );
     }
@@ -293,6 +279,29 @@ class EventsController extends Controller
         ]);
     }
 
+    public function patchOccurrenceProfileGroupOrder(
+        EventOccurrenceGroupOrderPatchRequest $request,
+        string $tenant_domain,
+        string $event_id,
+        string $occurrence_id,
+        string $group_id,
+    ): JsonResponse {
+        $event = $this->eventQueryService->findByIdOrSlug($event_id);
+        if (! $event) {
+            abort(404, 'Event not found.');
+        }
+        $occurrence = $this->findOccurrenceOrFail($event, $occurrence_id);
+
+        return response()->json([
+            'data' => $this->eventManagementService->moveOccurrenceGroup(
+                $event,
+                $occurrence,
+                $group_id,
+                $request->direction(),
+            ),
+        ]);
+    }
+
     public function patchOccurrenceProfileGroupMembers(
         EventOccurrenceGroupMembersPatchRequest $request,
         string $tenant_domain,
@@ -338,7 +347,13 @@ class EventsController extends Controller
         $perPage = is_numeric($requestedPerPage)
             ? max(1, min((int) $requestedPerPage, InputConstraints::PUBLIC_PAGE_SIZE_MAX))
             : null;
-        $cursor = is_string($request->query('cursor')) ? $request->query('cursor') : null;
+        $rawCursor = $request->query('cursor');
+        if (is_string($rawCursor) && strlen($rawCursor) > InputConstraints::PAGINATION_CURSOR_MAX) {
+            abort(422, 'The cursor exceeds the configured length limit.');
+        }
+        $cursor = is_string($rawCursor) ? $rawCursor : null;
+        $rawSearch = $request->query('search');
+        $search = $this->normalizeMemberSearchOrAbort($rawSearch);
 
         return response()->json([
             'tenant_id' => $this->tenantContext->resolveCurrentTenantId(),
@@ -347,6 +362,7 @@ class EventsController extends Controller
                 $tabId,
                 $cursor,
                 $perPage,
+                $search,
             ),
         ]);
     }
@@ -358,6 +374,20 @@ class EventsController extends Controller
         }
 
         return str_starts_with($request->path(), 'admin/api/v1');
+    }
+
+    private function normalizeMemberSearchOrAbort(mixed $rawSearch): ?string
+    {
+        if (! is_string($rawSearch) || trim($rawSearch) === '') {
+            return null;
+        }
+
+        $search = $this->profileResolver->normalizeMemberSearch($rawSearch);
+        if ($search === null) {
+            abort(422, 'The search must normalize to 2 to 100 ASCII characters.');
+        }
+
+        return $search;
     }
 
     private function resolveAccountFromRoute(Request $request): ?string

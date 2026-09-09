@@ -26,6 +26,12 @@ final class MongoCommandTrace implements CommandSubscriber
 
     public function commandFailed(CommandFailedEvent $event): void {}
 
+    /** @return list<array{name:string,command:array<string,mixed>}> */
+    public function commands(): array
+    {
+        return $this->commands;
+    }
+
     /** @return list<array<string,mixed>> */
     public function commandsForCollection(string $collection): array
     {
@@ -46,6 +52,24 @@ final class MongoCommandTrace implements CommandSubscriber
             static fn (array $entry): bool => $entry['name'] === $commandName
                 && ($entry['command'][$commandName] ?? null) === $collection,
         ));
+    }
+
+    /** @return list<list<array<string,mixed>>> */
+    public function aggregatePipelinesForCollection(string $collection): array
+    {
+        $pipelines = [];
+        foreach ($this->commands as $entry) {
+            if ($entry['name'] !== 'aggregate' || ($entry['command']['aggregate'] ?? null) !== $collection) {
+                continue;
+            }
+
+            $pipelines[] = array_values(array_map(
+                fn (mixed $stage): array => $this->arrayFrom($stage),
+                $this->arrayFrom($entry['command']['pipeline'] ?? []),
+            ));
+        }
+
+        return $pipelines;
     }
 
     public function countCommand(string $commandName): int

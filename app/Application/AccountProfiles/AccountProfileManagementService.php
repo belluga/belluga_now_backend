@@ -7,7 +7,6 @@ namespace App\Application\AccountProfiles;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Application\Taxonomies\TaxonomyValidationService;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
-use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Support\Validation\InputConstraints;
@@ -18,6 +17,7 @@ use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\UTCDateTime;
 use MongoDB\Driver\Exception\BulkWriteException;
 use MongoDB\Driver\Exception\CommandException;
+use MongoDB\Model\BSONArray;
 use MongoDB\Operation\FindOneAndUpdate;
 
 class AccountProfileManagementService
@@ -28,7 +28,6 @@ class AccountProfileManagementService
         private readonly TaxonomyTermSummaryResolverService $taxonomyTermSummaryResolver,
         private readonly AccountProfileNestedGroupService $nestedGroupService,
         private readonly AccountProfileNestedGroupMemberStore $nestedGroupMemberStore,
-        private readonly AccountProfileNestedPublicMembersProjectionService $nestedPublicMembersProjectionService,
         private readonly AccountProfileContactChannelsService $contactChannelsService,
         private readonly AccountProfileTransactionRunner $transactionRunner,
         private readonly AccountProfileOutboxPublisher $outboxPublisher,
@@ -120,13 +119,11 @@ class AccountProfileManagementService
                 $relationAttributes,
             );
         }
-        $this->nestedGroupMemberStore->replaceAllGroupsWithinContext(
+        $this->nestedGroupMemberStore->synchronizeGroupHeadsWithinContext(
             $context,
             $profile,
             $relationNestedGroups ?? [],
-            $admittedTargets,
         );
-        $this->nestedPublicMembersProjectionService->rebuildForProfileWithinContext($context, $profile);
         if ($mutateWithinTransaction !== null) {
             $mutateWithinTransaction($profile, $context);
             $profile = $profile->fresh();
@@ -212,11 +209,18 @@ class AccountProfileManagementService
             }
             $payload['account_id'] = (string) $payload['account_id'];
             $payload['location'] = $this->formatLocation($payload['location'] ?? null);
-            $payload['name_search_key'] = AccountProfileNameSearchKey::fromDisplayName(
-                (string) ($payload['display_name'] ?? '')
-            );
+            $payload = [
+                ...$payload,
+                ...AccountProfileSearchV1::fromSources(
+                    (string) ($payload['display_name'] ?? ''),
+                    $this->registryService->typeDefinition($profileType),
+                    (array) ($payload['taxonomy_terms'] ?? []),
+                ),
+            ];
 
             $profile = AccountProfile::create($payload)->fresh();
+        } catch (ValidationException $exception) {
+            throw $exception;
         } catch (BulkWriteException|CommandException $exception) {
             if ($this->isDuplicateKeyException($exception)) {
                 throw ValidationException::withMessages([
@@ -244,6 +248,7 @@ class AccountProfileManagementService
         bool $dispatchOutboxImmediately = true,
         ?Closure $compensateKnownRollback = null,
         bool $useAggregateRevisionCas = true,
+        bool $forceSearchRefresh = false,
     ): AccountProfile {
         $attributes = AccountProfileRichTextSanitizer::sanitizePayload($attributes);
 
@@ -333,6 +338,7 @@ class AccountProfileManagementService
                     $mutateWithinTransaction,
                     $expectedAggregateRevision,
                     $useAggregateRevisionCas,
+                    $forceSearchRefresh,
                 ): array {
                     $receipt = $this->outboxPublisher->receipt($context, $commandId);
                     if ($receipt !== null) {
@@ -341,7 +347,14 @@ class AccountProfileManagementService
 
                     $persistedProfile = AccountProfile::query()->findOrFail($profileId);
                     $this->lifecycleService->assertProfileMutationAllowed($persistedProfile, $context);
+                    $this->nestedGroupMemberStore->assertCanonicalGroupHeadsAvailableWithinContext(
+                        $context,
+                        $persistedProfile,
+                    );
                     $persistedProfile->fill($attributes);
+                    if ($forceSearchRefresh) {
+                        $this->applyCanonicalSearchFields($persistedProfile);
+                    }
                     if (
                         ! $this->hasSemanticMutation($persistedProfile)
                         && ! array_key_exists('nested_profile_groups', $attributes)
@@ -403,14 +416,12 @@ class AccountProfileManagementService
                                 $persistedProfile,
                             );
                         if (array_key_exists('nested_profile_groups', $attributes)) {
-                            $this->nestedGroupMemberStore->replaceAllGroupsWithinContext(
+                            $this->nestedGroupMemberStore->synchronizeGroupHeadsWithinContext(
                                 $context,
                                 $persistedProfile,
                                 $normalizedNestedProfileGroups ?? [],
-                                $admittedTargets,
                             );
                         }
-                        $this->nestedPublicMembersProjectionService->rebuildForProfileWithinContext($context, $persistedProfile);
                     } catch (BulkWriteException|CommandException $exception) {
                         if ($this->isDuplicateKeyException($exception)) {
                             throw ValidationException::withMessages([
@@ -497,6 +508,13 @@ class AccountProfileManagementService
         return $receipt === null ? null : $this->resultForCommandReceipt($receipt, $fingerprint);
     }
 
+    public function hasCommittedCommand(?string $commandId): bool
+    {
+        $normalized = trim((string) $commandId);
+
+        return $normalized !== '' && $this->outboxPublisher->committedReceipt($normalized) !== null;
+    }
+
     public function dispatchOutboxEvent(?string $outboxEventId): void
     {
         if ($outboxEventId !== null) {
@@ -538,7 +556,7 @@ class AccountProfileManagementService
         array $removeIds,
         ?string $commandId = null,
     ): array {
-        $groups = $this->nestedGroupService->formatForRead($profile->nested_profile_groups ?? []);
+        $groups = $this->nestedGroupService->formatMetadataForRead($profile->nested_profile_groups ?? []);
         $group = $this->nestedGroupService->findGroupOrFail($groups, $groupId);
         $profileId = trim((string) $profile->getKey());
         foreach ($addIds as $candidateId) {
@@ -549,46 +567,26 @@ class AccountProfileManagementService
             }
         }
 
-        $existingIds = $this->nestedGroupMemberStore->groupMemberIds($profile, (string) $group['id']);
-        $removeLookup = array_fill_keys($removeIds, true);
-        $nextIds = array_values(array_filter(
-            $existingIds,
-            static fn (string $profileId): bool => $profileId !== '' && ! isset($removeLookup[$profileId]),
-        ));
-        $seen = array_fill_keys($nextIds, true);
-        foreach ($addIds as $profileId) {
-            if ($profileId === '' || isset($seen[$profileId])) {
-                continue;
-            }
-            $nextIds[] = $profileId;
-            $seen[$profileId] = true;
-        }
-
         $updatedProfile = $this->update(
             $profile,
             [],
             $commandId,
-            function (AccountProfile $persistedProfile, AccountProfileTransactionContext $context) use ($group, $addIds, $nextIds): void {
+            function (AccountProfile $persistedProfile, AccountProfileTransactionContext $context) use ($group, $addIds, $removeIds): void {
                 $admittedTargets = [];
                 if ($addIds !== []) {
-                    $admittedTargets = $this->relationAdmissionService->admit(
+                    $admittedTargets = $this->relationAdmissionService->admitQueryableProfiles(
                         $context,
                         (string) $persistedProfile->getKey(),
-                        [
-                            'nested_profile_groups' => [[
-                                'account_profile_ids' => $addIds,
-                            ]],
-                        ],
+                        $addIds,
                     );
                 }
 
-                $this->nestedGroupMemberStore->replaceGroupMembersWithinContext(
+                $this->nestedGroupMemberStore->patchGroupMembersWithinContext(
                     $context,
                     $persistedProfile,
                     (string) $group['id'],
-                    $nextIds,
-                    $admittedTargets,
-                    $group,
+                    $addIds,
+                    $removeIds,
                 );
             },
             useAggregateRevisionCas: false,
@@ -600,7 +598,7 @@ class AccountProfileManagementService
             'id' => (string) $updatedGroup['id'],
             'label' => (string) $updatedGroup['label'],
             'order' => (int) ($updatedGroup['order'] ?? 0),
-            'member_count' => max(0, (int) ($updatedGroup['member_count'] ?? count($updatedGroup['account_profile_ids'] ?? []))),
+            'member_count' => max(0, (int) ($updatedGroup['member_count'] ?? 0)),
         ];
     }
 
@@ -716,6 +714,73 @@ class AccountProfileManagementService
         return $group;
     }
 
+    /** @return array{account_profile_id:string,groups:array<int, array{id:string,order:int}>} */
+    public function moveNestedGroup(
+        AccountProfile $profile,
+        string $groupId,
+        string $direction,
+    ): array {
+        $profileId = trim((string) $profile->getKey());
+
+        return $this->transactionRunner->run(function (AccountProfileTransactionContext $context) use (
+            $profile,
+            $profileId,
+            $groupId,
+            $direction,
+        ): array {
+            $this->lifecycleService->assertProfileMutationAllowed($profile, $context);
+            $groups = $this->nestedGroupMemberStore->orderedGroupPositionsWithinContext($context, $profile);
+            $this->assertGroupOrderParity($groups, $profile->nested_profile_groups ?? [], 'Account Profile');
+            $index = array_search(trim($groupId), array_column($groups, 'id'), true);
+            if ($index === false) {
+                throw new \Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+            }
+
+            $neighborIndex = $direction === 'up' ? $index - 1 : $index + 1;
+            if (! isset($groups[$neighborIndex])) {
+                return ['account_profile_id' => $profileId, 'groups' => $groups];
+            }
+
+            $moved = $groups[$index];
+            $neighbor = $groups[$neighborIndex];
+            $this->nestedGroupMemberStore->swapAdjacentGroupOrdersWithinContext($context, $profile, $moved, $neighbor);
+
+            $expectedFence = max(0, (int) $profile->getAttribute('lifecycle_fence_revision'));
+            $fenceFilter = $expectedFence === 0
+                ? ['$or' => [['lifecycle_fence_revision' => 0], ['lifecycle_fence_revision' => ['$exists' => false]]]]
+                : ['lifecycle_fence_revision' => $expectedFence];
+            $updated = $context->collection('account_profiles')->updateOne([
+                '_id' => new ObjectId($profileId),
+                'deleted_at' => null,
+                'account_profile_deletion_attempt_id' => null,
+                'nested_profile_groups' => ['$all' => [
+                    ['$elemMatch' => ['id' => $moved['id'], 'order' => $moved['order']]],
+                    ['$elemMatch' => ['id' => $neighbor['id'], 'order' => $neighbor['order']]],
+                ]],
+                ...$fenceFilter,
+            ], [
+                '$set' => [
+                    'nested_profile_groups.$[moved].order' => $neighbor['order'],
+                    'nested_profile_groups.$[neighbor].order' => $moved['order'],
+                    'updated_at' => new UTCDateTime((int) now()->getTimestampMs()),
+                ],
+                '$inc' => ['aggregate_revision' => 1],
+            ], [...$context->rawOptions(), 'arrayFilters' => [
+                ['moved.id' => $moved['id'], 'moved.order' => $moved['order']],
+                ['neighbor.id' => $neighbor['id'], 'neighbor.order' => $neighbor['order']],
+            ]]);
+            if ($updated->getMatchedCount() !== 1 || $updated->getModifiedCount() !== 1) {
+                throw new ConcurrencyConflictException('Account Profile nested group mirror changed during reorder.');
+            }
+
+            $groups[$index]['order'] = $neighbor['order'];
+            $groups[$neighborIndex]['order'] = $moved['order'];
+            usort($groups, static fn (array $left, array $right): int => [$left['order'], $left['id']] <=> [$right['order'], $right['id']]);
+
+            return ['account_profile_id' => $profileId, 'groups' => array_values($groups)];
+        });
+    }
+
     /**
      * @return array{nested_profile_groups:array<int, array<string, mixed>>,deleted_group_id:string}
      */
@@ -731,22 +796,27 @@ class AccountProfileManagementService
             $groups = $this->nestedGroupMemberStore->metadataGroupsWithinContext($context, $persisted);
             $group = $this->nestedGroupService->findGroupOrFail($groups, $groupId);
             $this->nestedGroupMemberStore->deleteGroupWithinContext($context, $persisted, (string) $group['id']);
+            $nextGroups = array_values(array_map(
+                static function (array $candidate) use ($group): array {
+                    if ((int) ($candidate['order'] ?? 0) > (int) ($group['order'] ?? 0)) {
+                        $candidate['order'] = (int) $candidate['order'] - 1;
+                    }
+
+                    return $candidate;
+                },
+                array_values(array_filter(
+                    $groups,
+                    static fn (array $candidate): bool => (string) ($candidate['id'] ?? '') !== (string) $group['id'],
+                )),
+            ));
             $updated = $context->collection('account_profiles')->updateOne(
                 ['_id' => new ObjectId($profileId), 'deleted_at' => null, 'nested_profile_groups.id' => (string) $group['id']],
-                ['$pull' => ['nested_profile_groups' => ['id' => (string) $group['id']]], '$inc' => ['aggregate_revision' => 1]],
+                ['$set' => ['nested_profile_groups' => $nextGroups], '$inc' => ['aggregate_revision' => 1]],
                 $context->rawOptions(),
             );
             if ($updated->getMatchedCount() !== 1) {
                 throw new ConcurrencyConflictException('Account Profile nested group mirror changed during delete.');
             }
-            $context->collection(AccountProfileNestedPublicMembersProjectionService::COLLECTION)->deleteMany(
-                [
-                    'tenant_id' => (string) Tenant::current()?->getKey(),
-                    'parent_profile_id' => $profileId,
-                    'group_id' => (string) $group['id'],
-                ],
-                $context->rawOptions(),
-            );
 
             return ['group' => $group, 'profile' => $persisted->fresh() ?? $persisted];
         });
@@ -772,24 +842,48 @@ class AccountProfileManagementService
         ]);
     }
 
+    /**
+     * @param  array<int, array{id:string,order:int}>  $heads
+     */
+    private function assertGroupOrderParity(array $heads, mixed $rawMirror, string $owner): void
+    {
+        if ($rawMirror instanceof BSONArray) {
+            $rawMirror = $rawMirror->getArrayCopy();
+        }
+        if (! is_array($rawMirror)) {
+            throw new ConcurrencyConflictException("{$owner} nested group mirror is malformed.");
+        }
+
+        $mirror = [];
+        foreach ($rawMirror as $group) {
+            if ($group instanceof \MongoDB\Model\BSONDocument) {
+                $group = $group->getArrayCopy();
+            }
+            if (! is_array($group)) {
+                throw new ConcurrencyConflictException("{$owner} nested group mirror is malformed.");
+            }
+            $mirror[] = ['id' => trim((string) ($group['id'] ?? $group['_id'] ?? '')), 'order' => (int) ($group['order'] ?? -1)];
+        }
+        usort($mirror, static fn (array $left, array $right): int => [$left['order'], $left['id']] <=> [$right['order'], $right['id']]);
+
+        if ($heads === [] && $mirror === []) {
+            return;
+        }
+
+        $ids = array_column($heads, 'id');
+        $orders = array_column($heads, 'order');
+        if ($ids === [] || count($ids) !== count(array_unique($ids)) || $orders !== range(0, count($heads) - 1) || $mirror !== $heads) {
+            throw new ConcurrencyConflictException("{$owner} nested group order is inconsistent.");
+        }
+    }
+
     private function nestedProfileGroupsPayloadIsEmpty(mixed $rawGroups): bool
     {
         if (! is_array($rawGroups)) {
             return true;
         }
 
-        foreach ($rawGroups as $rawGroup) {
-            if (! is_array($rawGroup)) {
-                continue;
-            }
-            $label = trim((string) ($rawGroup['label'] ?? ''));
-            $memberIds = $rawGroup['account_profile_ids'] ?? $rawGroup['profile_ids'] ?? [];
-            if ($label !== '' || (is_array($memberIds) && $memberIds !== [])) {
-                return false;
-            }
-        }
-
-        return true;
+        return $rawGroups === [];
     }
 
     /**
@@ -878,12 +972,8 @@ class AccountProfileManagementService
 
         $expectedRevision = $expectedAggregateRevision ?? max(0, (int) $profile->getAttribute('aggregate_revision'));
         $profile->setAttribute('aggregate_revision', $expectedRevision + 1);
-        if ($profile->isDirty('display_name') || trim((string) $profile->getAttribute('name_search_key')) === '') {
-            $profile->setAttribute(
-                'name_search_key',
-                AccountProfileNameSearchKey::fromDisplayName((string) $profile->getAttribute('display_name')),
-            );
-        }
+        $this->applyCanonicalSearchFields($profile);
+        $searchChanged = $profile->isDirty('name_search_key') || $profile->isDirty('search_terms');
         $profile->setAttribute('updated_at', now());
         $dirty = $profile->getDirty();
         unset($dirty['_id']);
@@ -915,6 +1005,17 @@ class AccountProfileManagementService
             throw new ConcurrencyConflictException('Account Profile aggregate revision changed during mutation.');
         }
 
+        if ($searchChanged) {
+            $this->nestedGroupMemberStore->refreshSearchForMemberWithinContext(
+                $context,
+                $profileId,
+                (string) ($updated['name_search_key'] ?? ''),
+                ($updated['search_terms'] ?? null) instanceof BSONArray
+                    ? $updated['search_terms']->getArrayCopy()
+                    : (array) ($updated['search_terms'] ?? []),
+            );
+        }
+
         return AccountProfile::query()->findOrFail($profileId);
     }
 
@@ -933,12 +1034,8 @@ class AccountProfileManagementService
             throw new ConcurrencyConflictException('Account Profile aggregate id is invalid for a non-CAS mutation.');
         }
 
-        if ($profile->isDirty('display_name') || trim((string) $profile->getAttribute('name_search_key')) === '') {
-            $profile->setAttribute(
-                'name_search_key',
-                AccountProfileNameSearchKey::fromDisplayName((string) $profile->getAttribute('display_name')),
-            );
-        }
+        $this->applyCanonicalSearchFields($profile);
+        $searchChanged = $profile->isDirty('name_search_key') || $profile->isDirty('search_terms');
         $profile->setAttribute('updated_at', now());
         $dirty = $profile->getDirty();
         unset($dirty['_id'], $dirty['aggregate_revision']);
@@ -962,7 +1059,30 @@ class AccountProfileManagementService
             throw new ConcurrencyConflictException('Account Profile aggregate could not be updated.');
         }
 
+        if ($searchChanged) {
+            $this->nestedGroupMemberStore->refreshSearchForMemberWithinContext(
+                $context,
+                $profileId,
+                (string) ($updated['name_search_key'] ?? ''),
+                ($updated['search_terms'] ?? null) instanceof BSONArray
+                    ? $updated['search_terms']->getArrayCopy()
+                    : (array) ($updated['search_terms'] ?? []),
+            );
+        }
+
         return AccountProfile::query()->findOrFail($profileId);
+    }
+
+    private function applyCanonicalSearchFields(AccountProfile $profile): void
+    {
+        $profileType = (string) $profile->getAttribute('profile_type');
+        $search = AccountProfileSearchV1::fromSources(
+            (string) $profile->getAttribute('display_name'),
+            $this->registryService->typeDefinition($profileType),
+            (array) ($profile->getAttribute('taxonomy_terms') ?? []),
+        );
+        $profile->setAttribute('name_search_key', $search['name_search_key']);
+        $profile->setAttribute('search_terms', $search['search_terms']);
     }
 
     private function hasSemanticMutation(AccountProfile $profile): bool

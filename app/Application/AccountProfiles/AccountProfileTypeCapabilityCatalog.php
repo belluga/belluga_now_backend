@@ -38,6 +38,8 @@ final class AccountProfileTypeCapabilityCatalog
 
     public const HAS_CONTACT_CHANNELS = 'has_contact_channels';
 
+    public const HAS_EXTERNAL_LINKS = 'has_external_links';
+
     /**
      * @var array<string, array<string, bool>>
      */
@@ -85,6 +87,7 @@ final class AccountProfileTypeCapabilityCatalog
             $this->definition(self::HAS_GALLERY),
             $this->definition(self::HAS_NESTED_PROFILE_GROUPS),
             $this->definition(self::HAS_CONTACT_CHANNELS),
+            $this->definition(self::HAS_EXTERNAL_LINKS),
         ];
     }
 

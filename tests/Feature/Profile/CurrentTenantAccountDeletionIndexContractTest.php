@@ -43,7 +43,6 @@ class CurrentTenantAccountDeletionIndexContractTest extends TestCaseTenant
                 'idx_account_profiles_owner_personal_v1',
                 'idx_account_profiles_account_delete_v1',
                 'idx_account_profiles_contact_source_delete_v1',
-                'idx_account_profiles_nested_member_delete_v1',
             ],
             'account_users' => [
                 'idx_account_users_account_role_delete_v1',

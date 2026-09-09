@@ -166,6 +166,33 @@ class AccountProfileRegistryService
         );
     }
 
+    public function hasExternalLinks(string $profileType): bool
+    {
+        $definition = $this->typeDefinition($profileType);
+        $capabilities = $definition['capabilities'] ?? [];
+
+        return $this->capabilityCatalog->isExplicitlyEnabled(
+            AccountProfileTypeCapabilityCatalog::HAS_EXTERNAL_LINKS,
+            is_array($capabilities) ? $capabilities : [],
+        );
+    }
+
+    public function hasExternalLinksAuthoritatively(string $profileType): bool
+    {
+        $type = TenantProfileType::query()
+            ->where('type', trim($profileType))
+            ->first();
+
+        if (! $type instanceof TenantProfileType) {
+            return false;
+        }
+
+        return $this->capabilityCatalog->isExplicitlyEnabled(
+            AccountProfileTypeCapabilityCatalog::HAS_EXTERNAL_LINKS,
+            $this->arrayFrom($type->capabilities ?? []),
+        );
+    }
+
     /**
      * @return array<string, string>|null
      */

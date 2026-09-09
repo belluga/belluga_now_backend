@@ -300,8 +300,7 @@ final class AccountProfileQueryabilityGuard
 
     private function isCapabilityBoundBuilderMethod(string $normalizedMethod, string $block): bool
     {
-        $hasCapabilityShape = $this->hasProfileTypeShape($block)
-            || str_contains($block, 'queryable_only');
+        $hasCapabilityShape = $this->hasProfileTypeShape($block);
 
         if (! $hasCapabilityShape) {
             return false;
@@ -401,7 +400,7 @@ function defaultAccountProfileQueryabilityAllowlist(): array
             'source_kind' => 'query',
             'category' => 'canonical_gateway',
             'owner' => $owner,
-            'rationale' => 'Canonical tenant-admin AccountProfile index gateway, including queryable_only selector filtering.',
+            'rationale' => 'Canonical tenant-admin AccountProfile administrative listing; candidate selection is owned exclusively by AccountProfileCandidateDiscoveryService.',
         ],
         [
             'key' => 'app/Application/AccountProfiles/AccountProfileQueryService.php::publicPageEnvelope::query',
