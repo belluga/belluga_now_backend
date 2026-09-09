@@ -38,7 +38,6 @@ class AccountProfile extends Model
         'external_links',
         'aggregate_revision',
         'bio',
-        'content',
         'avatar_url',
         'cover_url',
         'name_search_key',

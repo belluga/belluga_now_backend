@@ -143,13 +143,6 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
                     (string) $profile->getKey(),
                     'bio',
                 ),
-                'content' => $this->richTextReadCanonicalizer->canonicalize(
-                    $profile->content,
-                    true,
-                    'account_profile',
-                    (string) $profile->getKey(),
-                    'content',
-                ),
                 'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
                     is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
                 ),

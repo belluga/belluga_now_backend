@@ -6,7 +6,9 @@ namespace Tests\Feature\AccountProfiles;
 
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Http\Api\v1\Requests\AccountOnboardingStoreRequest;
 use App\Http\Api\v1\Requests\AccountProfileStoreRequest;
+use App\Http\Api\v1\Requests\AccountProfileUpdateRequest;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
@@ -65,7 +67,6 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
                 'is_favoritable' => false,
                 'is_poi_enabled' => false,
                 'has_bio' => true,
-                'has_content' => true,
             ],
         ]);
 
@@ -76,7 +77,7 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
         ]);
     }
 
-    public function test_onboarding_sanitizes_bio_and_content_rich_text_before_persistence(): void
+    public function test_onboarding_sanitizes_bio_rich_text_before_persistence(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}account_onboardings",
@@ -85,7 +86,6 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
                 'ownership_state' => 'tenant_owned',
                 'profile_type' => 'personal',
                 'bio' => "Linha 1 🎉\nLinha 2",
-                'content' => '<h2>Perfil</h2><p><strong>Forte</strong> <em>italico</em> <s>corte</s> <u>under</u> <a href="https://example.com">link</a> 🎉</p><blockquote>Quote</blockquote><ul><li>Um</li></ul><ol><li>Dois</li></ol><script>alert("x")</script><style>.x{}</style><p><img src="https://example.com/banner.png" alt="Banner"></p>',
             ],
             $this->getHeaders()
         );
@@ -99,38 +99,115 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
         $expectedBio = '<p>Linha 1 🎉<br />Linha 2</p>';
         $this->assertSame($expectedBio, $response->json('data.account_profile.bio'));
         $this->assertSame($expectedBio, $stored->bio);
+        $this->assertArrayNotHasKey('content', (array) $response->json('data.account_profile'));
+        $this->assertNull($stored->getAttribute('content'));
+    }
 
-        $content = (string) $response->json('data.account_profile.content');
-        $this->assertSame($content, $stored->content);
-        $this->assertStringContainsString('<h2>Perfil', $content);
-        $this->assertStringContainsString('<strong>Forte</strong>', $content);
-        $this->assertStringContainsString('<em>italico</em>', $content);
-        $this->assertStringContainsString('<s>corte</s>', $content);
-        $this->assertStringContainsString('under <a href="https://example.com">link</a> 🎉', $content);
-        $this->assertStringContainsString('<blockquote>Quote</blockquote>', $content);
-        $this->assertStringContainsString('<ul><li>Um</li></ul>', $content);
-        $this->assertStringContainsString('<ol><li>Dois</li></ol>', $content);
-        $this->assertStringNotContainsString('<u>', $content);
-        $this->assertStringNotContainsString('</u>', $content);
-        $this->assertStringContainsString('<a href="https://example.com">link</a>', $content);
-        $this->assertStringNotContainsString('<img', $content);
-        $this->assertStringNotContainsString('<script', $content);
-        $this->assertStringNotContainsString('alert', $content);
-        $this->assertStringNotContainsString('<style', $content);
+    public function test_onboarding_rejects_an_explicit_content_key(): void
+    {
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_onboardings",
+            [
+                'name' => 'Content Rejection Onboarding '.Str::random(6),
+                'ownership_state' => 'tenant_owned',
+                'profile_type' => 'personal',
+                'bio' => '<p>Bio válida</p>',
+                'content' => '<p>Legacy content must be rejected</p>',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $this->assertArrayHasKey('content', (array) $response->json('errors'));
+    }
+
+    public function test_store_request_and_legacy_endpoint_reject_explicit_content_without_persistence(): void
+    {
+        $beforeCount = AccountProfile::query()->count();
+        $payload = [
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'personal',
+            'display_name' => 'Legacy Content Rejection',
+            'bio' => '<p>Bio válida</p>',
+            'content' => '<p>Legacy content must be rejected</p>',
+        ];
+
+        $validator = Validator::make(
+            $payload,
+            (new AccountProfileStoreRequest)->rules()
+        );
+
+        $this->assertTrue($validator->fails());
+        $this->assertArrayHasKey('content', $validator->errors()->toArray());
+
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profiles",
+            $payload,
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('error_code', 'tenant_admin_onboarding_required');
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $this->assertSame($beforeCount, AccountProfile::query()->count());
+    }
+
+    public function test_all_write_requests_reject_the_content_key_even_when_its_value_is_empty(): void
+    {
+        $requests = [
+            new AccountOnboardingStoreRequest,
+            new AccountProfileStoreRequest,
+            new AccountProfileUpdateRequest,
+        ];
+        $explicitValues = [null, '', []];
+
+        foreach ($requests as $request) {
+            foreach ($explicitValues as $content) {
+                $validator = Validator::make(
+                    ['content' => $content],
+                    $request->rules(),
+                );
+
+                $this->assertTrue($validator->fails());
+                $this->assertArrayHasKey('content', $validator->errors()->toArray());
+            }
+        }
+    }
+
+    public function test_update_rejects_an_explicit_content_key(): void
+    {
+        $profile = $this->createProfile([
+            'bio' => '<p>Bio antiga</p>',
+        ]);
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
+            [
+                'bio' => '<p>Bio nova</p>',
+                'content' => '<p>Legacy content must be rejected</p>',
+            ],
+            $this->getHeaders()
+        );
+
+        $response->assertStatus(422);
+        $this->assertArrayHasKey('content', (array) $response->json('errors'));
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $stored = $profile->fresh();
+        $this->assertSame('<p>Bio antiga</p>', (string) $stored->bio);
     }
 
     public function test_update_sanitizes_fields_independently_and_strips_media_only_content(): void
     {
         $profile = $this->createProfile([
             'bio' => '<p>Bio antiga</p>',
-            'content' => '<p>Conteudo antigo</p>',
         ]);
 
         $response = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
             [
                 'bio' => '<p><img src="https://example.com/banner.png" alt="Banner"></p><p><br /></p>',
-                'content' => "Conteúdo 1 🎉\nConteúdo 2",
             ],
             $this->getHeaders()
         );
@@ -142,10 +219,6 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
 
         $this->assertSame('', $response->json('data.bio'));
         $this->assertSame('', (string) $stored->bio);
-
-        $expectedContent = '<p>Conteúdo 1 🎉<br />Conteúdo 2</p>';
-        $this->assertSame($expectedContent, $response->json('data.content'));
-        $this->assertSame($expectedContent, $stored->content);
     }
 
     public function test_update_preserves_heading_boundaries_across_adjacent_rich_text_blocks(): void
@@ -155,15 +228,10 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
             .'<p><strong>Bold bio</strong><br />Second bio line</p>'
             .'<blockquote>Bio quote</blockquote>'
             .'<ul><li>Bio bullet</li></ul>';
-        $content = '<h3>Content Heading</h3>'
-            .'<p><em>Italic content</em> and <s>strike content</s> 😄</p>'
-            .'<ol><li>Content ordered</li></ol>';
-
         $response = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
             [
                 'bio' => $bio,
-                'content' => $content,
             ],
             $this->getHeaders()
         );
@@ -176,10 +244,6 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
         $this->assertSame($bio, $response->json('data.bio'));
         $this->assertSame($bio, $stored->bio);
         $this->assertStringNotContainsString('<h2>Bio Heading 🎉<p>', (string) $stored->bio);
-
-        $this->assertSame($content, $response->json('data.content'));
-        $this->assertSame($content, $stored->content);
-        $this->assertStringNotContainsString('<h3>Content Heading<p>', (string) $stored->content);
     }
 
     public function test_rich_text_limit_is_enforced_after_sanitization_per_field(): void
@@ -193,20 +257,17 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
             $profileUrl,
             [
                 'bio' => $exact,
-                'content' => $exact,
             ],
             $this->getHeaders()
         );
 
         $accepted->assertOk();
         $this->assertSame(self::RICH_TEXT_MAX_BYTES, strlen((string) $accepted->json('data.bio')));
-        $this->assertSame(self::RICH_TEXT_MAX_BYTES, strlen((string) $accepted->json('data.content')));
 
         $bioRejected = $this->patchJson(
             $profileUrl,
             [
                 'bio' => $overLimit,
-                'content' => $exact,
             ],
             $this->getHeaders()
         );
@@ -214,21 +275,6 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
         $bioRejected->assertStatus(422);
         $bioErrors = (array) $bioRejected->json('errors');
         $this->assertArrayHasKey('bio', $bioErrors);
-        $this->assertArrayNotHasKey('content', $bioErrors);
-
-        $contentRejected = $this->patchJson(
-            $profileUrl,
-            [
-                'bio' => $exact,
-                'content' => $overLimit,
-            ],
-            $this->getHeaders()
-        );
-
-        $contentRejected->assertStatus(422);
-        $contentErrors = (array) $contentRejected->json('errors');
-        $this->assertArrayNotHasKey('bio', $contentErrors);
-        $this->assertArrayHasKey('content', $contentErrors);
     }
 
     public function test_raw_payload_larger_than_limit_is_rejected_before_sanitization(): void
@@ -256,14 +302,12 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
             "{$this->base_tenant_api_admin}account_profiles/".(string) $profile->_id,
             [
                 'bio' => $raw,
-                'content' => $raw,
             ],
             $this->getHeaders()
         );
 
         $updateResponse->assertStatus(422);
         $this->assertArrayHasKey('bio', (array) $updateResponse->json('errors'));
-        $this->assertArrayHasKey('content', (array) $updateResponse->json('errors'));
 
         $onboardingResponse = $this->postJson(
             "{$this->base_tenant_api_admin}account_onboardings",
@@ -271,13 +315,13 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
                 'name' => 'Raw Oversized Onboarding '.Str::random(6),
                 'ownership_state' => 'tenant_owned',
                 'profile_type' => 'personal',
-                'content' => $raw,
+                'bio' => $raw,
             ],
             $this->getHeaders()
         );
 
         $onboardingResponse->assertStatus(422);
-        $this->assertArrayHasKey('content', (array) $onboardingResponse->json('errors'));
+        $this->assertArrayHasKey('bio', (array) $onboardingResponse->json('errors'));
     }
 
     public function test_account_profile_rich_text_sanitizer_uses_neutral_shared_support(): void
@@ -430,7 +474,6 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
         $this->assertSame($safe, $canonicalizer->canonicalize($safe, true, ...$identity));
         $this->assertSame($safe, $canonicalizer->canonicalize($safe, true, ...$identity));
         $this->assertSame('<p>safe</p>', $canonicalizer->canonicalize($safe, false, ...$identity));
-        $this->assertSame($safe, $canonicalizer->canonicalize($safe, true, 'account_profile', 'profile-1', 'content'));
         $this->assertSame($safe, $canonicalizer->canonicalize($safe, true, 'account_profile', 'profile-2', 'bio'));
         $this->assertSame($safe, $canonicalizer->canonicalize($safe, true, 'event', 'profile-1', 'bio'));
         $this->assertSame('<p>distinct</p>', $canonicalizer->canonicalize('<p>distinct</p>', true, ...$identity));
@@ -438,7 +481,6 @@ class AccountProfileRichTextFidelityTest extends TestCaseTenant
             [
                 [$safe, true],
                 [$safe, false],
-                [$safe, true],
                 [$safe, true],
                 [$safe, true],
                 ['<p>distinct</p>', true],

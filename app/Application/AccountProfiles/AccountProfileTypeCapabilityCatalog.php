@@ -22,8 +22,6 @@ final class AccountProfileTypeCapabilityCatalog
 
     public const HAS_BIO = 'has_bio';
 
-    public const HAS_CONTENT = 'has_content';
-
     public const HAS_TAXONOMIES = 'has_taxonomies';
 
     public const HAS_AVATAR = 'has_avatar';
@@ -51,7 +49,6 @@ final class AccountProfileTypeCapabilityCatalog
             self::IS_INVITEABLE => true,
             self::IS_PUBLICLY_DISCOVERABLE => false,
             self::IS_POI_ENABLED => false,
-            self::HAS_CONTENT => false,
             self::HAS_GALLERY => false,
         ],
         'artist' => [
@@ -79,7 +76,6 @@ final class AccountProfileTypeCapabilityCatalog
             $this->definition(self::IS_POI_ENABLED),
             $this->definition(self::IS_REFERENCE_LOCATION_ENABLED, requires: [self::IS_POI_ENABLED]),
             $this->definition(self::HAS_BIO),
-            $this->definition(self::HAS_CONTENT),
             $this->definition(self::HAS_TAXONOMIES),
             $this->definition(self::HAS_AVATAR),
             $this->definition(self::HAS_COVER),

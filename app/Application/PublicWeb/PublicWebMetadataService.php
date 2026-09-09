@@ -62,8 +62,7 @@ class PublicWebMetadataService
         }
 
         $metadata['description'] = $this->excerpt(
-            $this->sanitizeText((string) ($payload['content'] ?? ''))
-            ?: $this->sanitizeText((string) ($payload['bio'] ?? ''))
+            $this->sanitizeText((string) ($payload['bio'] ?? ''))
             ?: $metadata['description']
         );
         $metadata['image'] = $this->resolveImageUrl([

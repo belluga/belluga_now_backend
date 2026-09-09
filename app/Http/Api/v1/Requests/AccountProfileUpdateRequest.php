@@ -46,7 +46,7 @@ class AccountProfileUpdateRequest extends FormRequest
             'external_links.*' => 'missing',
             'external_links_limit' => 'missing',
             'bio' => $this->optionalAccountProfileRichTextRule(),
-            'content' => $this->optionalAccountProfileRichTextRule(),
+            'content' => 'missing',
             'avatar' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:'.InputConstraints::IMAGE_MAX_KB,
             'cover' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:'.InputConstraints::IMAGE_MAX_KB,
             'avatar_url' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,

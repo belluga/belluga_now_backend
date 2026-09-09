@@ -1110,7 +1110,6 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
                     'is_favoritable' => true,
                     'is_poi_enabled' => true,
                     'has_bio' => true,
-                    'has_content' => true,
                     'has_taxonomies' => true,
                     'has_avatar' => true,
                     'has_cover' => true,

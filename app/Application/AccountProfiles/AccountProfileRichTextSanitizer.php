@@ -18,7 +18,7 @@ final class AccountProfileRichTextSanitizer
     {
         $errors = [];
 
-        foreach (['bio', 'content'] as $field) {
+        foreach (['bio'] as $field) {
             if (! array_key_exists($field, $payload)) {
                 continue;
             }

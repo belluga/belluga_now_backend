@@ -81,7 +81,6 @@ class AccountProfileFormatterService
                 is_string($profile->cover_url) ? $profile->cover_url : null
             ),
             'bio' => $this->canonicalRichText($profile, 'bio'),
-            'content' => $this->canonicalRichText($profile, 'content'),
             'taxonomy_terms' => $this->taxonomyTermSummaryResolver->ensureSnapshots(
                 is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
             ),

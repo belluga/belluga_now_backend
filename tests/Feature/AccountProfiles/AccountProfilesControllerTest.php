@@ -9661,7 +9661,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'visibility' => 'public',
             'is_active' => true,
             'bio' => "<p>{$safe}{$unsafe}</p>",
-            'content' => "<p>{$unsafe}{$safe}</p>",
             'location' => [
                 'type' => 'Point',
                 'coordinates' => [-40.0, -20.0],
@@ -9669,7 +9668,6 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'taxonomy_terms' => [],
         ])->fresh();
         $expectedBio = '<p><a href="https://example.test/safe">safe</a>unsafe</p>';
-        $expectedContent = '<p>unsafe<a href="https://example.test/safe">safe</a></p>';
 
         $queryFormat = new \ReflectionMethod(AccountProfileQueryService::class, 'format');
         $queryPayload = $queryFormat->invoke(
@@ -9677,16 +9675,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $profile,
         );
         $this->assertSame($expectedBio, $queryPayload['bio']);
-        $this->assertSame($expectedContent, $queryPayload['content']);
+        $this->assertArrayNotHasKey('content', $queryPayload);
 
         $formatted = app(AccountProfileFormatterService::class)->format($profile);
         $this->assertSame($expectedBio, $formatted['bio']);
-        $this->assertSame($expectedContent, $formatted['content']);
+        $this->assertArrayNotHasKey('content', $formatted);
 
         $resolved = app(AccountProfileResolverAdapter::class)
             ->resolvePhysicalHostByProfileId((string) $profile->_id);
         $this->assertSame($expectedBio, data_get($resolved, 'venue.bio'));
-        $this->assertSame($expectedContent, data_get($resolved, 'venue.content'));
+        $this->assertArrayNotHasKey('content', data_get($resolved, 'venue', []));
 
         $outboxProjection = new \ReflectionMethod(AccountProfileOutboxPublisher::class, 'projection');
         $projection = $outboxProjection->invoke(
@@ -9694,11 +9692,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $profile,
         );
         $this->assertSame($expectedBio, $projection['bio']);
-        $this->assertSame($expectedContent, $projection['content']);
+        $this->assertArrayNotHasKey('content', $projection);
         $this->assertSame(
             [
                 [$profile->bio, true],
-                [$profile->content, true],
             ],
             $sanitizerCalls,
             'Query, formatter, resolver, and outbox must share one request-scoped canonicalization per field identity.'
