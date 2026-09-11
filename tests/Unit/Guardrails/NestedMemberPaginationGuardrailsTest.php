@@ -38,6 +38,25 @@ final class NestedMemberPaginationGuardrailsTest extends TestCase
         $this->assertStringContainsString('[ARCH-GUARDRAILS] PASS', $output);
     }
 
+    public function test_guard_rejects_a_copy_of_the_historical_nested_delete_index(): void
+    {
+        $fixtureRoot = sys_get_temp_dir().'/nested-member-copy-'.bin2hex(random_bytes(6));
+        mkdir($fixtureRoot.'/database/migrations/tenants', 0777, true);
+        file_put_contents(
+            $fixtureRoot.'/database/migrations/tenants/2026_09_11_000100_copied_nested_delete_index.php',
+            "<?php\n".'$query->where(\'nested_profile_groups.account_profile_ids\');'."\n",
+        );
+
+        $process = new Process([
+            'php', $this->guardPath(), '--root='.$fixtureRoot, '--scan-path=database/migrations',
+        ], $this->repositoryRoot);
+        $process->run();
+        $output = $process->getOutput().$process->getErrorOutput();
+
+        $this->assertSame(1, $process->getExitCode(), $output);
+        $this->assertStringContainsString('nested_profile_groups.account_profile_ids', $output);
+    }
+
     public function test_guard_rejects_a_controlled_full_list_and_legacy_authority_fixture(): void
     {
         $fixtureRoot = sys_get_temp_dir().'/nested-member-guard-'.bin2hex(random_bytes(6));

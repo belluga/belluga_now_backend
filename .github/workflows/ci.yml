@@ -133,6 +133,32 @@ jobs:
           tools: composer:v2
           coverage: none
 
+      - name: Enforce protected migration history
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            protected_base="$(jq -r '.pull_request.base.sha // empty' "$EVENT_PATH")"
+          elif [[ "$EVENT_NAME" == "push" ]]; then
+            protected_base="$(jq -r '.before // empty' "$EVENT_PATH")"
+          else
+            echo "ERROR: unsupported event for migration integrity guard: $EVENT_NAME" >&2
+            exit 1
+          fi
+
+          protected_base="$(printf '%s' "$protected_base" | tr '[:upper:]' '[:lower:]')"
+          if [[ ! "$protected_base" =~ ^[0-9a-f]{40}$ ]] || [[ "$protected_base" =~ ^0{40}$ ]]; then
+            echo "ERROR: missing or zero protected base SHA from event payload." >&2
+            exit 1
+          fi
+
+          git fetch --no-tags --depth=1 origin "$protected_base"
+          git cat-file -e "$protected_base^{commit}"
+          php scripts/migration_integrity_guard.php --protected-base="$protected_base"
+
       - name: PHP and Composer diagnostics
         run: |
           php --version

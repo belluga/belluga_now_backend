@@ -38,14 +38,15 @@ trait MigrateFreshSeedOnce
                 $this->dropTenantDatabases();
             }
 
+            Artisan::call($command, [
+                '--database' => 'landlord',
+                '--path' => $this->landlordMigrationPaths(),
+            ]);
+
             Artisan::call(sprintf(
                 'tenants:artisan "%s --database=tenant %s"',
                 $command,
                 $tenantPaths
-            ));
-            Artisan::call(sprintf(
-                '%s --database=landlord --path=database/migrations/landlord',
-                $command
             ));
 
             static::$migrationHasRunOnce = true;
@@ -60,6 +61,12 @@ trait MigrateFreshSeedOnce
             static fn (string $path): string => sprintf('--path=%s', $path),
             $paths
         ));
+    }
+
+    /** @return array<int, string> */
+    protected function landlordMigrationPaths(): array
+    {
+        return (array) config('multitenancy.landlord_migration_paths', ['database/migrations/landlord']);
     }
 
     protected function wipeMongoCollections(): void

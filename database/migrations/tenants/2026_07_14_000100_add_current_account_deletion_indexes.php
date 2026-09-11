@@ -30,6 +30,10 @@ return new class extends Migration
                 ['contact_source_account_profile_id' => 1, '_id' => 1],
                 options: ['name' => 'idx_account_profiles_contact_source_delete_v1'],
             );
+            $collection->index(
+                ['nested_profile_groups.account_profile_ids' => 1, '_id' => 1],
+                options: ['name' => 'idx_account_profiles_nested_member_delete_v1'],
+            );
         });
 
         Schema::table('account_users', static function (Blueprint $collection): void {

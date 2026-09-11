@@ -58,6 +58,10 @@ final class NestedMemberPaginationGuard
             foreach ($lines as $index => $line) {
                 foreach (self::FORBIDDEN_TOKENS as $token => $message) {
                     if (str_contains($line, $token)) {
+                        if ($token === 'nested_profile_groups.account_profile_ids'
+                            && $this->isApprovedHistoricalNestedDeleteIndex($relativePath)) {
+                            continue;
+                        }
                         $violations[] = sprintf('%s:%d %s Token: `%s`', $relativePath, $index + 1, $message, $token);
                     }
                 }
@@ -78,6 +82,44 @@ final class NestedMemberPaginationGuard
         }
 
         return 1;
+    }
+
+    private function isApprovedHistoricalNestedDeleteIndex(string $relativePath): bool
+    {
+        $historicalPath = 'database/migrations/tenants/2026_07_14_000100_add_current_account_deletion_indexes.php';
+        $forwardPath = 'database/migrations/tenants/2026_09_10_000400_drop_retired_nested_profile_delete_index.php';
+        $baseline = 'db5ccae40185e47dab95cf5e471530f7795773c5';
+        if ($relativePath !== $historicalPath && $relativePath !== $forwardPath) {
+            return false;
+        }
+        try {
+            $lock = json_decode((string) file_get_contents($this->root.'/database/migration-integrity-lock.json'), true, flags: JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return false;
+        }
+        $historical = null;
+        $forward = null;
+        foreach (is_array($lock['migrations'] ?? null) ? $lock['migrations'] : [] as $row) {
+            if (($row['path'] ?? null) === $historicalPath) $historical = $row;
+            if (($row['path'] ?? null) === $forwardPath) $forward = $row;
+        }
+        $forwardSource = @file_get_contents($this->root.'/'.$forwardPath);
+
+        $historicalApproved = is_array($historical)
+            && ($historical['status'] ?? null) === 'active'
+            && ($historical['provenance_commit'] ?? null) === $baseline
+            && ($historical['target_sha256'] ?? null) === @hash_file('sha256', $this->root.'/'.$historicalPath)
+            && in_array($historicalPath, $lock['bootstrap_inventory']['restores'] ?? [], true);
+        $forwardApproved = is_array($forward)
+            && ($forward['status'] ?? null) === 'active'
+            && is_array($forward)
+            && ($forward['preflight_id'] ?? null) === 'tenant.account_profiles.nested_delete_retirement_v1'
+            && ($forward['target_sha256'] ?? null) === @hash_file('sha256', $this->root.'/'.$forwardPath)
+            && in_array($forwardPath, $lock['bootstrap_inventory']['forwards'] ?? [], true)
+            && is_string($forwardSource)
+            && str_contains($forwardSource, "dropIndex('idx_account_profiles_nested_member_delete_v1')");
+
+        return $historicalApproved && $forwardApproved;
     }
 
     /** @return array<int, string> */

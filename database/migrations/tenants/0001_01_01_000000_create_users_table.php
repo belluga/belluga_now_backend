@@ -48,6 +48,15 @@ return new class extends Migration
                 ]);
         });
 
+        Schema::create('password_reset_tokens', function (Blueprint $collection) {
+            $collection->unique('slot_key');
+            $collection->index('broker');
+            $collection->index('user_id');
+            $collection->index('user_id_string');
+            $collection->index('token_lookup_hash');
+            $collection->index('expires_at');
+        });
+
         Schema::create('sessions', function (Blueprint $collection) {
             $collection->unique('id');
             $collection->sparse('user_id');

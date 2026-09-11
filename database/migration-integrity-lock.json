@@ -1,0 +1,1011 @@
+{
+    "version": 1,
+    "baseline_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+    "bootstrap_inventory": {
+        "restores": [
+            "database/migrations/tenants/0001_01_01_000000_create_users_table.php",
+            "database/migrations/landlord/0001_01_01_000000_create_landlord_users_table.php",
+            "packages/belluga/belluga_push_handler/database/migrations/2025_01_01_000000_create_push_collections.php",
+            "packages/belluga/belluga_events/database/migrations/2026_01_19_000200_create_events_collection.php",
+            "database/migrations/tenants/2026_01_29_000300_create_profile_types_collection.php",
+            "packages/belluga/belluga_map_pois/database/migrations/2026_02_02_000500_create_map_pois_collection.php",
+            "database/migrations/tenants/2026_02_16_000600_make_accounts_document_index_non_unique.php",
+            "packages/belluga/belluga_invites/database/migrations/2026_03_12_000100_create_invite_core_collections.php",
+            "packages/belluga/belluga_invites/database/migrations/2026_03_12_000120_optimize_invite_hot_query_indexes.php",
+            "database/migrations/tenants/2026_07_14_000100_add_current_account_deletion_indexes.php"
+        ],
+        "tombstones": [
+            "database/migrations/tenants/2026_03_01_000100_create_ticketing_core_collections.php",
+            "database/migrations/tenants/2026_07_20_000400_create_account_profile_nested_public_member_projection_indexes.php",
+            "packages/belluga/belluga_events/database/migrations/2026_07_21_000800_create_event_profile_group_members_collection.php"
+        ],
+        "forwards": [
+            "database/migrations/tenants/2026_09_10_000100_drop_legacy_tenant_password_reset_tokens_collection.php",
+            "packages/belluga/belluga_events/database/migrations/2026_09_10_000200_reconcile_events_collection_indexes.php",
+            "packages/belluga/belluga_invites/database/migrations/2026_09_10_000300_reconcile_invite_receiver_profile_indexes.php",
+            "database/migrations/tenants/2026_09_10_000400_drop_retired_nested_profile_delete_index.php",
+            "database/migrations/tenants/2026_09_10_000450_create_account_profile_command_receipts_collection.php"
+        ]
+    },
+    "migrations": [
+        {
+            "scope": "landlord",
+            "basename": "0001_01_01_000000_create_landlord_users_table",
+            "path": "database/migrations/landlord/0001_01_01_000000_create_landlord_users_table.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "b6c23da48bb68e7951ed7fdb7231b43db08c7f4b270c08bd5dd19a061fedbd08",
+            "target_sha256": "a9d7ccd59323da24b95429e63d19689bca6d4a9a329b51d93a29862ab3ede906"
+        },
+        {
+            "scope": "landlord",
+            "basename": "0001_01_01_000001_create_cache_table",
+            "path": "database/migrations/landlord/0001_01_01_000001_create_cache_table.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "e501c2b797f885301ca36a709f5f2554ff82b47ef5e40ce8c5ca6152fb600663",
+            "target_sha256": "e501c2b797f885301ca36a709f5f2554ff82b47ef5e40ce8c5ca6152fb600663"
+        },
+        {
+            "scope": "landlord",
+            "basename": "0001_01_01_000002_create_jobs_table",
+            "path": "database/migrations/landlord/0001_01_01_000002_create_jobs_table.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "7c9c712adf4091c87bf2612f4d0dccdfa1df4501553e4ac068b83d7bd5462fa5",
+            "target_sha256": "7c9c712adf4091c87bf2612f4d0dccdfa1df4501553e4ac068b83d7bd5462fa5"
+        },
+        {
+            "scope": "landlord",
+            "basename": "2025_04_14_174949_create_personal_access_tokens_table",
+            "path": "database/migrations/landlord/2025_04_14_174949_create_personal_access_tokens_table.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "328cd79c5398584d44ab0b5b97b9b15097a6eb51058b72b4838684f2775d89e4",
+            "target_sha256": "328cd79c5398584d44ab0b5b97b9b15097a6eb51058b72b4838684f2775d89e4"
+        },
+        {
+            "scope": "landlord",
+            "basename": "2025_04_25_000600_create_landlord_tenants_table",
+            "path": "database/migrations/landlord/2025_04_25_000600_create_landlord_tenants_table.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "ac07500005b263bec7cb1ef5f7d5323ca158213c3d4329f2b2407d874bcc7597",
+            "target_sha256": "ac07500005b263bec7cb1ef5f7d5323ca158213c3d4329f2b2407d874bcc7597"
+        },
+        {
+            "scope": "landlord",
+            "basename": "2025_04_29_000600_create_landlord_domains_table",
+            "path": "database/migrations/landlord/2025_04_29_000600_create_landlord_domains_table.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "3fb36439198247c840cc7b0ab7baa0ebff2f9cba02507d0e417669652d88b6b9",
+            "target_sha256": "3fb36439198247c840cc7b0ab7baa0ebff2f9cba02507d0e417669652d88b6b9"
+        },
+        {
+            "scope": "landlord",
+            "basename": "2025_05_01_000600_create_landlord_roles_table",
+            "path": "database/migrations/landlord/2025_05_01_000600_create_landlord_roles_table.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "c5e2849816089d7e84a9f2014405e7a95e4e1110d7d195ff11310c0632750dc8",
+            "target_sha256": "c5e2849816089d7e84a9f2014405e7a95e4e1110d7d195ff11310c0632750dc8"
+        },
+        {
+            "scope": "landlord",
+            "basename": "2025_05_01_000600_create_tenant_roles_table",
+            "path": "database/migrations/landlord/2025_05_01_000600_create_tenant_roles_table.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "dd74d89ecad13a3131151da03bc82992233e089d4ae3248783fe7e879e0dbc7b",
+            "target_sha256": "dd74d89ecad13a3131151da03bc82992233e089d4ae3248783fe7e879e0dbc7b"
+        },
+        {
+            "scope": "landlord",
+            "basename": "2025_09_11_000600_create_landlord_table",
+            "path": "database/migrations/landlord/2025_09_11_000600_create_landlord_table.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "b547fb41158a9cc3a8dab79e273e70834f5548b5259934e8d61623befea25c33",
+            "target_sha256": "b547fb41158a9cc3a8dab79e273e70834f5548b5259934e8d61623befea25c33"
+        },
+        {
+            "scope": "landlord",
+            "basename": "2026_02_26_000710_create_landlord_settings_collection",
+            "path": "packages/belluga/belluga_settings/database/migrations_landlord/2026_02_26_000710_create_landlord_settings_collection.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "2440cf63e8398771cd5c2aa0a5687b15e30981f96c9509986075ad441f916190",
+            "target_sha256": "2440cf63e8398771cd5c2aa0a5687b15e30981f96c9509986075ad441f916190"
+        },
+        {
+            "scope": "landlord",
+            "basename": "2026_03_08_000700_create_api_abuse_signal_collections",
+            "path": "database/migrations/landlord/2026_03_08_000700_create_api_abuse_signal_collections.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "486e7cbfb1a3ec9f90c746064cf977c7e902f71a8d68bd5f3d0ed2c14d2d6c4c",
+            "target_sha256": "486e7cbfb1a3ec9f90c746064cf977c7e902f71a8d68bd5f3d0ed2c14d2d6c4c"
+        },
+        {
+            "scope": "landlord",
+            "basename": "2026_03_17_000810_update_domains_unique_index_for_typed_app_domains",
+            "path": "database/migrations/landlord/2026_03_17_000810_update_domains_unique_index_for_typed_app_domains.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "d7824113512e60d15856dcc9beccd44d9ac1456bf30c1a89e3ecb13c1aea8bd6",
+            "target_sha256": "d7824113512e60d15856dcc9beccd44d9ac1456bf30c1a89e3ecb13c1aea8bd6"
+        },
+        {
+            "scope": "landlord",
+            "basename": "2026_03_17_000820_backfill_tenant_app_domains_into_typed_domains",
+            "path": "database/migrations/landlord/2026_03_17_000820_backfill_tenant_app_domains_into_typed_domains.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "669badced199eb6b51814e34ff5c75b4183bcd3f1fc540d90d186c60b151055d",
+            "target_sha256": "669badced199eb6b51814e34ff5c75b4183bcd3f1fc540d90d186c60b151055d"
+        },
+        {
+            "scope": "landlord",
+            "basename": "2026_05_11_000900_update_password_reset_token_indexes",
+            "path": "database/migrations/landlord/2026_05_11_000900_update_password_reset_token_indexes.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "4dd17f25a89954e6d874fe7fb2d5024ee1e40feccd2cde94316f0f990e00d1b7",
+            "target_sha256": "4dd17f25a89954e6d874fe7fb2d5024ee1e40feccd2cde94316f0f990e00d1b7"
+        },
+        {
+            "scope": "tenant",
+            "basename": "0001_01_01_000000_create_accounts_table",
+            "path": "database/migrations/tenants/0001_01_01_000000_create_accounts_table.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "da01e71b40edd55ac46f7fd9c59731e076778e9d7a16fde24c1d00c3ea217121",
+            "target_sha256": "da01e71b40edd55ac46f7fd9c59731e076778e9d7a16fde24c1d00c3ea217121"
+        },
+        {
+            "scope": "tenant",
+            "basename": "0001_01_01_000000_create_roles_table",
+            "path": "database/migrations/tenants/0001_01_01_000000_create_roles_table.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "2b2f2ea1ce996f3050e164c4842c45f05977f4a545bc39d0f38116838b74d447",
+            "target_sha256": "2b2f2ea1ce996f3050e164c4842c45f05977f4a545bc39d0f38116838b74d447"
+        },
+        {
+            "scope": "tenant",
+            "basename": "0001_01_01_000000_create_users_table",
+            "path": "database/migrations/tenants/0001_01_01_000000_create_users_table.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "d42cb964c76682e08a5273198ebda10948a98f4b8850bd33e04400c6c002a4f2",
+            "target_sha256": "d42cb964c76682e08a5273198ebda10948a98f4b8850bd33e04400c6c002a4f2"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2025_01_01_000000_create_push_collections",
+            "path": "packages/belluga/belluga_push_handler/database/migrations/2025_01_01_000000_create_push_collections.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "76056ce4529c5f40d1e4a8726b05ac253c225cbbf1273b87acc3b4b806fee519",
+            "target_sha256": "56344b85ceac94f2dd9187474d2fc351d32dae7a194914f20c15cabc1ff52848"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2025_10_20_000700_create_identity_merge_audits_collection",
+            "path": "database/migrations/tenants/2025_10_20_000700_create_identity_merge_audits_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "3d3918270ae0055bfdb9e22e6f04408e0f90f01dac1b9a4b09d5511f9cc76d32",
+            "target_sha256": "3d3918270ae0055bfdb9e22e6f04408e0f90f01dac1b9a4b09d5511f9cc76d32"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_01_18_000100_create_organizations_collection",
+            "path": "database/migrations/tenants/2026_01_18_000100_create_organizations_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "d8b4ec7741513902b8da86d9b15b91dea5795d493b1aec25a7edae9848ef0499",
+            "target_sha256": "d8b4ec7741513902b8da86d9b15b91dea5795d493b1aec25a7edae9848ef0499"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_01_18_000110_create_account_profiles_collection",
+            "path": "database/migrations/tenants/2026_01_18_000110_create_account_profiles_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "388ab420ec5f169b80a3508c6c923c6a5d15e9276e4e6dac628c6b3f503d0745",
+            "target_sha256": "388ab420ec5f169b80a3508c6c923c6a5d15e9276e4e6dac628c6b3f503d0745"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_01_19_000200_create_events_collection",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_01_19_000200_create_events_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "1bf9030fd06e7312df6a8fe95c8d11e4e6eaeb3bf5c22329c56f4cda9546506b",
+            "target_sha256": "1bf9030fd06e7312df6a8fe95c8d11e4e6eaeb3bf5c22329c56f4cda9546506b"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_01_29_000300_create_profile_types_collection",
+            "path": "database/migrations/tenants/2026_01_29_000300_create_profile_types_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "486c2ef09e4b0bdee55369e61f51403e636fd3c9f8f0eccc5cb68555fae6b8b0",
+            "target_sha256": "486c2ef09e4b0bdee55369e61f51403e636fd3c9f8f0eccc5cb68555fae6b8b0"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_01_29_000310_migrate_account_profile_types_collection",
+            "path": "database/migrations/tenants/2026_01_29_000310_migrate_account_profile_types_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "72d520dc65c3689b861d87f6d8b1ef4965d5253a0b90f0d3e5ebcfdaf733d938",
+            "target_sha256": "72d520dc65c3689b861d87f6d8b1ef4965d5253a0b90f0d3e5ebcfdaf733d938"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_01_29_000320_remove_legacy_profile_type_registry_from_settings",
+            "path": "database/migrations/tenants/2026_01_29_000320_remove_legacy_profile_type_registry_from_settings.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "f84418bae2acf2d64d24b98a61f42c909eac7e85c20ca7b465ab686d4c91ca8f",
+            "target_sha256": "f84418bae2acf2d64d24b98a61f42c909eac7e85c20ca7b465ab686d4c91ca8f"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_02_02_000400_create_taxonomies_collection",
+            "path": "database/migrations/tenants/2026_02_02_000400_create_taxonomies_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "4ccd82fee841320e8b9b8c6140052258147c8714d57149d8073c7ac3b78b6e26",
+            "target_sha256": "4ccd82fee841320e8b9b8c6140052258147c8714d57149d8073c7ac3b78b6e26"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_02_02_000410_create_taxonomy_terms_collection",
+            "path": "database/migrations/tenants/2026_02_02_000410_create_taxonomy_terms_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "f2db645f62b52ad843dc3e90eee828161978dbcb251a00f96e7bcad467cec1cf",
+            "target_sha256": "f2db645f62b52ad843dc3e90eee828161978dbcb251a00f96e7bcad467cec1cf"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_02_02_000420_create_static_profile_types_collection",
+            "path": "database/migrations/tenants/2026_02_02_000420_create_static_profile_types_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "f8b109990d0c47af58ca3dbf2203ed923cf29197e9f19be1b97595dbe5b8bc9b",
+            "target_sha256": "f8b109990d0c47af58ca3dbf2203ed923cf29197e9f19be1b97595dbe5b8bc9b"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_02_02_000430_create_static_assets_collection",
+            "path": "database/migrations/tenants/2026_02_02_000430_create_static_assets_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "bb14e6645aa3d4d15fa7a3427629e2f26fcde100095b38fa7e1cc744fdd2c7c8",
+            "target_sha256": "bb14e6645aa3d4d15fa7a3427629e2f26fcde100095b38fa7e1cc744fdd2c7c8"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_02_02_000500_create_map_pois_collection",
+            "path": "packages/belluga/belluga_map_pois/database/migrations/2026_02_02_000500_create_map_pois_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "2d7962b6ba9d2e7d8c02c76530f81e88ab9055008fb4ffcf7d0238721c25afa1",
+            "target_sha256": "2d7962b6ba9d2e7d8c02c76530f81e88ab9055008fb4ffcf7d0238721c25afa1"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_02_16_000600_make_accounts_document_index_non_unique",
+            "path": "database/migrations/tenants/2026_02_16_000600_make_accounts_document_index_non_unique.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "4b578d32bfb4f9448241bd2f2dfb99866abf0c39d68e7edf477914b9eb976374",
+            "target_sha256": "397d0759c41f511c5a025610e4239edba66251fc4f21ffd0a23b78eac7cea3d6"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_02_26_000300_create_event_occurrences_collection",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_02_26_000300_create_event_occurrences_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "9bc802e3ce2e74c6b86289a3d01b30f78bdae1d4c6b0b623e17b42c7b50ad5bb",
+            "target_sha256": "9bc802e3ce2e74c6b86289a3d01b30f78bdae1d4c6b0b623e17b42c7b50ad5bb"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_02_26_000700_create_settings_collection",
+            "path": "packages/belluga/belluga_settings/database/migrations/2026_02_26_000700_create_settings_collection.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "1a6d6353abf14358d897852c4aa4c77763e3eccf2732a2a60ccd74dfe4fe4c24",
+            "target_sha256": "1a6d6353abf14358d897852c4aa4c77763e3eccf2732a2a60ccd74dfe4fe4c24"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_01_000100_create_ticketing_core_collections",
+            "path": "database/migrations/tenants/2026_03_01_000100_create_ticketing_core_collections.php",
+            "status": "retired-applied-tombstone",
+            "classification": "retired-applied-tombstone",
+            "provenance_commit": "5c6e9f4e39e4bc7653efe7a2703a5e12523b00f6",
+            "historical_source_sha256": "fb9a2e1ebc25b2fe0a25552f9d09868d5b7919237459499519d5b4e980ea839f",
+            "deletion_commit": "5c6e9f4e39e4bc7653efe7a2703a5e12523b00f6",
+            "executed_or_equivalent_sha256": "fb9a2e1ebc25b2fe0a25552f9d09868d5b7919237459499519d5b4e980ea839f",
+            "target_sha256": "de587631f5dcd4114d485b27bbfe2e98aaf25ce678a615867267795f0c64b2ad"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_03_000330_create_event_types_collection",
+            "path": "database/migrations/tenants/2026_03_03_000330_create_event_types_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "38a7fd80232f0e58bff6674d9568e7c36f13006d07cba5cdd2cf0b0302916a95",
+            "target_sha256": "38a7fd80232f0e58bff6674d9568e7c36f13006d07cba5cdd2cf0b0302916a95"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_03_000340_backfill_event_type_snapshots",
+            "path": "database/migrations/tenants/2026_03_03_000340_backfill_event_type_snapshots.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "9b581b972ff534664c88002a8286465bb07a972fa2a885365d8eee98e02b3c52",
+            "target_sha256": "9b581b972ff534664c88002a8286465bb07a972fa2a885365d8eee98e02b3c52"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_03_000400_provision_event_occurrences_atlas_search_index",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_03_03_000400_provision_event_occurrences_atlas_search_index.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "6a0329ea57b422b89a72415cd0ca55005cbf7d39d9e4e7a46db624126a39d870",
+            "target_sha256": "6a0329ea57b422b89a72415cd0ca55005cbf7d39d9e4e7a46db624126a39d870"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_06_000500_add_event_occurrences_artists_taxonomy_terms_index",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_03_06_000500_add_event_occurrences_artists_taxonomy_terms_index.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "f958ff0abe9f18ecc94a8b27ed319402d9a5611398fea350fa54566adcd92cb9",
+            "target_sha256": "f958ff0abe9f18ecc94a8b27ed319402d9a5611398fea350fa54566adcd92cb9"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_10_000600_add_source_type_index_to_map_pois_collection",
+            "path": "packages/belluga/belluga_map_pois/database/migrations/2026_03_10_000600_add_source_type_index_to_map_pois_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "ec0f39b2ee80da1c1a5bdab95a06e562c8e79b1ce29b729babf92190715f68c1",
+            "target_sha256": "ec0f39b2ee80da1c1a5bdab95a06e562c8e79b1ce29b729babf92190715f68c1"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_12_000100_create_invite_core_collections",
+            "path": "packages/belluga/belluga_invites/database/migrations/2026_03_12_000100_create_invite_core_collections.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "4d124a518716d1367b59e9b584841be8c61f23d84fb48b8ce216541381061562",
+            "target_sha256": "4d124a518716d1367b59e9b584841be8c61f23d84fb48b8ce216541381061562"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_12_000110_create_invite_quota_counters_collection",
+            "path": "packages/belluga/belluga_invites/database/migrations/2026_03_12_000110_create_invite_quota_counters_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "0e41cae7048278e2f12033d9c7849bc247c9577552e196e866ba82f715756855",
+            "target_sha256": "0e41cae7048278e2f12033d9c7849bc247c9577552e196e866ba82f715756855"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_12_000120_optimize_invite_hot_query_indexes",
+            "path": "packages/belluga/belluga_invites/database/migrations/2026_03_12_000120_optimize_invite_hot_query_indexes.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "f6107cb40e8354d7bdb5caa3468a1ab6380805021e10ad6952a1073a7950c1e6",
+            "target_sha256": "bd6522d102ede78867be3bc00d641ec7cc4e96ea0caaa9ba0779161da55e8593"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_12_000130_create_invite_command_idempotencies_collection",
+            "path": "packages/belluga/belluga_invites/database/migrations/2026_03_12_000130_create_invite_command_idempotencies_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "f21f7ce391c46fe095c6206a5506553aacaca072773b396ed08b517821288483",
+            "target_sha256": "f21f7ce391c46fe095c6206a5506553aacaca072773b396ed08b517821288483"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_13_000800_create_attendance_commitments_collection",
+            "path": "database/migrations/tenants/2026_03_13_000800_create_attendance_commitments_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "30ab107126e22a0ca4f3472e05220d78c69a813d1062b0057a3dc4d1f14020c9",
+            "target_sha256": "30ab107126e22a0ca4f3472e05220d78c69a813d1062b0057a3dc4d1f14020c9"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_19_000100_create_favorites_core_collections",
+            "path": "packages/belluga/belluga_favorites/database/migrations/2026_03_19_000100_create_favorites_core_collections.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "83a6fba75dd6bf75af79d6791f0f8db7f2094812267704e029b1e9b789f92d1b",
+            "target_sha256": "83a6fba75dd6bf75af79d6791f0f8db7f2094812267704e029b1e9b789f92d1b"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_21_000900_add_text_search_indexes_to_accounts_and_static_assets",
+            "path": "database/migrations/tenants/2026_03_21_000900_add_text_search_indexes_to_accounts_and_static_assets.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "34f6d555fd752f671b763e85c8571af1c9acb8abacee884328f3f92d0e23e35b",
+            "target_sha256": "34f6d555fd752f671b763e85c8571af1c9acb8abacee884328f3f92d0e23e35b"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_21_000900_add_text_search_indexes_to_events_and_occurrences",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_03_21_000900_add_text_search_indexes_to_events_and_occurrences.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "387bf1a6175dfd97d319e93fdd5032573bad782ed55aaef2573bdb9ff2209667",
+            "target_sha256": "387bf1a6175dfd97d319e93fdd5032573bad782ed55aaef2573bdb9ff2209667"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_03_28_001000_backfill_account_profile_visibility_public",
+            "path": "database/migrations/tenants/2026_03_28_001000_backfill_account_profile_visibility_public.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "12492d51d4796e960772f3e31ad1d6e328fc7152982c28943cdd2571e39096ea",
+            "target_sha256": "12492d51d4796e960772f3e31ad1d6e328fc7152982c28943cdd2571e39096ea"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_04_03_001000_add_agenda_lookup_indexes_to_event_occurrences",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_04_03_001000_add_agenda_lookup_indexes_to_event_occurrences.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "3478416b2f787eb26aa52a528e1a262f1d75b8d614522d30a223cc546ba594f4",
+            "target_sha256": "3478416b2f787eb26aa52a528e1a262f1d75b8d614522d30a223cc546ba594f4"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_04_03_002000_add_public_feed_index_to_account_profiles",
+            "path": "database/migrations/tenants/2026_04_03_002000_add_public_feed_index_to_account_profiles.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "988b644688871d20d0e7ce6c9dd4af305814704d7e2caab6786aaef954fcd428",
+            "target_sha256": "988b644688871d20d0e7ce6c9dd4af305814704d7e2caab6786aaef954fcd428"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_04_03_003000_add_contact_hash_indexes_to_account_users",
+            "path": "database/migrations/tenants/2026_04_03_003000_add_contact_hash_indexes_to_account_users.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "4350d3e6446278ce87750da2f05dde0937ec965c297c975b12aa03c411ff271a",
+            "target_sha256": "4350d3e6446278ce87750da2f05dde0937ec965c297c975b12aa03c411ff271a"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_04_11_000100_add_deleted_at_cleanup_indexes_to_account_profiles_and_static_assets",
+            "path": "database/migrations/tenants/2026_04_11_000100_add_deleted_at_cleanup_indexes_to_account_profiles_and_static_assets.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "a5444ac56fddf0a097e2087874edcff9999c191d0482930cf0fb0c786f495fe2",
+            "target_sha256": "a5444ac56fddf0a097e2087874edcff9999c191d0482930cf0fb0c786f495fe2"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_04_12_000200_add_related_profile_management_index_to_events",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_04_12_000200_add_related_profile_management_index_to_events.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "04359286b060bce93c7f8de1797e1323a5198a34089ec125f621e08ebb62c756",
+            "target_sha256": "04359286b060bce93c7f8de1797e1323a5198a34089ec125f621e08ebb62c756"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_04_14_000300_add_management_order_index_to_events",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_04_14_000300_add_management_order_index_to_events.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "16a3ead931cd995cacfff585373855d4d16dc3ee3c8cf016b841ca4496af185b",
+            "target_sha256": "16a3ead931cd995cacfff585373855d4d16dc3ee3c8cf016b841ca4496af185b"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_04_20_000100_create_environment_snapshots_collection",
+            "path": "database/migrations/tenants/2026_04_20_000100_create_environment_snapshots_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "299833b3d80506dd8b20c115b07089962fa05102edfba607e9e5a543fb6d89ad",
+            "target_sha256": "299833b3d80506dd8b20c115b07089962fa05102edfba607e9e5a543fb6d89ad"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_04_20_000200_create_proximity_preferences_collection",
+            "path": "database/migrations/tenants/2026_04_20_000200_create_proximity_preferences_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "4b1998a527ec7d1322d515649a264dfdbcf2fb30b701b070a6e006b946a4a7ea",
+            "target_sha256": "4b1998a527ec7d1322d515649a264dfdbcf2fb30b701b070a6e006b946a4a7ea"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_04_25_000100_add_taxonomy_terms_flat_to_account_profiles",
+            "path": "database/migrations/tenants/2026_04_25_000100_add_taxonomy_terms_flat_to_account_profiles.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "0de2ad00506c0c47e84867a315d1dba2474b87fec6cccc08120ca9d2f0857618",
+            "target_sha256": "0de2ad00506c0c47e84867a315d1dba2474b87fec6cccc08120ca9d2f0857618"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_04_25_000600_backfill_event_account_context_ids",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_04_25_000600_backfill_event_account_context_ids.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "40e96e1171f205e3bf9393fc73541caa7110a5587b060f4eb16d93b2a42d4d73",
+            "target_sha256": "40e96e1171f205e3bf9393fc73541caa7110a5587b060f4eb16d93b2a42d4d73"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_04_28_000100_create_phone_otp_challenges_collection",
+            "path": "database/migrations/tenants/2026_04_28_000100_create_phone_otp_challenges_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "f75484c32d9d496b2f3852dea59a93c6ce67da56858a04627abff5cd7728d0d5",
+            "target_sha256": "f75484c32d9d496b2f3852dea59a93c6ce67da56858a04627abff5cd7728d0d5"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_04_28_000200_create_contact_groups_and_social_graph_fields",
+            "path": "database/migrations/tenants/2026_04_28_000200_create_contact_groups_and_social_graph_fields.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "3d192fab0221e9fe24e70cd847f0d9b7359d5a833515f9063d9e9d64b558ccbd",
+            "target_sha256": "3d192fab0221e9fe24e70cd847f0d9b7359d5a833515f9063d9e9d64b558ccbd"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_05_01_000300_backfill_personal_profile_type_inviteability",
+            "path": "database/migrations/tenants/2026_05_01_000300_backfill_personal_profile_type_inviteability.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "0492cb4089984faf2d4d3ab71a527df9a13806789c1eb12b3f135ab0e5a286e7",
+            "target_sha256": "0492cb4089984faf2d4d3ab71a527df9a13806789c1eb12b3f135ab0e5a286e7"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_05_01_000400_backfill_public_discovery_profile_type_capability",
+            "path": "database/migrations/tenants/2026_05_01_000400_backfill_public_discovery_profile_type_capability.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "c54c4dbde1b23f188c86e41b826e651b2ff12f3218d7fc0105e1d29ca193f854",
+            "target_sha256": "c54c4dbde1b23f188c86e41b826e651b2ff12f3218d7fc0105e1d29ca193f854"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_05_04_000500_add_unique_pending_phone_index_to_phone_otp_challenges",
+            "path": "database/migrations/tenants/2026_05_04_000500_add_unique_pending_phone_index_to_phone_otp_challenges.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "fa5ce9a0e589cb774a220c212cd83a1bc3c0abee0356b7015d847f325d22a829",
+            "target_sha256": "fa5ce9a0e589cb774a220c212cd83a1bc3c0abee0356b7015d847f325d22a829"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_05_04_001100_move_occurrence_order_authority_to_events",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_05_04_001100_move_occurrence_order_authority_to_events.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "08d69f4588b7f35fa036a010bd0eac3b1548f83e68734d05a92aeb0472ceee64",
+            "target_sha256": "08d69f4588b7f35fa036a010bd0eac3b1548f83e68734d05a92aeb0472ceee64"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_05_10_000100_create_push_devices_collection",
+            "path": "packages/belluga/belluga_push_handler/database/migrations/2026_05_10_000100_create_push_devices_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "ad651c70d415cf142efdf702dcfb7185e6233ce04259aa4fdb16dae1526c5e72",
+            "target_sha256": "ad651c70d415cf142efdf702dcfb7185e6233ce04259aa4fdb16dae1526c5e72"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_05_23_000300_add_sent_status_inviter_occurrence_index",
+            "path": "packages/belluga/belluga_invites/database/migrations/2026_05_23_000300_add_sent_status_inviter_occurrence_index.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "ecc1f00062fbb7924fae7d0f0010295733951bc60b25f55e6852e22e7e4df92b",
+            "target_sha256": "ecc1f00062fbb7924fae7d0f0010295733951bc60b25f55e6852e22e7e4df92b"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_05_24_000100_create_inviteable_people_projection",
+            "path": "packages/belluga/belluga_invites/database/migrations/2026_05_24_000100_create_inviteable_people_projection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "b0707f435e32ebc3bdd898cf9fe7d789715bd17d35c0a163b72779e876b8df40",
+            "target_sha256": "b0707f435e32ebc3bdd898cf9fe7d789715bd17d35c0a163b72779e876b8df40"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_05_25_000100_rebuild_sent_status_inviter_occurrence_index",
+            "path": "packages/belluga/belluga_invites/database/migrations/2026_05_25_000100_rebuild_sent_status_inviter_occurrence_index.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "d13de348df72219eb5312fd713b6445a891782677a61f39fdff7ac8766ab3065",
+            "target_sha256": "d13de348df72219eb5312fd713b6445a891782677a61f39fdff7ac8766ab3065"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_06_06_000100_backfill_profile_type_queryability_and_public_navigation",
+            "path": "database/migrations/tenants/2026_06_06_000100_backfill_profile_type_queryability_and_public_navigation.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "20ddda1724629d9042aea17f2bbe962c261aadaee49ecb92d1b9745e00bfe40f",
+            "target_sha256": "20ddda1724629d9042aea17f2bbe962c261aadaee49ecb92d1b9745e00bfe40f"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_06_30_000700_add_public_agenda_party_ref_index_to_event_occurrences",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_06_30_000700_add_public_agenda_party_ref_index_to_event_occurrences.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "93e882d483e2500d77828b4fdd1784c9aad992316079b8dcf4ab30c16c7eb82b",
+            "target_sha256": "93e882d483e2500d77828b4fdd1784c9aad992316079b8dcf4ab30c16c7eb82b"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_13_000100_add_contact_source_candidate_indexes",
+            "path": "database/migrations/tenants/2026_07_13_000100_add_contact_source_candidate_indexes.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "dc209e68bb2008a9af151a5b8d2a9c8a204ea145653e984866165ae481518752",
+            "target_sha256": "dc209e68bb2008a9af151a5b8d2a9c8a204ea145653e984866165ae481518752"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_14_000100_add_current_account_deletion_indexes",
+            "path": "database/migrations/tenants/2026_07_14_000100_add_current_account_deletion_indexes.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "632f8435b956d3d709b4bae30899361685d48dfb075e9c19b51d28992f1f8cac",
+            "target_sha256": "632f8435b956d3d709b4bae30899361685d48dfb075e9c19b51d28992f1f8cac"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_16_000100_create_phone_identity_coordination_leases_collection",
+            "path": "database/migrations/tenants/2026_07_16_000100_create_phone_identity_coordination_leases_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "6cf821450b21a4abd9f644739e8dbd5f09d3b7b9bc42a6f9fa9cac7ccacbda89",
+            "target_sha256": "6cf821450b21a4abd9f644739e8dbd5f09d3b7b9bc42a6f9fa9cac7ccacbda89"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_16_000800_add_public_agenda_geo_index_to_event_occurrences",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_07_16_000800_add_public_agenda_geo_index_to_event_occurrences.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "5d8fcb1c755a7ea23852f69361bb834e52354ab15bf3853b82338b2e1830cc98",
+            "target_sha256": "5d8fcb1c755a7ea23852f69361bb834e52354ab15bf3853b82338b2e1830cc98"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_18_000100_canonicalize_profile_type_capabilities",
+            "path": "database/migrations/tenants/2026_07_18_000100_canonicalize_profile_type_capabilities.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "b60c0985312340dac10479abe0351d00cf2ce2aff4b3051c97afd6c7f6c6cfc5",
+            "target_sha256": "b60c0985312340dac10479abe0351d00cf2ce2aff4b3051c97afd6c7f6c6cfc5"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_19_000100_add_account_profile_candidate_discovery_indexes",
+            "path": "database/migrations/tenants/2026_07_19_000100_add_account_profile_candidate_discovery_indexes.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "39ad9092195fc98f1062bcfa26b54edc70105a1c0d0098992885cf84fdcce45c",
+            "target_sha256": "39ad9092195fc98f1062bcfa26b54edc70105a1c0d0098992885cf84fdcce45c"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_20_000300_add_account_profile_public_name_index",
+            "path": "database/migrations/tenants/2026_07_20_000300_add_account_profile_public_name_index.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "0c76ab1a462a007c590f4dd4203149ce01d06fb6e8a57b84c720f9cb667d142d",
+            "target_sha256": "0c76ab1a462a007c590f4dd4203149ce01d06fb6e8a57b84c720f9cb667d142d"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_20_000400_create_account_profile_nested_public_member_projection_indexes",
+            "path": "database/migrations/tenants/2026_07_20_000400_create_account_profile_nested_public_member_projection_indexes.php",
+            "status": "retired-applied-tombstone",
+            "classification": "retired-applied-tombstone",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "historical_source_sha256": "c4b683d363b1be515b7de779df768fbc92561d6866fe36519d6f1e63591a126e",
+            "executed_or_equivalent_sha256": "c4b683d363b1be515b7de779df768fbc92561d6866fe36519d6f1e63591a126e",
+            "target_sha256": "de587631f5dcd4114d485b27bbfe2e98aaf25ce678a615867267795f0c64b2ad"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_20_000500_rebuild_account_profile_public_name_index_as_partial",
+            "path": "database/migrations/tenants/2026_07_20_000500_rebuild_account_profile_public_name_index_as_partial.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "fba5dc95f789eb8ec4d9c89a22ac49d65731573c2712bb3903a17897565834ed",
+            "target_sha256": "fba5dc95f789eb8ec4d9c89a22ac49d65731573c2712bb3903a17897565834ed"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_21_000100_rebuild_contact_source_candidate_index_for_name_search",
+            "path": "database/migrations/tenants/2026_07_21_000100_rebuild_contact_source_candidate_index_for_name_search.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "022e8e171600905ba325a6cf08ae5bf1c9c54e1c59065535654f777fc2b3c83d",
+            "target_sha256": "022e8e171600905ba325a6cf08ae5bf1c9c54e1c59065535654f777fc2b3c83d"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_21_000200_add_account_profile_outbox_and_lifecycle_indexes",
+            "path": "database/migrations/tenants/2026_07_21_000200_add_account_profile_outbox_and_lifecycle_indexes.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "32980a94ecee3f0dcf9c8c610ae2383da8597f3cfaf19745765f400d7e877e2f",
+            "target_sha256": "32980a94ecee3f0dcf9c8c610ae2383da8597f3cfaf19745765f400d7e877e2f"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_21_000500_create_account_profile_nested_group_member_indexes",
+            "path": "database/migrations/tenants/2026_07_21_000500_create_account_profile_nested_group_member_indexes.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "329f5f764c74743f8ff882bb1aa546fb67f2e6a188ed60e483848a57bbda1b2d",
+            "target_sha256": "329f5f764c74743f8ff882bb1aa546fb67f2e6a188ed60e483848a57bbda1b2d"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_21_000800_create_event_profile_group_members_collection",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_07_21_000800_create_event_profile_group_members_collection.php",
+            "status": "retired-applied-tombstone",
+            "classification": "retired-applied-tombstone",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "historical_source_sha256": "ed13de60bdf6a870c2b8434439795c8acfa19b72f068717ddffa8b8b8f7645b3",
+            "executed_or_equivalent_sha256": "ed13de60bdf6a870c2b8434439795c8acfa19b72f068717ddffa8b8b8f7645b3",
+            "target_sha256": "de587631f5dcd4114d485b27bbfe2e98aaf25ce678a615867267795f0c64b2ad"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_07_22_000100_drop_legacy_event_occurrence_index",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_07_22_000100_drop_legacy_event_occurrence_index.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "00d9bc448cd4a9998488579c57239c4ce2e7f4f64cf649b0c1994267557fa3cb",
+            "target_sha256": "00d9bc448cd4a9998488579c57239c4ce2e7f4f64cf649b0c1994267557fa3cb"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_08_15_000100_backfill_account_publication_status",
+            "path": "database/migrations/tenants/2026_08_15_000100_backfill_account_publication_status.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "d14c243f01f62bd931711cf0c28e767c7422b137c8694de9207ceb8e2cbe507e",
+            "target_sha256": "d14c243f01f62bd931711cf0c28e767c7422b137c8694de9207ceb8e2cbe507e"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_08_26_000050_canonicalize_historical_event_nested_groups",
+            "path": "database/migrations/tenants/2026_08_26_000050_canonicalize_historical_event_nested_groups.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "c145af1f4bca0188703b4dd39ee0a53d2d69e9f1e6cc67839b014025952bd70e",
+            "target_sha256": "c145af1f4bca0188703b4dd39ee0a53d2d69e9f1e6cc67839b014025952bd70e"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_08_26_000100_remove_nested_group_label_copies",
+            "path": "database/migrations/tenants/2026_08_26_000100_remove_nested_group_label_copies.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "a0eb2a9692ed93a2aab18163cb8302aea2385b381585d7edfdfb164a8ca6ae0a",
+            "target_sha256": "a0eb2a9692ed93a2aab18163cb8302aea2385b381585d7edfdfb164a8ca6ae0a"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_02_000100_add_external_links_profile_type_capability",
+            "path": "database/migrations/tenants/2026_09_02_000100_add_external_links_profile_type_capability.php",
+            "status": "active",
+            "classification": "legacy-runtime-derived",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "eebc1bf68f6c405632829605434b20ad6ca0d0506147d7ef7296fdb7f226e960",
+            "target_sha256": "eebc1bf68f6c405632829605434b20ad6ca0d0506147d7ef7296fdb7f226e960"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_04_000100_add_account_profile_semantic_search_indexes",
+            "path": "database/migrations/tenants/2026_09_04_000100_add_account_profile_semantic_search_indexes.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "b6f181994dcb7d76d0bb408bb286122b8b91f5081785c5b5860b44ac7199dac7",
+            "target_sha256": "b6f181994dcb7d76d0bb408bb286122b8b91f5081785c5b5860b44ac7199dac7"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_06_000100_add_tenant_admin_account_profile_list_indexes",
+            "path": "database/migrations/tenants/2026_09_06_000100_add_tenant_admin_account_profile_list_indexes.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "57f0fc107b3bc333c76903c2ca8ce693ac14227457aa9582bc25ce1ab85b542f",
+            "target_sha256": "57f0fc107b3bc333c76903c2ca8ce693ac14227457aa9582bc25ce1ab85b542f"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_07_000100_add_event_account_profile_candidate_browse_index",
+            "path": "database/migrations/tenants/2026_09_07_000100_add_event_account_profile_candidate_browse_index.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "046e75aac09edfd8bb098247f6768f4946147cc6e5ea060c6bc56e12cb665667",
+            "target_sha256": "046e75aac09edfd8bb098247f6768f4946147cc6e5ea060c6bc56e12cb665667"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_08_000100_remove_account_profile_content_field",
+            "path": "database/migrations/tenants/2026_09_08_000100_remove_account_profile_content_field.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "af4a6b840bc23433bb8c6e07c583d31265e03d403073560ccc6eeb278a9198de",
+            "target_sha256": "af4a6b840bc23433bb8c6e07c583d31265e03d403073560ccc6eeb278a9198de"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_10_000100_drop_legacy_tenant_password_reset_tokens_collection",
+            "path": "database/migrations/tenants/2026_09_10_000100_drop_legacy_tenant_password_reset_tokens_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "6b4d50bddc149797046df0ecc2ec8c11599a389548df7280be8987d252b35569",
+            "target_sha256": "30ed003b0cd061b26087657da367148bba9ddedbf530934427b23762d5aa8298",
+            "preflight_id": "tenant.password_reset_tokens.empty_v1"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_10_000200_reconcile_events_collection_indexes",
+            "path": "packages/belluga/belluga_events/database/migrations/2026_09_10_000200_reconcile_events_collection_indexes.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "3c6075049418793c0669c8091ebb85d75b0e48609346dcbf79a4dd18b0e61a2a",
+            "target_sha256": "12f3f0a4e366f3b8f88dfddcdaef5531cbbc9e442960d8c837fd4fe602a942fe",
+            "preflight_id": "tenant.events.index_conflicts_v1"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_10_000300_reconcile_invite_receiver_profile_indexes",
+            "path": "packages/belluga/belluga_invites/database/migrations/2026_09_10_000300_reconcile_invite_receiver_profile_indexes.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "31eb08f7d52d4a6d01053ed2a92080b12faeeea3273ab2e69de3bdc85d16d6cd",
+            "target_sha256": "827955cd88769bb858637837898a7f18296a2affe3e54f49ebca46866754e482",
+            "preflight_id": "tenant.invite_edges.receiver_profile_unique_v1"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_10_000400_drop_retired_nested_profile_delete_index",
+            "path": "database/migrations/tenants/2026_09_10_000400_drop_retired_nested_profile_delete_index.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "f806c044825fb4449615bf596ccb523fa4dcd222f409a93f090d1af3ff19eb60",
+            "target_sha256": "69b8873e8517137d054c5898f73ec05714b70268769426b92e4650d42ee54f80",
+            "preflight_id": "tenant.account_profiles.nested_delete_retirement_v1"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_10_000450_create_account_profile_command_receipts_collection",
+            "path": "database/migrations/tenants/2026_09_10_000450_create_account_profile_command_receipts_collection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
+            "executed_or_equivalent_sha256": "35095507fcc9a268ba3cae1301d3f028b409927f98f749bf1268cf35cae4a9da",
+            "target_sha256": "cb1ab16d4c9a795a205f397d6d5b11f34af7903bd17619b0577a497ed7d1e848",
+            "preflight_id": "tenant.account_profile_command_receipts.compatible_v1"
+        }
+    ]
+}
