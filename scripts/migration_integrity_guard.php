@@ -164,6 +164,15 @@ final class MigrationIntegrityGuard
                     $this->fail("$key missing $field");
                 }
             }
+            if (! in_array($row['status'] ?? null, ['active', 'retired-applied-tombstone'], true)) {
+                $this->fail("bad status $key");
+            }
+            if (! preg_match('/^[0-9a-f]{40}$/', (string) ($row['provenance_commit'] ?? ''))) {
+                $this->fail("bad provenance_commit $key");
+            }
+            if (! preg_match('/^[0-9a-f]{64}$/', (string) ($row['executed_or_equivalent_sha256'] ?? ''))) {
+                $this->fail("bad executed_or_equivalent_sha256 $key");
+            }
             if (($row['path'] ?? null) !== $migration['path']) {
                 $this->fail("path drift $key");
             }

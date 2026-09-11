@@ -122,7 +122,7 @@ final class MigrationSchemaConvergenceTest extends TestCase
                 ],
             ],
             'nominal_delta' => [
-                'tenant_indexes' => 'frozen 292 - actual 291 = 1',
+                'tenant_indexes' => 'frozen 291 - actual 291 = 0',
                 'production_initial_has_content_index' => true,
                 'after_current_tail_has_content_index' => in_array('idx_account_profile_types_capability_has_content_v1', $this->indexNames($productionTenant, 'account_profile_types'), true),
                 'production_command_receipts_indexes' => $this->indexNames($productionTenant, 'account_profile_command_receipts'),

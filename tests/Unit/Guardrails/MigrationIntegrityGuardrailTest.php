@@ -101,6 +101,36 @@ final class MigrationIntegrityGuardrailTest extends TestCase
         }
     }
 
+    public function test_new_lock_rows_reject_invalid_status_and_digest_provenance_shapes(): void
+    {
+        $cases = [
+            ['status', 'unexpected', 'bad status'],
+            ['provenance_commit', 'not-a-commit', 'bad provenance_commit'],
+            ['executed_or_equivalent_sha256', 'not-a-sha256', 'bad executed_or_equivalent_sha256'],
+        ];
+
+        foreach ($cases as [$field, $value, $diagnostic]) {
+            $root = $this->fixture();
+            try {
+                $base = $this->git($root, 'rev-parse HEAD');
+                $path = 'database/migrations/tenants/2026_01_02_000001_append.php';
+                file_put_contents($root.'/'.$path, '<?php');
+                $lock = $this->lockFor($root);
+                $row = $this->row('tenant', basename($path, '.php'), $path, $root);
+                $row[$field] = $value;
+                $lock['migrations'][] = $row;
+                file_put_contents($root.'/database/migration-integrity-lock.json', json_encode($lock, JSON_PRETTY_PRINT));
+
+                $result = $this->runFixtureGuard($root, $base);
+
+                self::assertSame(1, $result['status'], $result['output']);
+                self::assertStringContainsString($diagnostic, $result['output']);
+            } finally {
+                $this->removeFixture($root);
+            }
+        }
+    }
+
     public function test_duplicate_tenant_basename_across_two_configured_paths_is_explicit(): void
     {
         $root = $this->fixture(true);
