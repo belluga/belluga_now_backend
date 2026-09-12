@@ -9316,6 +9316,52 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertNotSame((string) $excluded->_id, (string) ($response->json('data.0.id') ?? ''));
     }
 
+    public function test_home_favorites_pin_candidates_include_only_tenant_owned_published_public_profiles(): void
+    {
+        Sanctum::actingAs(LandlordUser::query()->firstOrFail(), ['account-users:view']);
+
+        $eligibleAccount = Account::query()->create([
+            'name' => 'Eligible pin account',
+            'document' => 'ELIGIBLE-PIN-'.uniqid('', true),
+            'ownership_state' => 'tenant_owned',
+            'publication' => ['status' => 'published', 'publish_at' => null],
+        ]);
+        $eligible = AccountProfile::query()->create([
+            'account_id' => (string) $eligibleAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Eligible Pin Candidate',
+            'slug' => 'eligible-pin-candidate',
+            'visibility' => 'public',
+            'is_active' => true,
+            'name_search_key' => 'eligible pin candidate',
+            'search_terms' => ['eligible', 'pin', 'candidate'],
+        ]);
+        $unmanaged = $this->createNestedProfileFixture(
+            'Unmanaged Pin Candidate',
+            'unmanaged-pin-candidate',
+            ['name_search_key' => 'unmanaged pin candidate'],
+        );
+
+        $response = null;
+        $trace = $this->captureMongoCommands(function () use (&$response): void {
+            $response = $this->getJson(
+                "{$this->base_tenant_api_admin}account_profiles/candidates?scope=home_favorites_pinned_profile&search=pin",
+                $this->getHeaders(),
+            );
+        });
+
+        $response->assertOk();
+        $ids = collect($response->json('data'))->pluck('id')->all();
+        $this->assertContains((string) $eligible->_id, $ids);
+        $this->assertNotContains((string) $unmanaged->_id, $ids);
+        $this->assertCount(
+            1,
+            $trace->aggregatePipelinesForCollection('account_profiles'),
+        );
+        $this->assertSame(0, $trace->countForCollection('accounts', 'find'));
+        $this->assertSame(0, $trace->countForCollection('account_users', 'find'));
+    }
+
     /**
      * @param  array<string, mixed>  $overrides
      */

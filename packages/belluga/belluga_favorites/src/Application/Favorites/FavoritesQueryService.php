@@ -17,7 +17,7 @@ class FavoritesQueryService
     ) {}
 
     /**
-     * @return array{items: array<int, array<string, mixed>>, has_more: bool}
+     * @return array{items: array<int, array<string, mixed>>, has_more: bool, pinned: array<string, mixed>|null}
      */
     public function listForOwner(
         string $ownerUserId,
@@ -39,6 +39,7 @@ class FavoritesQueryService
             return [
                 'items' => [],
                 'has_more' => false,
+                'pinned' => null,
             ];
         }
 
@@ -48,16 +49,24 @@ class FavoritesQueryService
         }
 
         if ($definition->registryKey === 'account_profile' && $effectiveTargetType === 'account_profile') {
-            return $this->accountProfileDirectReadService->listForOwner(
+            $result = $this->accountProfileDirectReadService->listForOwner(
                 ownerUserId: $ownerUserId,
                 page: $resolvedPage,
                 pageSize: $resolvedPageSize,
             );
+
+            return [
+                ...$result,
+                'pinned' => $resolvedPage === 1
+                    ? $this->accountProfileDirectReadService->pinnedProfile()
+                    : null,
+            ];
         }
 
         return [
             'items' => [],
             'has_more' => false,
+            'pinned' => null,
         ];
     }
 }

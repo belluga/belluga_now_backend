@@ -18,7 +18,8 @@ Host route file: `routes/api/packages/project_tenant_public_api_v1/favorites.php
 Middleware owned by the host: `auth:sanctum` + `CheckTenantAccess`
 
 Endpoints:
-- `GET /favorites` returns `{ items: [], has_more: false }` only when there is no authenticated user context.
+- `GET /favorites` returns `{ pinned: null, items: [], has_more: false }` only when there is no authenticated user context.
+- On page 1, the host may project one eligible tenant-owned Account Profile in `pinned`; it is separate from favorite edges and is `null` on continuation pages.
 - For `registry_key=account_profile` / `target_type=account_profile`, the current read path is bounded direct-read and no longer depends on `favoritable_account_profile_snapshots`.
 - Current account-profile `/favorites` paging is bounded to `page_size <= 10`.
 - `POST /favorites` creates or refreshes a favorite edge.
@@ -51,6 +52,7 @@ Collections:
 
 Key invariants:
 - favorite edges are unique by owner, registry, target type, and target id.
+- the optional `pinned` projection never creates, removes, reorders, or deduplicates favorite edges.
 - account-profile favorites ordering/navigation now comes from bounded direct reads over favorite edges, active account profiles, and canonical event-occurrence associations.
 - runtime favorites services no longer read, rebuild, or route through snapshot builders for the current account-profile contract.
 

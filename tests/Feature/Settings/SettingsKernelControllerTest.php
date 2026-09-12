@@ -11,8 +11,10 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantEnvironmentSnapshot;
+use App\Models\Tenants\TenantProfileType;
 use Belluga\Settings\Contracts\SettingsRegistryContract;
 use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Belluga\Settings\Models\Tenants\TenantSettings;
@@ -207,6 +209,103 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertContains('discovery_filters', $namespaces);
         $this->assertContains('app_links', $namespaces);
         $this->assertContains('resend_email', $namespaces);
+        $this->assertContains('home_favorites_pinned_profile', $namespaces);
+    }
+
+    public function test_home_favorites_pin_has_an_atomic_type_scoped_read_and_write_contract(): void
+    {
+        TenantProfileType::query()->updateOrCreate(['type' => 'venue'], [
+            'label' => 'Venue',
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+            ],
+        ]);
+        $tenantOwnedAccount = Account::query()->create([
+            'name' => 'Tenant-owned pin account',
+            'document' => 'PIN-'.uniqid('', true),
+            'ownership_state' => 'tenant_owned',
+            'publication' => ['status' => 'published', 'publish_at' => null],
+        ]);
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $tenantOwnedAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Pinned Venue',
+            'slug' => 'pinned-venue',
+            'visibility' => 'public',
+            'is_active' => true,
+        ]);
+        $endpoint = "{$this->base_tenant_api_admin}settings/values/home_favorites_pinned_profile";
+
+        $this->getJson($endpoint)->assertOk()->assertExactJson([
+            'data' => [
+                'setting_type' => 'home_favorites_pinned_profile',
+                'value' => ['account_profile_id' => null],
+                'availability' => 'unset',
+                'selected_profile' => null,
+            ],
+        ]);
+
+        $this->patchJson($endpoint, ['account_profile_id' => (string) $profile->_id])
+            ->assertOk()
+            ->assertJsonPath('data.availability', 'available')
+            ->assertJsonPath('data.selected_profile.id', (string) $profile->_id)
+            ->assertJsonPath('data.selected_profile.display_name', 'Pinned Venue');
+
+        $this->patchJson($endpoint, [])->assertUnprocessable();
+        $this->patchJson($endpoint, [
+            'account_profile_id' => (string) $profile->_id,
+            'events' => [],
+        ])->assertUnprocessable();
+        $this->assertSame(3, (int) data_get(TenantSettings::current()?->events, 'default_duration_hours'));
+
+        $this->patchJson($endpoint, ['account_profile_id' => null])
+            ->assertOk()
+            ->assertJsonPath('data.availability', 'unset')
+            ->assertJsonPath('data.value.account_profile_id', null);
+    }
+
+    public function test_home_favorites_pin_rejects_ineligible_profile_and_exposes_stale_value_as_unavailable(): void
+    {
+        TenantProfileType::query()->updateOrCreate(['type' => 'venue'], [
+            'label' => 'Venue',
+            'capabilities' => [
+                'is_queryable' => true,
+                'is_publicly_navigable' => true,
+                'is_publicly_discoverable' => true,
+            ],
+        ]);
+        $unmanagedAccount = Account::query()->create([
+            'name' => 'Unmanaged pin account',
+            'document' => 'PIN-UNMANAGED-'.uniqid('', true),
+            'ownership_state' => 'unmanaged',
+            'publication' => ['status' => 'published', 'publish_at' => null],
+        ]);
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $unmanagedAccount->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Unavailable Venue',
+            'slug' => 'unavailable-venue',
+            'visibility' => 'public',
+            'is_active' => true,
+        ]);
+        $endpoint = "{$this->base_tenant_api_admin}settings/values/home_favorites_pinned_profile";
+
+        $this->patchJson($endpoint, ['account_profile_id' => (string) $profile->_id])
+            ->assertUnprocessable();
+
+        $settings = TenantSettings::current();
+        $settings?->setAttribute('home_favorites_pinned_profile', [
+            'account_profile_id' => (string) $profile->_id,
+        ]);
+        $settings?->save();
+
+        $this->getJson($endpoint)
+            ->assertOk()
+            ->assertJsonPath('data.value.account_profile_id', (string) $profile->_id)
+            ->assertJsonPath('data.availability', 'unavailable')
+            ->assertJsonPath('data.selected_profile', null);
     }
 
     public function test_settings_values_endpoint_returns_namespace_values(): void
@@ -1162,6 +1261,7 @@ class SettingsKernelControllerTest extends TestCaseTenant
             'push-settings:update',
             'telemetry-settings:update',
             'tenant-public-auth-settings:update',
+            'tenant-branding:update',
         ];
     }
 

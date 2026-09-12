@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace App\Integration\Favorites;
 
-use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\AccountProfiles\AccountProfilePublicCatalogEligibilityPolicy;
 use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
+use App\Application\AccountProfiles\HomeFavoritesPinnedProfileService;
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Models\Tenants\AccountProfile;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Favorites\Contracts\AccountProfileFavoriteDirectReadContract;
@@ -24,7 +25,33 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
     public function __construct(
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly AccountPublicationStateService $accountPublicationStateService,
+        private readonly HomeFavoritesPinnedProfileService $pinnedProfileService,
     ) {}
+
+    /** @return array<string, mixed>|null */
+    public function pinnedProfile(): ?array
+    {
+        $profileId = $this->pinnedProfileService->storedProfileId();
+        if ($profileId === null) {
+            return null;
+        }
+
+        $profile = $this->pinnedProfileService->findEligibleProfile($profileId);
+        if (! $profile instanceof AccountProfile) {
+            return null;
+        }
+
+        $state = $this->loadLiveAndNextOccurrenceStates([$profileId])[$profileId] ?? [];
+        $last = $this->loadLastOccurrenceStates([$profileId])[$profileId] ?? null;
+
+        return $this->buildPreviewPayload(
+            profile: $profile,
+            publicCatalogPolicy: $this->publicCatalogSnapshotReader->catalogSnapshot()->policy(),
+            liveNowOccurrence: $state['live_now'] ?? null,
+            nextOccurrence: $state['next'] ?? null,
+            lastOccurrence: $last,
+        );
+    }
 
     /**
      * @return array{items: array<int, array<string, mixed>>, has_more: bool}
@@ -409,10 +436,45 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
         ?EventOccurrence $lastOccurrence,
     ): array {
         $profileId = (string) $profile->getAttribute('_id');
+        $liveNowOccurrenceAt = $liveNowOccurrence?->starts_at;
+        $nextOccurrenceAt = $nextOccurrence?->starts_at;
+
+        $sortBlock = $liveNowOccurrenceAt instanceof \DateTimeInterface
+            ? 0
+            : ($nextOccurrenceAt instanceof \DateTimeInterface ? 1 : 2);
+
+        return [
+            'profile_id' => $profileId,
+            'favorite_id' => (string) $edge->getAttribute('_id'),
+            'favorited_at' => $edge->favorited_at,
+            'sort_block' => $sortBlock,
+            'sort_upcoming_occurrence_at' => $sortBlock === 1 ? $nextOccurrenceAt : null,
+            'payload' => $this->buildPreviewPayload(
+                profile: $profile,
+                publicCatalogPolicy: $publicCatalogPolicy,
+                liveNowOccurrence: $liveNowOccurrence,
+                nextOccurrence: $nextOccurrence,
+                lastOccurrence: $lastOccurrence,
+                favoriteId: (string) $edge->getAttribute('_id'),
+                favoritedAt: $edge->favorited_at,
+            ),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function buildPreviewPayload(
+        AccountProfile $profile,
+        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
+        ?EventOccurrence $liveNowOccurrence,
+        ?EventOccurrence $nextOccurrence,
+        ?EventOccurrence $lastOccurrence,
+        ?string $favoriteId = null,
+        mixed $favoritedAt = null,
+    ): array {
+        $profileId = (string) $profile->getAttribute('_id');
         $profileSlug = trim((string) ($profile->slug ?? ''));
         $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile);
         $publicDetailPath = $canOpenPublicDetail ? '/parceiro/'.$profileSlug : null;
-
         $liveNowOccurrenceId = $liveNowOccurrence ? (string) $liveNowOccurrence->getAttribute('_id') : null;
         $liveNowOccurrenceAt = $liveNowOccurrence?->starts_at;
         $nextOccurrenceId = $nextOccurrence ? (string) $nextOccurrence->getAttribute('_id') : null;
@@ -425,56 +487,49 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
         $eventTargetSlug = $eventNavigationOccurrence?->slug
             ? trim((string) $eventNavigationOccurrence->slug)
             : null;
-        $eventTargetPath = $this->buildEventTargetPath(
-            $eventTargetSlug,
-            $eventTargetOccurrenceId,
-        );
+        $eventTargetPath = $this->buildEventTargetPath($eventTargetSlug, $eventTargetOccurrenceId);
 
-        $sortBlock = $liveNowOccurrenceAt instanceof \DateTimeInterface
-            ? 0
-            : ($nextOccurrenceAt instanceof \DateTimeInterface ? 1 : 2);
-
-        return [
-            'profile_id' => $profileId,
-            'favorite_id' => (string) $edge->getAttribute('_id'),
-            'favorited_at' => $edge->favorited_at,
-            'sort_block' => $sortBlock,
-            'sort_upcoming_occurrence_at' => $sortBlock === 1 ? $nextOccurrenceAt : null,
-            'payload' => [
-                'favorite_id' => (string) $edge->getAttribute('_id'),
-                'registry_key' => 'account_profile',
-                'target_type' => 'account_profile',
-                'target_id' => $profileId,
-                'favorited_at' => $this->formatDate($edge->favorited_at),
-                'target' => [
-                    'id' => $profileId,
-                    'slug' => $profileSlug,
-                    'display_name' => (string) ($profile->display_name ?? ''),
-                    'avatar_url' => $profile->avatar_url ?? null,
-                    'cover_url' => $profile->cover_url ?? null,
-                    'profile_type' => $profile->profile_type ? (string) $profile->profile_type : null,
-                    'can_open_public_detail' => $canOpenPublicDetail,
-                    'public_detail_path' => $publicDetailPath,
-                ],
-                'occurrence_state' => [
-                    'live_now_event_occurrence_id' => $liveNowOccurrenceId,
-                    'live_now_event_occurrence_at' => $this->formatDate($liveNowOccurrenceAt),
-                    'next_event_occurrence_id' => $nextOccurrenceId,
-                    'next_event_occurrence_at' => $this->formatDate($nextOccurrenceAt),
-                    'last_event_occurrence_at' => $this->formatDate($lastOccurrenceAt),
-                ],
-                'navigation' => [
-                    'kind' => $eventTargetPath !== null ? 'event' : 'account_profile',
-                    'target_slug' => $eventTargetPath !== null ? $eventTargetSlug : $profileSlug,
-                    'target_path' => $eventTargetPath ?? $publicDetailPath,
-                    'profile_target_path' => $publicDetailPath,
-                    'event_target_path' => $eventTargetPath,
-                    'event_target_slug' => $eventTargetSlug,
-                    'event_occurrence_id' => $eventTargetOccurrenceId,
-                    'can_open_public_detail' => $canOpenPublicDetail,
-                ],
+        $payload = [
+            'registry_key' => 'account_profile',
+            'target_type' => 'account_profile',
+            'target_id' => $profileId,
+            'target' => [
+                'id' => $profileId,
+                'slug' => $profileSlug,
+                'display_name' => (string) ($profile->display_name ?? ''),
+                'avatar_url' => $profile->avatar_url ?? null,
+                'cover_url' => $profile->cover_url ?? null,
+                'profile_type' => $profile->profile_type ? (string) $profile->profile_type : null,
+                'can_open_public_detail' => $canOpenPublicDetail,
+                'public_detail_path' => $publicDetailPath,
+            ],
+            'occurrence_state' => [
+                'live_now_event_occurrence_id' => $liveNowOccurrenceId,
+                'live_now_event_occurrence_at' => $this->formatDate($liveNowOccurrenceAt),
+                'next_event_occurrence_id' => $nextOccurrenceId,
+                'next_event_occurrence_at' => $this->formatDate($nextOccurrenceAt),
+                'last_event_occurrence_at' => $this->formatDate($lastOccurrenceAt),
+            ],
+            'navigation' => [
+                'kind' => $eventTargetPath !== null ? 'event' : 'account_profile',
+                'target_slug' => $eventTargetPath !== null ? $eventTargetSlug : $profileSlug,
+                'target_path' => $eventTargetPath ?? $publicDetailPath,
+                'profile_target_path' => $publicDetailPath,
+                'event_target_path' => $eventTargetPath,
+                'event_target_slug' => $eventTargetSlug,
+                'event_occurrence_id' => $eventTargetOccurrenceId,
+                'can_open_public_detail' => $canOpenPublicDetail,
             ],
         ];
+        if ($favoriteId !== null) {
+            $payload = [
+                'favorite_id' => $favoriteId,
+                ...$payload,
+                'favorited_at' => $this->formatDate($favoritedAt),
+            ];
+        }
+
+        return $payload;
     }
 
     /**

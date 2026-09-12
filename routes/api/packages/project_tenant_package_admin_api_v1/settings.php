@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Api\v1\Controllers\HomeFavoritesPinnedProfileSettingsController;
 use App\Http\Api\v1\Controllers\PhoneOtpReviewAccessHashController;
 use App\Http\Api\v1\Controllers\TenantTelemetrySettingsController;
 use App\Http\Middleware\CheckTenantAccess;
@@ -16,6 +17,8 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
             ->group(function (): void {
                 Route::get('/schema', [SettingsKernelController::class, 'schema']);
                 Route::get('/values', [SettingsKernelController::class, 'values']);
+                Route::get('/values/home_favorites_pinned_profile', [HomeFavoritesPinnedProfileSettingsController::class, 'show']);
+                Route::patch('/values/home_favorites_pinned_profile', [HomeFavoritesPinnedProfileSettingsController::class, 'update']);
                 Route::patch('/values/{namespace}', [SettingsKernelController::class, 'patch']);
                 Route::post('/values/phone_otp_review_access/hash', PhoneOtpReviewAccessHashController::class)
                     ->middleware('abilities:tenant-public-auth-settings:update');
