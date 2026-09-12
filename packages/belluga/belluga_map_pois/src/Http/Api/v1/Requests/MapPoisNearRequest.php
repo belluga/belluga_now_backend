@@ -6,6 +6,7 @@ namespace Belluga\MapPois\Http\Api\v1\Requests;
 
 use Belluga\MapPois\Support\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class MapPoisNearRequest extends FormRequest
 {
@@ -23,6 +24,13 @@ class MapPoisNearRequest extends FormRequest
             'origin_lat' => 'required|numeric|between:-90,90',
             'origin_lng' => 'required|numeric|between:-180,180',
             'max_distance_meters' => 'sometimes|numeric|min:0',
+            'source' => [
+                'sometimes',
+                'string',
+                Rule::in(['event', 'account_profile', 'account', 'static', 'static_asset', 'asset']),
+            ],
+            'types' => 'sometimes|array|max:'.InputConstraints::METADATA_MAX_ITEMS,
+            'types.*' => 'string|max:'.InputConstraints::NAME_MAX,
             'categories' => 'sometimes|array|max:'.InputConstraints::METADATA_MAX_ITEMS,
             'categories.*' => 'string|max:'.InputConstraints::NAME_MAX,
             'tags' => 'sometimes|array|max:'.InputConstraints::METADATA_MAX_ITEMS,

@@ -9,6 +9,7 @@ use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Environment\TenantEnvironmentPayloadFactory;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\Telemetry\TelemetrySettingsKernelBridge;
+use App\Integration\DiscoveryFilters\DiscoveryFiltersSettingsPatchGuard;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantEnvironmentSnapshot;
@@ -184,7 +185,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
         app()->instance(
             TenantEnvironmentPayloadFactory::class,
-            new class(app(TelemetrySettingsKernelBridge::class), app(TenantPublicAuthMethodResolver::class), app(PushSettingsKernelBridge::class), app(AccountProfileRegistryService::class), app(BrandingManifestService::class), app(BrandingPublicWebMediaService::class)) extends TenantEnvironmentPayloadFactory
+            new class(app(TelemetrySettingsKernelBridge::class), app(TenantPublicAuthMethodResolver::class), app(PushSettingsKernelBridge::class), app(AccountProfileRegistryService::class), app(BrandingManifestService::class), app(BrandingPublicWebMediaService::class), app(DiscoveryFiltersSettingsPatchGuard::class)) extends TenantEnvironmentPayloadFactory
             {
                 public function buildSnapshotSource(Tenant $tenant): array
                 {
@@ -823,12 +824,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertJsonPath('settings.map_ui.default_origin.lat', -20.671339);
         $response->assertJsonPath('settings.map_ui.default_origin.lng', -40.495395);
         $response->assertJsonPath('settings.map_ui.default_origin.label', 'Praia do Morro');
-        $response->assertJsonPath('settings.map_ui.filters.0.key', 'event');
-        $response->assertJsonPath('settings.map_ui.filters.0.label', 'Eventos');
-        $response->assertJsonPath(
-            'settings.map_ui.filters.0.image_uri',
-            'https://tenant-alpha.test/storage/map-filters/event.png'
-        );
+        $response->assertJsonCount(0, 'settings.map_ui.filters');
     }
 
     public function test_environment_api_exposes_canonical_public_map_filters_over_legacy_map_ui_filters(): void
@@ -893,6 +889,50 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $response->assertJsonPath('settings.map_ui.filters.0.marker_override.color', '#0F766E');
         $response->assertJsonPath('settings.map_ui.filters.0.query.source', 'account_profile');
         $response->assertJsonPath('settings.map_ui.filters.0.query.types.0', 'restaurant');
+    }
+
+    public function test_environment_api_omits_invalid_public_map_rules_and_never_falls_back_to_legacy_filters(): void
+    {
+        $tenant = $this->currentTenant();
+        $tenant->makeCurrent();
+
+        AppTenantSettings::query()->delete();
+        AppTenantSettings::create([
+            'map_ui' => [
+                'filters' => [['key' => 'legacy', 'label' => 'Legacy']],
+            ],
+            'discovery_filters' => [
+                'surfaces' => [
+                    'public_map.primary' => [
+                        'filters' => [
+                            [
+                                'key' => 'invalid',
+                                'label' => 'Inválido',
+                                'query' => [
+                                    'entities' => ['event', 'account_profile'],
+                                    'types_by_entity' => [],
+                                ],
+                            ],
+                            [
+                                'key' => 'events',
+                                'label' => 'Eventos',
+                                'query' => [
+                                    'entities' => ['event'],
+                                    'types_by_entity' => ['event' => ['show']],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $response = $this->get("{$this->base_api_tenant}environment");
+
+        $response->assertOk();
+        $response->assertJsonCount(1, 'settings.map_ui.filters');
+        $response->assertJsonPath('settings.map_ui.filters.0.key', 'events');
+        $response->assertJsonPath('settings.map_ui.filters.0.query.source', 'event');
     }
 
     public function test_environment_api_exposes_publication_app_links_from_settings(): void

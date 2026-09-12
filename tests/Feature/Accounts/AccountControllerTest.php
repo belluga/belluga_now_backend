@@ -15,6 +15,7 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\TenantProfileType;
+use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
@@ -491,8 +492,21 @@ class AccountControllerTest extends TestCase
 
     public function test_update_accepts_publication_transition_to_published(): void
     {
-        [$account] = $this->createDraftPersonalAccountAggregate();
+        [$account, $profile] = $this->createDraftPersonalAccountAggregate();
         $accountSlug = (string) $account->slug;
+
+        $profile->fill([
+            'profile_type' => 'venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.498383, -20.673067],
+            ],
+            'is_active' => true,
+        ]);
+        $profile->save();
+        $this->app->make(MapPoiProjectionService::class)->upsertFromAccountProfile(
+            $profile->fresh()
+        );
 
         $response = $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
             'publication' => [
@@ -512,12 +526,30 @@ class AccountControllerTest extends TestCase
             AccountPublicationStateService::PUBLISHED,
             data_get($updated->getAttribute('publication'), 'status'),
         );
+        $projected = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', (string) $profile->_id)
+            ->firstOrFail();
+        $this->assertTrue((bool) $projected->is_active);
     }
 
     public function test_update_accepts_publication_transition_back_to_draft(): void
     {
-        [$account] = $this->createDraftPersonalAccountAggregate();
+        [$account, $profile] = $this->createDraftPersonalAccountAggregate();
         $accountSlug = (string) $account->slug;
+
+        $profile->fill([
+            'profile_type' => 'venue',
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.498383, -20.673067],
+            ],
+            'is_active' => true,
+        ]);
+        $profile->save();
+        $this->app->make(MapPoiProjectionService::class)->upsertFromAccountProfile(
+            $profile->fresh()
+        );
 
         $this->patchJson("{$this->tenantAccountsAdminUrl}/{$accountSlug}", [
             'publication' => [
@@ -544,6 +576,11 @@ class AccountControllerTest extends TestCase
             data_get($updated->getAttribute('publication'), 'status'),
         );
         $this->assertNull(data_get($updated->getAttribute('publication'), 'publish_at'));
+        $projected = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', (string) $profile->_id)
+            ->firstOrFail();
+        $this->assertFalse((bool) $projected->is_active);
     }
 
     public function test_update_rejects_publish_scheduled_account_publication_status(): void

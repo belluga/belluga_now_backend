@@ -71,7 +71,11 @@ class MapPoiProjectionService
         );
     }
 
-    public function upsertFromAccountProfile(object $profile, ?int $forcedCheckpoint = null): void
+    public function upsertFromAccountProfile(
+        object $profile,
+        ?int $forcedCheckpoint = null,
+        ?bool $parentAccountPublished = null,
+    ): void
     {
         if (! $profile->profile_type) {
             $this->deleteByRef('account_profile', (string) $profile->_id);
@@ -116,7 +120,9 @@ class MapPoiProjectionService
             'occurrence_facets' => [],
             'is_happening_now' => false,
             'priority' => 40,
-            'is_active' => (bool) ($profile->is_active ?? false),
+            'is_active' => (bool) ($profile->is_active ?? false)
+                && ($parentAccountPublished
+                    ?? $this->sourceReader->isParentAccountPublished($profile)),
             'active_window_start_at' => null,
             'active_window_end_at' => null,
             'time_start' => null,

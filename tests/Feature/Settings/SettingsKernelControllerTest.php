@@ -343,6 +343,68 @@ class SettingsKernelControllerTest extends TestCaseTenant
         );
     }
 
+    public function test_patch_discovery_filters_rejects_invalid_public_map_entity_shapes_atomically(): void
+    {
+        $validFilter = [
+            'key' => 'events',
+            'target' => 'map_poi',
+            'label' => 'Eventos',
+            'query' => [
+                'entities' => ['event'],
+                'types_by_entity' => ['event' => ['show']],
+            ],
+        ];
+        $validPayload = [
+            'surfaces' => [
+                'public_map.primary' => [
+                    'target' => 'map_poi',
+                    'primary_selection_mode' => 'single',
+                    'filters' => [$validFilter],
+                ],
+            ],
+        ];
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}settings/values/discovery_filters",
+            $validPayload,
+        )->assertOk();
+
+        $invalidQueries = [
+            ['entities' => [], 'types_by_entity' => []],
+            [
+                'entities' => ['event', 'account_profile'],
+                'types_by_entity' => ['event' => ['show']],
+            ],
+            ['entities' => ['unknown'], 'types_by_entity' => []],
+            [
+                'entities' => ['event'],
+                'types_by_entity' => ['account_profile' => ['restaurant']],
+            ],
+        ];
+
+        foreach ($invalidQueries as $query) {
+            $invalidFilter = $validFilter;
+            $invalidFilter['query'] = $query;
+            $response = $this->patchJson(
+                "{$this->base_tenant_api_admin}settings/values/discovery_filters",
+                ['discovery_filters.surfaces' => [
+                    'public_map.primary' => [
+                        'target' => 'map_poi',
+                        'primary_selection_mode' => 'single',
+                        'filters' => [$invalidFilter],
+                    ],
+                ]],
+            );
+
+            $response->assertUnprocessable();
+            $this->assertNotEmpty($response->json('errors'));
+
+            $stored = $this->getJson("{$this->base_tenant_api_admin}settings/values");
+            $storedSurface = $stored->json('data.discovery_filters.surfaces')['public_map.primary'] ?? [];
+            $this->assertSame('event', data_get($storedSurface, 'filters.0.query.entities.0'));
+        }
+    }
+
     public function test_patch_discovery_filters_requires_discovery_filters_ability(): void
     {
         Sanctum::actingAs(LandlordUser::query()->firstOrFail(), [

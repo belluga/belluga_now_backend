@@ -21,13 +21,13 @@ class MapPoisIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'ne_lat' => 'sometimes|numeric|between:-90,90',
-            'ne_lng' => 'sometimes|numeric|between:-180,180',
-            'sw_lat' => 'sometimes|numeric|between:-90,90',
-            'sw_lng' => 'sometimes|numeric|between:-180,180',
+            'ne_lat' => 'required|numeric|between:-90,90',
+            'ne_lng' => 'required|numeric|between:-180,180',
+            'sw_lat' => 'required|numeric|between:-90,90',
+            'sw_lng' => 'required|numeric|between:-180,180',
             'origin_lat' => 'sometimes|required_with:origin_lng|numeric|between:-90,90',
             'origin_lng' => 'sometimes|required_with:origin_lat|numeric|between:-180,180',
-            'max_distance_meters' => 'sometimes|numeric|min:0',
+            'max_distance_meters' => 'sometimes|numeric|gt:0',
             'source' => [
                 'sometimes',
                 'string',
@@ -42,11 +42,7 @@ class MapPoisIndexRequest extends FormRequest
             'taxonomy' => 'sometimes|array|max:'.InputConstraints::METADATA_MAX_ITEMS,
             'taxonomy.*' => 'string|max:'.InputConstraints::NAME_MAX,
             'search' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
-            'sort' => [
-                'sometimes',
-                'string',
-                Rule::in(['priority', 'distance', 'time_to_event']),
-            ],
+            'sort' => 'prohibited',
             'stack_key' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
         ];
     }

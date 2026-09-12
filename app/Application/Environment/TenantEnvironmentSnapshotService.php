@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 
 class TenantEnvironmentSnapshotService
 {
-    public const SCHEMA_VERSION = 3;
+    public const SCHEMA_VERSION = 4;
 
     /**
      * @var array<string, bool>
@@ -71,7 +71,9 @@ class TenantEnvironmentSnapshotService
 
                     return $this->hydrateSnapshotPayload(
                         tenant: $tenant,
-                        snapshotPayload: $this->snapshotPayload($snapshotDocument),
+                        snapshotPayload: $this->sanitizeStaleSnapshotPayload(
+                            $this->snapshotPayload($snapshotDocument)
+                        ),
                         requestRoot: $requestRoot,
                         requestHost: $requestHost,
                     );
@@ -375,6 +377,26 @@ class TenantEnvironmentSnapshotService
     private function snapshotPayload(?array $snapshotDocument): mixed
     {
         return $snapshotDocument['snapshot'] ?? [];
+    }
+
+    private function sanitizeStaleSnapshotPayload(mixed $snapshotPayload): array
+    {
+        $payload = $this->normalizeMongoValue($snapshotPayload);
+        if (! is_array($payload)) {
+            return [
+                'settings' => [
+                    'map_ui' => ['filters' => []],
+                ],
+            ];
+        }
+
+        $settings = is_array($payload['settings'] ?? null) ? $payload['settings'] : [];
+        $mapUi = is_array($settings['map_ui'] ?? null) ? $settings['map_ui'] : [];
+        $mapUi['filters'] = [];
+        $settings['map_ui'] = $mapUi;
+        $payload['settings'] = $settings;
+
+        return $payload;
     }
 
     private function snapshotBuiltAtIso(?array $snapshotDocument): ?string

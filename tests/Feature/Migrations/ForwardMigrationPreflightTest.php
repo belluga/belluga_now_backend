@@ -6,6 +6,7 @@ namespace Tests\Feature\Migrations;
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
+use MongoDB\BSON\ObjectId;
 use RuntimeException;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -349,6 +350,63 @@ final class ForwardMigrationPreflightTest extends TestCase
         }
 
         self::assertSame($before, $this->databaseState($database));
+    }
+
+    public function test_map_projection_forward_converges_activity_and_replaces_the_geo_index_idempotently(): void
+    {
+        $database = DB::connection('tenant')->getDatabase();
+        foreach (['map_pois', 'account_profiles', 'accounts'] as $collection) {
+            $database->dropCollection($collection);
+        }
+        $pois = $database->selectCollection('map_pois');
+        $profiles = $database->selectCollection('account_profiles');
+        $accounts = $database->selectCollection('accounts');
+        $pois->createIndex(['location' => '2dsphere'], ['name' => 'location_2dsphere']);
+
+        $publishedAccountId = new ObjectId();
+        $draftAccountId = new ObjectId();
+        $activePublishedProfileId = new ObjectId();
+        $activeDraftProfileId = new ObjectId();
+        $inactivePublishedProfileId = new ObjectId();
+        $accounts->insertMany([
+            ['_id' => $publishedAccountId, 'publication' => ['status' => 'published']],
+            ['_id' => $draftAccountId, 'publication' => ['status' => 'draft']],
+        ]);
+        $profiles->insertMany([
+            ['_id' => $activePublishedProfileId, 'account_id' => (string) $publishedAccountId, 'is_active' => true],
+            ['_id' => $activeDraftProfileId, 'account_id' => (string) $draftAccountId, 'is_active' => true],
+            ['_id' => $inactivePublishedProfileId, 'account_id' => (string) $publishedAccountId, 'is_active' => false],
+        ]);
+        foreach ([
+            [(string) $activePublishedProfileId, false],
+            [(string) $activeDraftProfileId, true],
+            [(string) $inactivePublishedProfileId, true],
+            [(string) new ObjectId(), true],
+        ] as [$refId, $isActive]) {
+            $pois->insertOne([
+                'ref_type' => 'account_profile',
+                'ref_id' => $refId,
+                'location' => ['type' => 'Point', 'coordinates' => [-40.0, -20.0]],
+                'is_active' => $isActive,
+            ]);
+        }
+
+        $migration = $this->migration(
+            'packages/belluga/belluga_map_pois/database/migrations/2026_09_10_000500_converge_bounded_map_read_projection.php'
+        );
+        $migration->up();
+        $migration->up();
+
+        self::assertTrue((bool) $pois->findOne(['ref_id' => (string) $activePublishedProfileId])['is_active']);
+        self::assertFalse((bool) $pois->findOne(['ref_id' => (string) $activeDraftProfileId])['is_active']);
+        self::assertFalse((bool) $pois->findOne(['ref_id' => (string) $inactivePublishedProfileId])['is_active']);
+        self::assertSame(1, $pois->countDocuments(['ref_type' => 'account_profile', 'is_active' => true]));
+        $indexes = $this->indexInfoByName($pois);
+        self::assertSame(
+            ['location' => '2dsphere', 'is_active' => 1],
+            $indexes['idx_map_pois_location_active_v1']['key'],
+        );
+        self::assertArrayNotHasKey('location_2dsphere', $indexes);
     }
 
     private function migration(string $path): Migration

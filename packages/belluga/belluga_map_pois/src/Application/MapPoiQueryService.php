@@ -6,10 +6,10 @@ namespace Belluga\MapPois\Application;
 
 use Belluga\MapPois\Application\Concerns\MapPoiQueryFormatting;
 use Belluga\MapPois\Contracts\MapPoiSettingsContract;
-use Belluga\MapPois\Contracts\MapPoiTaxonomySnapshotResolverContract;
 use Belluga\MapPois\Contracts\MapPoiTenantContextContract;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
+use Illuminate\Validation\ValidationException;
 use MongoDB\BSON\UTCDateTime;
 
 class MapPoiQueryService
@@ -17,12 +17,10 @@ class MapPoiQueryService
     use MapPoiQueryFormatting;
 
     private const EVENT_DOMINANCE_RADIUS_METERS = 50.0;
-    private const PUBLISHED_ACCOUNT_STATUS = 'published';
 
     public function __construct(
         private readonly MapPoiSettingsContract $settings,
         private readonly MapPoiTenantContextContract $tenantContext,
-        private readonly MapPoiTaxonomySnapshotResolverContract $taxonomySnapshotResolver,
     ) {}
 
     /**
@@ -31,6 +29,7 @@ class MapPoiQueryService
      */
     public function stacks(array $queryParams, ?string $timezone): array
     {
+        $queryParams = $this->normalizeViewportQuery($queryParams);
         $stackKey = trim((string) ($queryParams['stack_key'] ?? ''));
         $bounds = $this->resolveBounds($queryParams);
         $serverTime = Carbon::now()->toJSON();
@@ -43,17 +42,19 @@ class MapPoiQueryService
                 'tenant_id' => $this->resolveTenantId(),
                 'server_time' => $serverTime,
                 'bounds' => $bounds,
+                'is_partial' => false,
                 'stacks' => $stack ? [$stack] : [],
             ];
         }
 
-        $stacks = $this->resolveDominantStacks($queryParams, $timezone);
+        $scene = $this->resolveDominantStacks($queryParams, $timezone);
 
         return [
             'tenant_id' => $this->resolveTenantId(),
             'server_time' => $serverTime,
             'bounds' => $bounds,
-            'stacks' => $stacks,
+            'is_partial' => $scene['is_partial'],
+            'stacks' => $scene['stacks'],
         ];
     }
 
@@ -63,6 +64,7 @@ class MapPoiQueryService
      */
     public function near(array $queryParams, ?string $timezone): array
     {
+        $queryParams = $this->normalizeNearQuery($queryParams);
         $page = max(1, (int) ($queryParams['page'] ?? 1));
         $pageSize = (int) ($queryParams['page_size'] ?? 10);
         if ($pageSize <= 0) {
@@ -73,13 +75,7 @@ class MapPoiQueryService
         }
 
         $pipeline = $this->buildBasePipeline($queryParams, $timezone, true, true);
-        $pipeline[] = [
-            '$sort' => [
-                'distance_meters' => 1,
-                'priority' => -1,
-                'ref_id' => 1,
-            ],
-        ];
+        $pipeline[] = ['$sort' => $this->nearSort($queryParams)];
         $skip = ($page - 1) * $pageSize;
         $limit = $pageSize + 1;
 
@@ -128,7 +124,6 @@ class MapPoiQueryService
 
         $pipeline = [
             ['$match' => $match],
-            ...$this->publishedAccountProfileGateStages(),
             ['$limit' => 1],
         ];
 
@@ -143,10 +138,6 @@ class MapPoiQueryService
 
             if ($stackKey !== '') {
                 $payload['stack_key'] = $stackKey;
-                $payload['stack_count'] = $this->resolveStackCount(
-                    $stackKey,
-                    $timezone
-                );
             }
 
             return [
@@ -156,563 +147,6 @@ class MapPoiQueryService
         }
 
         return null;
-    }
-
-    /**
-     * @param  array<string, mixed>  $queryParams
-     * @return array<string, mixed>
-     */
-    public function filters(array $queryParams, ?string $timezone): array
-    {
-        $basePipeline = $this->buildBasePipeline($queryParams, $timezone, false);
-        $configuredCategories = $this->configuredCategoryMetadata();
-
-        $categoryPipeline = array_merge($basePipeline, [
-            ['$group' => ['_id' => '$category', 'count' => ['$sum' => 1]]],
-            ['$sort' => ['count' => -1, '_id' => 1]],
-        ]);
-
-        $tagPipeline = array_merge($basePipeline, [
-            ['$unwind' => '$tags'],
-            ['$group' => ['_id' => '$tags', 'count' => ['$sum' => 1]]],
-            ['$sort' => ['count' => -1, '_id' => 1]],
-        ]);
-
-        $taxonomyPipeline = array_merge($basePipeline, [
-            ['$unwind' => '$taxonomy_terms'],
-            ['$group' => [
-                '_id' => [
-                    'type' => '$taxonomy_terms.type',
-                    'value' => '$taxonomy_terms.value',
-                ],
-                'name' => ['$first' => '$taxonomy_terms.name'],
-                'taxonomy_name' => ['$first' => '$taxonomy_terms.taxonomy_name'],
-                'label' => ['$first' => '$taxonomy_terms.label'],
-                'count' => ['$sum' => 1],
-            ]],
-            ['$sort' => ['count' => -1, '_id.type' => 1, '_id.value' => 1]],
-        ]);
-
-        $categories = MapPoi::raw(function ($collection) use ($categoryPipeline) {
-            return $collection->aggregate($categoryPipeline);
-        });
-        $tags = MapPoi::raw(function ($collection) use ($tagPipeline) {
-            return $collection->aggregate($tagPipeline);
-        });
-        $taxonomies = MapPoi::raw(function ($collection) use ($taxonomyPipeline) {
-            return $collection->aggregate($taxonomyPipeline);
-        });
-
-        $categoryCountByKey = [];
-        foreach ($categories as $row) {
-            $rowData = $this->normalizeDocument($row);
-            $rowId = $rowData['_id'] ?? $rowData['id'] ?? null;
-            if ($rowId === null || $rowId === '') {
-                continue;
-            }
-            $key = strtolower(trim((string) $rowId));
-            if ($key === '') {
-                continue;
-            }
-            $categoryCountByKey[$key] = (int) ($rowData['count'] ?? 0);
-        }
-        $categoryItems = $this->buildConfiguredCategoryItems(
-            $queryParams,
-            $timezone,
-            $configuredCategories,
-            $categoryCountByKey
-        );
-
-        $tagItems = [];
-        foreach ($tags as $row) {
-            $rowData = $this->normalizeDocument($row);
-            $rowId = $rowData['_id'] ?? $rowData['id'] ?? null;
-            if ($rowId === null || $rowId === '') {
-                continue;
-            }
-            $tagItems[] = [
-                'key' => (string) $rowId,
-                'label' => (string) $rowId,
-                'count' => (int) ($rowData['count'] ?? 0),
-            ];
-        }
-
-        $taxonomyItems = [];
-        foreach ($taxonomies as $row) {
-            $rowData = $this->normalizeDocument($row);
-            $id = $rowData['_id'] ?? $rowData['id'] ?? null;
-            $type = null;
-            $value = null;
-
-            if (is_array($id)) {
-                $type = $id['type'] ?? null;
-                $value = $id['value'] ?? null;
-            } elseif (is_object($id)) {
-                $idData = $this->normalizeDocument($id);
-                $type = $idData['type'] ?? null;
-                $value = $idData['value'] ?? null;
-            }
-            if (! $type || ! $value) {
-                continue;
-            }
-            $name = $this->normalizeOptionalString($rowData['name'] ?? null)
-                ?? $this->normalizeOptionalString($rowData['label'] ?? null)
-                ?? (string) $value;
-            $taxonomyName = $this->normalizeOptionalString($rowData['taxonomy_name'] ?? null)
-                ?? (string) $type;
-            $taxonomyItems[] = [
-                'type' => (string) $type,
-                'value' => (string) $value,
-                'name' => $name,
-                'taxonomy_name' => $taxonomyName,
-                'label' => $name,
-                'count' => (int) ($rowData['count'] ?? 0),
-            ];
-        }
-        $taxonomyItems = $this->resolveTaxonomyItemSnapshots($taxonomyItems);
-
-        return [
-            'tenant_id' => $this->resolveTenantId(),
-            'categories' => $categoryItems,
-            'tags' => $tagItems,
-            'taxonomy_terms' => $taxonomyItems,
-        ];
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $items
-     * @return array<int, array<string, mixed>>
-     */
-    private function resolveTaxonomyItemSnapshots(array $items): array
-    {
-        if ($items === []) {
-            return [];
-        }
-
-        $resolvedByToken = [];
-        foreach ($this->taxonomySnapshotResolver->resolve($items) as $resolved) {
-            $type = strtolower(trim((string) ($resolved['type'] ?? '')));
-            $value = strtolower(trim((string) ($resolved['value'] ?? '')));
-            if ($type === '' || $value === '') {
-                continue;
-            }
-            $resolvedByToken["{$type}:{$value}"] = $resolved;
-        }
-
-        foreach ($items as $index => $item) {
-            $type = strtolower(trim((string) ($item['type'] ?? '')));
-            $value = strtolower(trim((string) ($item['value'] ?? '')));
-            $resolved = $resolvedByToken["{$type}:{$value}"] ?? null;
-            if ($resolved === null) {
-                continue;
-            }
-
-            $name = $this->normalizeOptionalString($resolved['name'] ?? null)
-                ?? $this->normalizeOptionalString($resolved['label'] ?? null)
-                ?? (string) ($item['name'] ?? $value);
-            $taxonomyName = $this->normalizeOptionalString($resolved['taxonomy_name'] ?? null)
-                ?? (string) ($item['taxonomy_name'] ?? $type);
-            $items[$index]['name'] = $name;
-            $items[$index]['taxonomy_name'] = $taxonomyName;
-            $items[$index]['label'] = $this->normalizeOptionalString($resolved['label'] ?? null) ?? $name;
-        }
-
-        return $items;
-    }
-
-    /**
-     * @param  array<string, mixed>  $queryParams
-     * @param array<string, array{
-     *   key: string,
-     *   position: int,
-     *   label: string,
-     *   image_uri: ?string,
-     *   override_marker: bool,
-     *   marker_override: array<string, string>|null,
-     *   query: array{
-     *     source: ?string,
-     *     types: array<int, string>,
-     *     taxonomy: array<int, string>,
-     *     tags: array<int, string>,
-     *     categories: array<int, string>
-     *   }
-     * }> $metadataByKey
-     * @param  array<string, int>  $categoryCountByKey
-     * @return array<int, array<string, mixed>>
-     */
-    private function buildConfiguredCategoryItems(
-        array $queryParams,
-        ?string $timezone,
-        array $metadataByKey,
-        array $categoryCountByKey
-    ): array {
-        if ($metadataByKey === []) {
-            return [];
-        }
-
-        $orderedMetadata = array_values($metadataByKey);
-        usort(
-            $orderedMetadata,
-            static fn (array $left, array $right): int => ((int) $left['position']) <=> ((int) $right['position'])
-        );
-
-        $items = [];
-        foreach ($orderedMetadata as $metadata) {
-            $key = strtolower(trim((string) ($metadata['key'] ?? '')));
-            if ($key === '') {
-                continue;
-            }
-
-            $query = is_array($metadata['query'] ?? null)
-                ? $metadata['query']
-                : [
-                    'source' => null,
-                    'types' => [],
-                    'taxonomy' => [],
-                    'tags' => [],
-                    'categories' => [],
-                ];
-
-            $hasScopedQuery = $query['source'] !== null ||
-                ($query['types'] ?? []) !== [] ||
-                ($query['taxonomy'] ?? []) !== [] ||
-                ($query['tags'] ?? []) !== [] ||
-                ($query['categories'] ?? []) !== [];
-
-            $count = $hasScopedQuery
-                ? $this->countConfiguredCategoryMatches(
-                    $queryParams,
-                    $timezone,
-                    $key,
-                    $query
-                )
-                : (int) ($categoryCountByKey[$key] ?? 0);
-
-            $item = [
-                'key' => $key,
-                'label' => (string) ($metadata['label'] ?? $key),
-                'count' => $count,
-                'override_marker' => (bool) ($metadata['override_marker'] ?? false),
-            ];
-
-            $imageUri = $metadata['image_uri'] ?? null;
-            if (is_string($imageUri) && trim($imageUri) !== '') {
-                $item['image_uri'] = trim($imageUri);
-            }
-            $markerOverride = $metadata['marker_override'] ?? null;
-            if (is_array($markerOverride) && $markerOverride !== []) {
-                $item['marker_override'] = $markerOverride;
-            }
-
-            if ($hasScopedQuery) {
-                $item['query'] = [
-                    ...($query['source'] !== null ? ['source' => $query['source']] : []),
-                    ...(($query['types'] ?? []) !== [] ? ['types' => array_values($query['types'])] : []),
-                    ...(($query['taxonomy'] ?? []) !== [] ? ['taxonomy' => array_values($query['taxonomy'])] : []),
-                    ...(($query['tags'] ?? []) !== [] ? ['tags' => array_values($query['tags'])] : []),
-                    ...(($query['categories'] ?? []) !== [] ? ['categories' => array_values($query['categories'])] : []),
-                ];
-            }
-
-            $items[] = $item;
-        }
-
-        return $items;
-    }
-
-    /**
-     * @param  array<string, mixed>  $queryParams
-     * @param array{
-     *   source: ?string,
-     *   types: array<int, string>,
-     *   taxonomy: array<int, string>,
-     *   tags: array<int, string>,
-     *   categories: array<int, string>
-     * } $query
-     */
-    private function countConfiguredCategoryMatches(
-        array $queryParams,
-        ?string $timezone,
-        string $fallbackCategoryKey,
-        array $query
-    ): int {
-        $pipeline = $this->buildBasePipeline($queryParams, $timezone, false);
-        $pipeline = $this->appendFilterConstraintToPipeline(
-            $pipeline,
-            $fallbackCategoryKey,
-            $query
-        );
-        $pipeline[] = ['$count' => 'total'];
-
-        $rows = MapPoi::raw(function ($collection) use ($pipeline) {
-            return $collection->aggregate($pipeline);
-        });
-
-        foreach ($rows as $row) {
-            $data = $this->normalizeDocument($row);
-
-            return (int) ($data['total'] ?? 0);
-        }
-
-        return 0;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $pipeline
-     * @param array{
-     *   source: ?string,
-     *   types: array<int, string>,
-     *   taxonomy: array<int, string>,
-     *   tags: array<int, string>,
-     *   categories: array<int, string>
-     * } $query
-     * @return array<int, array<string, mixed>>
-     */
-    private function appendFilterConstraintToPipeline(
-        array $pipeline,
-        string $fallbackCategoryKey,
-        array $query
-    ): array {
-        if ($pipeline === []) {
-            return $pipeline;
-        }
-
-        $constraint = $this->applyFilterQueryToMatch(
-            $fallbackCategoryKey,
-            $query
-        );
-
-        if ($constraint === []) {
-            return $pipeline;
-        }
-
-        $first = $pipeline[0];
-        if (isset($first['$match']) && is_array($first['$match'])) {
-            $pipeline[0]['$match'] = array_merge($first['$match'], $constraint);
-
-            return $pipeline;
-        }
-
-        if (
-            isset($first['$geoNear']) &&
-            is_array($first['$geoNear']) &&
-            is_array($first['$geoNear']['query'] ?? null)
-        ) {
-            $pipeline[0]['$geoNear']['query'] = array_merge(
-                $first['$geoNear']['query'],
-                $constraint
-            );
-        }
-
-        return $pipeline;
-    }
-
-    /**
-     * @param array{
-     *   source: ?string,
-     *   types: array<int, string>,
-     *   taxonomy: array<int, string>,
-     *   tags: array<int, string>,
-     *   categories: array<int, string>
-     * } $query
-     * @return array<string, mixed>
-     */
-    private function applyFilterQueryToMatch(
-        string $fallbackCategoryKey,
-        array $query
-    ): array {
-        $match = [];
-
-        $source = $query['source'] ?? null;
-        if (is_string($source) && trim($source) !== '') {
-            $refType = $this->mapSourceToRefType($source);
-            if ($refType !== null) {
-                $match['ref_type'] = $refType;
-            }
-        }
-
-        $types = $this->normalizeStringArray($query['types'] ?? []);
-        if ($types !== []) {
-            $match['source_type'] = ['$in' => $types];
-        }
-
-        $categories = $this->normalizeStringArray($query['categories'] ?? []);
-        if ($categories !== []) {
-            $match['category'] = ['$in' => $categories];
-        }
-
-        $taxonomy = $this->normalizeStringArray($query['taxonomy'] ?? []);
-        if ($taxonomy !== []) {
-            $match['taxonomy_terms_flat'] = ['$in' => $taxonomy];
-        }
-
-        $tags = $this->normalizeStringArray($query['tags'] ?? []);
-        if ($tags !== []) {
-            $match['tags'] = ['$in' => $tags];
-        }
-
-        if ($categories === [] && $source === null && $types === [] && $taxonomy === [] && $tags === []) {
-            $match['category'] = $fallbackCategoryKey;
-        }
-
-        return $match;
-    }
-
-    /**
-     * @return array<string, array{
-     *   key: string,
-     *   position: int,
-     *   label: string,
-     *   image_uri: ?string,
-     *   override_marker: bool,
-     *   marker_override: array<string, string>|null,
-     *   query: array{
-     *     source: ?string,
-     *     types: array<int, string>,
-     *     taxonomy: array<int, string>,
-     *     tags: array<int, string>,
-     *     categories: array<int, string>
-     *   }
-     * }>
-     */
-    private function configuredCategoryMetadata(): array
-    {
-        $mapUiSettings = $this->settings->resolveMapUiSettings();
-        $rawFilters = $mapUiSettings['filters'] ?? null;
-        if (! is_array($rawFilters)) {
-            return [];
-        }
-
-        $metadata = [];
-        $position = 0;
-
-        foreach ($rawFilters as $rawFilter) {
-            $filter = $this->normalizeDocument($rawFilter);
-            $rawKey = $filter['key'] ?? null;
-            if (! is_string($rawKey)) {
-                continue;
-            }
-
-            $key = strtolower(trim($rawKey));
-            if ($key === '' || isset($metadata[$key])) {
-                continue;
-            }
-
-            $label = $filter['label'] ?? null;
-            if (! is_string($label) || trim($label) === '') {
-                $label = $key;
-            } else {
-                $label = trim($label);
-            }
-
-            $imageUri = $filter['image_uri'] ?? null;
-            if (! is_string($imageUri) || trim($imageUri) === '') {
-                $imageUri = null;
-            } else {
-                $imageUri = trim($imageUri);
-            }
-
-            $rawQuery = $this->normalizeDocument($filter['query'] ?? null);
-            $query = $this->normalizeConfiguredFilterQuery($rawQuery);
-            $rawMarkerOverride = $this->normalizeDocument($filter['marker_override'] ?? null);
-            [$overrideMarker, $markerOverride] = $this->normalizeConfiguredMarkerOverride(
-                $rawMarkerOverride === [] ? null : $rawMarkerOverride,
-                (bool) ($filter['override_marker'] ?? false),
-            );
-
-            $metadata[$key] = [
-                'key' => $key,
-                'position' => $position,
-                'label' => $label,
-                'image_uri' => $imageUri,
-                'override_marker' => $overrideMarker,
-                'marker_override' => $markerOverride,
-                'query' => $query,
-            ];
-            $position++;
-        }
-
-        return $metadata;
-    }
-
-    /**
-     * @param  array<string, mixed>  $query
-     * @return array{
-     *   source: ?string,
-     *   types: array<int, string>,
-     *   taxonomy: array<int, string>,
-     *   tags: array<int, string>,
-     *   categories: array<int, string>
-     * }
-     */
-    private function normalizeConfiguredFilterQuery(array $query): array
-    {
-        $sourceRaw = strtolower(trim((string) ($query['source'] ?? '')));
-        $source = $sourceRaw === '' ? null : $sourceRaw;
-
-        return [
-            'source' => $source,
-            'types' => $this->normalizeStringArray($query['types'] ?? []),
-            'taxonomy' => $this->normalizeStringArray($query['taxonomy'] ?? []),
-            'tags' => $this->normalizeStringArray($query['tags'] ?? []),
-            'categories' => $this->normalizeStringArray(
-                $query['categories'] ?? ($query['category_keys'] ?? [])
-            ),
-        ];
-    }
-
-    /**
-     * @param  array<string, mixed>|null  $markerOverride
-     * @return array{0: bool, 1: array<string, string>|null}
-     */
-    private function normalizeConfiguredMarkerOverride(
-        ?array $markerOverride,
-        bool $overrideMarker,
-    ): array {
-        if (! is_array($markerOverride)) {
-            return [false, null];
-        }
-
-        $mode = strtolower(trim((string) ($markerOverride['mode'] ?? '')));
-        if ($mode === 'icon') {
-            $icon = trim((string) ($markerOverride['icon'] ?? ''));
-            $color = strtoupper(trim((string) ($markerOverride['color'] ?? '')));
-            $iconColor = strtoupper(trim((string) ($markerOverride['icon_color'] ?? '#FFFFFF')));
-            if (
-                $icon === ''
-                || preg_match('/^#[0-9A-F]{6}$/', $color) !== 1
-                || preg_match('/^#[0-9A-F]{6}$/', $iconColor) !== 1
-            ) {
-                return [false, null];
-            }
-
-            return [
-                $overrideMarker,
-                [
-                    'mode' => 'icon',
-                    'icon' => $icon,
-                    'color' => $color,
-                    'icon_color' => $iconColor,
-                ],
-            ];
-        }
-
-        if ($mode === 'image') {
-            $imageUri = trim((string) ($markerOverride['image_uri'] ?? ''));
-            if ($imageUri === '') {
-                return [false, null];
-            }
-
-            return [
-                $overrideMarker,
-                [
-                    'mode' => 'image',
-                    'image_uri' => $imageUri,
-                ],
-            ];
-        }
-
-        return [false, null];
     }
 
     /**
@@ -748,91 +182,76 @@ class MapPoiQueryService
         return $formatted;
     }
 
-    private function resolveStackCount(string $stackKey, ?string $timezone): int
-    {
-        $items = $this->loadStackDocuments([], $timezone, $stackKey);
-        $resolvedCount = count($this->applyIntraStackEventDominance($items));
-
-        return $resolvedCount > 0 ? $resolvedCount : 1;
-    }
-
     /**
      * @param  array<string, mixed>  $queryParams
-     * @return array<int, array<string, mixed>>
+     * @return array{is_partial: bool, stacks: array<int, array<string, mixed>>}
      */
     private function resolveDominantStacks(array $queryParams, ?string $timezone): array
     {
         $pipeline = $this->buildBasePipeline($queryParams, $timezone, true);
-        $pipeline[] = $this->buildRefTypeOrderStage();
-        $pipeline[] = $this->buildStackSortStage();
-        $pipeline[] = [
-            '$group' => [
-                '_id' => '$exact_key',
-                'stack_count' => ['$sum' => 1],
-                'event_count' => [
-                    '$sum' => [
-                        '$cond' => [
-                            ['$eq' => ['$ref_type', 'event']],
-                            1,
-                            0,
-                        ],
-                    ],
-                ],
-                'top_poi' => ['$first' => '$$ROOT'],
-                'center' => ['$first' => '$location'],
-            ],
-        ];
-        $pipeline[] = [
-            '$project' => [
-                '_id' => 0,
-                'stack_key' => '$_id',
-                'stack_count' => 1,
-                'event_count' => 1,
-                'top_poi' => 1,
-                'center' => 1,
-            ],
-        ];
+        $pipeline[] = ['$limit' => 51];
 
         $rows = MapPoi::raw(function ($collection) use ($pipeline) {
             return $collection->aggregate($pipeline);
         });
 
+        $sample = [];
+        foreach ($rows as $row) {
+            $sample[] = $this->normalizeDocument($row);
+        }
+        $isPartial = count($sample) > 50;
+        $sample = array_slice($sample, 0, 50);
+
+        $grouped = [];
+        foreach ($sample as $item) {
+            $stackKey = trim((string) ($item['exact_key'] ?? ''));
+            if ($stackKey === '') {
+                $stackKey = (string) ($item['ref_type'] ?? '').':'.(string) ($item['ref_id'] ?? '');
+            }
+            $grouped[$stackKey][] = $item;
+        }
+
         $candidates = [];
         $eventCenters = [];
-
-        foreach ($rows as $row) {
-            $data = $this->normalizeDocument($row);
-            $stackCount = (int) ($data['stack_count'] ?? 0);
-            if ($stackCount <= 0) {
-                continue;
-            }
-
-            $eventCount = (int) ($data['event_count'] ?? 0);
-            $displayCount = $eventCount > 0 ? $eventCount : $stackCount;
-            if ($displayCount <= 0) {
-                continue;
-            }
-
-            $center = $data['center'] ?? null;
-            $topPoi = $this->normalizeDocument($data['top_poi'] ?? null);
+        foreach ($grouped as $stackKey => $items) {
+            $dominantItems = $this->applyIntraStackEventDominance($items);
+            usort($dominantItems, fn (array $left, array $right): int => $this->compareSamplePois($left, $right));
+            $topPoi = $dominantItems[0];
+            $hasEvent = ($topPoi['ref_type'] ?? null) === 'event';
+            $center = $topPoi['location'] ?? null;
+            $distance = min(array_map(
+                static fn (array $item): float => (float) ($item['distance_meters'] ?? INF),
+                $dominantItems,
+            ));
 
             $candidate = [
-                'stack_key' => trim((string) ($data['stack_key'] ?? '')),
+                'stack_key' => $stackKey,
                 'center' => $center,
-                'stack_count' => $displayCount,
+                'stack_count' => count($dominantItems),
                 'top_poi' => $topPoi,
-                'has_event' => $eventCount > 0,
+                'has_event' => $hasEvent,
+                'distance_meters' => $distance,
             ];
-
-            if ($candidate['has_event']) {
-                $coordinates = $this->extractCoordinates($center) ?? $this->extractCoordinates($topPoi['location'] ?? null);
+            if ($hasEvent) {
+                $coordinates = $this->extractCoordinates($center);
                 if ($coordinates !== null) {
                     $eventCenters[] = $coordinates;
                 }
             }
-
             $candidates[] = $candidate;
         }
+
+        usort($candidates, function (array $left, array $right): int {
+            $distanceOrder = ($left['distance_meters'] <=> $right['distance_meters']);
+            if ($distanceOrder !== 0) {
+                return $distanceOrder;
+            }
+            $poiOrder = $this->compareSamplePois($left['top_poi'], $right['top_poi']);
+
+            return $poiOrder !== 0
+                ? $poiOrder
+                : strcmp((string) $left['stack_key'], (string) $right['stack_key']);
+        });
 
         $stacks = [];
         foreach ($candidates as $candidate) {
@@ -854,7 +273,35 @@ class MapPoiQueryService
             ];
         }
 
-        return array_values($stacks);
+        return [
+            'is_partial' => $isPartial,
+            'stacks' => array_values($stacks),
+        ];
+    }
+
+    /** @param array<string, mixed> $left @param array<string, mixed> $right */
+    private function compareSamplePois(array $left, array $right): int
+    {
+        $typeOrder = $this->refTypeOrder((string) ($left['ref_type'] ?? ''))
+            <=> $this->refTypeOrder((string) ($right['ref_type'] ?? ''));
+        if ($typeOrder !== 0) {
+            return $typeOrder;
+        }
+        $priorityOrder = (int) ($right['priority'] ?? 0) <=> (int) ($left['priority'] ?? 0);
+
+        return $priorityOrder !== 0
+            ? $priorityOrder
+            : strcmp((string) ($left['ref_id'] ?? ''), (string) ($right['ref_id'] ?? ''));
+    }
+
+    private function refTypeOrder(string $refType): int
+    {
+        return match ($refType) {
+            'event' => 1,
+            'account_profile' => 2,
+            'static' => 3,
+            default => 9,
+        };
     }
 
     /**
@@ -1004,6 +451,124 @@ class MapPoiQueryService
         return $earthRadiusMeters * $c;
     }
 
+    /** @param array<string, mixed> $queryParams @return array<string, mixed> */
+    private function normalizeViewportQuery(array $queryParams): array
+    {
+        $neLat = $this->toFloat($queryParams['ne_lat'] ?? null);
+        $neLng = $this->toFloat($queryParams['ne_lng'] ?? null);
+        $swLat = $this->toFloat($queryParams['sw_lat'] ?? null);
+        $swLng = $this->toFloat($queryParams['sw_lng'] ?? null);
+
+        if (
+            $neLat === null || $neLng === null || $swLat === null || $swLng === null
+            || ! is_finite($neLat) || ! is_finite($neLng)
+            || ! is_finite($swLat) || ! is_finite($swLng)
+            || $swLat >= $neLat || $swLng >= $neLng
+        ) {
+            throw ValidationException::withMessages([
+                'viewport' => ['map_viewport_invalid'],
+            ]);
+        }
+
+        $origin = [
+            'lat' => ($neLat + $swLat) / 2,
+            'lng' => ($neLng + $swLng) / 2,
+        ];
+        $corners = [
+            ['lat' => $neLat, 'lng' => $neLng],
+            ['lat' => $neLat, 'lng' => $swLng],
+            ['lat' => $swLat, 'lng' => $neLng],
+            ['lat' => $swLat, 'lng' => $swLng],
+        ];
+        $coveringRadius = max(array_map(
+            fn (array $corner): float => $this->distanceMetersBetween($origin, $corner),
+            $corners,
+        ));
+        $radius = $this->resolveRadiusSettings();
+        if ($coveringRadius > ($radius['max_km'] * 1000)) {
+            throw ValidationException::withMessages([
+                'viewport' => ['map_viewport_too_large'],
+            ]);
+        }
+        $effectiveRadius = max($coveringRadius, $radius['min_km'] * 1000);
+
+        $requestedLat = $this->toFloat($queryParams['origin_lat'] ?? null);
+        $requestedLng = $this->toFloat($queryParams['origin_lng'] ?? null);
+        $requestedRadius = $this->toFloat($queryParams['max_distance_meters'] ?? null);
+        if (
+            ($requestedLat !== null && abs($requestedLat - $origin['lat']) > 0.000001)
+            || ($requestedLng !== null && abs($requestedLng - $origin['lng']) > 0.000001)
+            || ($requestedRadius !== null && abs($requestedRadius - $effectiveRadius) > 1.0)
+        ) {
+            throw ValidationException::withMessages([
+                'viewport' => ['map_viewport_geometry_mismatch'],
+            ]);
+        }
+
+        $queryParams['origin_lat'] = $origin['lat'];
+        $queryParams['origin_lng'] = $origin['lng'];
+        $queryParams['max_distance_meters'] = $effectiveRadius;
+        $queryParams['_viewport_scene'] = true;
+
+        return $queryParams;
+    }
+
+    /** @param array<string, mixed> $queryParams @return array<string, mixed> */
+    private function normalizeNearQuery(array $queryParams): array
+    {
+        $radius = $this->resolveRadiusSettings();
+        $requestedMeters = $this->toFloat($queryParams['max_distance_meters'] ?? null);
+        $requestedKm = $requestedMeters !== null && is_finite($requestedMeters) && $requestedMeters > 0
+            ? $requestedMeters / 1000
+            : $radius['default_km'];
+        $effectiveKm = min(max($requestedKm, $radius['min_km']), $radius['max_km']);
+        $queryParams['max_distance_meters'] = $effectiveKm * 1000;
+
+        return $queryParams;
+    }
+
+    /** @return array{min_km: float, default_km: float, max_km: float} */
+    private function resolveRadiusSettings(): array
+    {
+        $fallback = ['min_km' => 0.5, 'default_km' => 5.0, 'max_km' => 50.0];
+        $mapUi = $this->normalizeDocument($this->settings->resolveMapUiSettings());
+        $configured = $this->normalizeDocument($mapUi['radius'] ?? null);
+        $resolved = [];
+        foreach ($fallback as $key => $fallbackValue) {
+            $value = $this->toFloat($configured[$key] ?? null);
+            $resolved[$key] = $value !== null && is_finite($value) && $value > 0
+                ? $value
+                : $fallbackValue;
+        }
+        if ($resolved['min_km'] > $resolved['max_km']) {
+            return $fallback;
+        }
+        $resolved['default_km'] = min(
+            max($resolved['default_km'], $resolved['min_km']),
+            $resolved['max_km'],
+        );
+
+        return $resolved;
+    }
+
+    /** @param array<string, mixed> $queryParams @return array<string, int> */
+    private function nearSort(array $queryParams): array
+    {
+        if ($this->mapSourceToRefType((string) ($queryParams['source'] ?? '')) === 'event') {
+            return [
+                'time_start' => 1,
+                'distance_meters' => 1,
+                'ref_id' => 1,
+            ];
+        }
+
+        return [
+            'distance_meters' => 1,
+            'priority' => -1,
+            'ref_id' => 1,
+        ];
+    }
+
     /**
      * @param  array<string, mixed>  $queryParams
      * @return array<int, array<string, mixed>>
@@ -1039,11 +604,14 @@ class MapPoiQueryService
             }
 
             $pipeline[] = ['$geoNear' => $geoNear];
+            if ($geoMatch !== []) {
+                $pipeline[] = ['$match' => $geoMatch];
+            }
         } else {
             $pipeline[] = ['$match' => array_merge($match, $geoMatch)];
         }
 
-        return array_merge($pipeline, $this->publishedAccountProfileGateStages());
+        return $pipeline;
     }
 
     /**
@@ -1113,96 +681,6 @@ class MapPoiQueryService
         ];
 
         return $match;
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function publishedAccountProfileGateStages(): array
-    {
-        return [
-            [
-                '$lookup' => [
-                    'from' => 'account_profiles',
-                    'let' => [
-                        'profile_ref_id' => '$ref_id',
-                        'profile_ref_type' => '$ref_type',
-                    ],
-                    'pipeline' => [
-                        [
-                            '$match' => [
-                                '$expr' => [
-                                    '$and' => [
-                                        [
-                                            '$eq' => [
-                                                '$$profile_ref_type',
-                                                'account_profile',
-                                            ],
-                                        ],
-                                        [
-                                            '$eq' => [
-                                                ['$toString' => '$_id'],
-                                                '$$profile_ref_id',
-                                            ],
-                                        ],
-                                    ],
-                                ],
-                            ],
-                        ],
-                        [
-                            '$lookup' => [
-                                'from' => 'accounts',
-                                'let' => [
-                                    'parent_account_id' => '$account_id',
-                                ],
-                                'pipeline' => [
-                                    [
-                                        '$match' => [
-                                            '$expr' => [
-                                                '$eq' => [
-                                                    ['$toString' => '$_id'],
-                                                    '$$parent_account_id',
-                                                ],
-                                            ],
-                                        ],
-                                    ],
-                                    [
-                                        '$match' => [
-                                            'publication.status' => self::PUBLISHED_ACCOUNT_STATUS,
-                                        ],
-                                    ],
-                                    [
-                                        '$project' => [
-                                            '_id' => 1,
-                                        ],
-                                    ],
-                                ],
-                                'as' => 'published_parent_accounts',
-                            ],
-                        ],
-                        [
-                            '$match' => [
-                                'published_parent_accounts.0' => ['$exists' => true],
-                            ],
-                        ],
-                        [
-                            '$project' => [
-                                '_id' => 1,
-                            ],
-                        ],
-                    ],
-                    'as' => 'published_account_profile_refs',
-                ],
-            ],
-            [
-                '$match' => [
-                    '$or' => [
-                        ['ref_type' => ['$ne' => 'account_profile']],
-                        ['published_account_profile_refs.0' => ['$exists' => true]],
-                    ],
-                ],
-            ],
-        ];
     }
 
     private function mapSourceToRefType(string $source): ?string
