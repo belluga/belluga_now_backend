@@ -83,7 +83,6 @@ class AccountProfileRegistryServiceTest extends TestCase
                 'is_inviteable' => false,
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => false,
-                'has_content' => false,
             ],
         ]);
         TenantProfileType::create([
@@ -97,7 +96,6 @@ class AccountProfileRegistryServiceTest extends TestCase
                 'is_inviteable' => false,
                 'is_publicly_discoverable' => true,
                 'is_poi_enabled' => true,
-                'has_content' => false,
             ],
         ]);
 

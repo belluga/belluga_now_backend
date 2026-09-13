@@ -64,7 +64,6 @@ Host routes are tenant-authenticated and tenant-access protected:
 - `GET /api/v1/map/pois`
 - `GET /api/v1/map/pois/lookup`
 - `GET /api/v1/map/near`
-- `GET /api/v1/map/filters`
 
 Route ownership lives in the host app. The package provides the controller and query service only.
 
@@ -78,12 +77,16 @@ Query inputs:
 - `stack_key` optional
 - `source` optional
 - `types[]` optional
+- `categories[]`, `tags[]`, `taxonomy[]`, and `search` optional
+
+Scene order is server-owned; caller-selected `sort` is rejected.
 
 Response shape:
 
 - `tenant_id`
 - `server_time`
 - `bounds`
+- `is_partial`
 - `stacks[]`
 
 Each stack exposes:
@@ -116,9 +119,12 @@ Returns paginated nearby POIs.
 Query inputs:
 
 - `origin_lat`, `origin_lng`
-- `page`
-- `page_size`
-- optional bounding and filtering parameters supported by the controller request
+- `page`, `page_size`
+- `source`, `types[]`, `categories[]`, `tags[]`, `taxonomy[]`, and `search` optional
+
+The tenant maximum radius bounds the complete-list envelope. Results use stable
+distance order, except event-only filters, which use stable time-to-event order
+before pagination.
 
 Response shape:
 

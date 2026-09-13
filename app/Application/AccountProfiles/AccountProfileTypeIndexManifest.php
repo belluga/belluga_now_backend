@@ -16,7 +16,6 @@ final class AccountProfileTypeIndexManifest
         ['id' => 'C-06', 'capability' => 'is_poi_enabled', 'name' => 'idx_account_profile_types_capability_is_poi_enabled_v1'],
         ['id' => 'C-07', 'capability' => 'is_reference_location_enabled', 'name' => 'idx_account_profile_types_capability_is_reference_location_enabled_v1'],
         ['id' => 'C-08', 'capability' => 'has_bio', 'name' => 'idx_account_profile_types_capability_has_bio_v1'],
-        ['id' => 'C-09', 'capability' => 'has_content', 'name' => 'idx_account_profile_types_capability_has_content_v1'],
         ['id' => 'C-10', 'capability' => 'has_taxonomies', 'name' => 'idx_account_profile_types_capability_has_taxonomies_v1'],
         ['id' => 'C-11', 'capability' => 'has_avatar', 'name' => 'idx_account_profile_types_capability_has_avatar_v1'],
         ['id' => 'C-12', 'capability' => 'has_cover', 'name' => 'idx_account_profile_types_capability_has_cover_v1'],

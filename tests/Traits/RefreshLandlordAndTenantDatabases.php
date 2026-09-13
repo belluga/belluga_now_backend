@@ -97,7 +97,7 @@ trait RefreshLandlordAndTenantDatabases
 
         Artisan::call($command, [
             '--database' => 'landlord',
-            '--path' => 'database/migrations/landlord',
+            '--path' => $this->landlordMigrationPaths(),
         ]);
 
         Artisan::call(sprintf(
@@ -235,5 +235,11 @@ trait RefreshLandlordAndTenantDatabases
             static fn (string $path): string => sprintf('--path=%s', $path),
             $paths
         ));
+    }
+
+    /** @return array<int, string> */
+    protected function landlordMigrationPaths(): array
+    {
+        return (array) config('multitenancy.landlord_migration_paths', ['database/migrations/landlord']);
     }
 }

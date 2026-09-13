@@ -40,7 +40,7 @@ class AccountOnboardingStoreRequest extends FormRequest
             'nested_profile_groups' => 'prohibited',
             'nested_profile_groups.*' => 'prohibited',
             'bio' => $this->optionalAccountProfileRichTextRule(),
-            'content' => $this->optionalAccountProfileRichTextRule(),
+            'content' => 'missing',
             'avatar' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:'.InputConstraints::IMAGE_MAX_KB,
             'cover' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:'.InputConstraints::IMAGE_MAX_KB,
             ...$this->accountProfileContactChannelRules(),

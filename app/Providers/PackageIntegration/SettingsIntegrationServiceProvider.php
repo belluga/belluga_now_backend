@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Providers\PackageIntegration;
 
 use App\Integration\Settings\CompositeSettingsPatchGuard;
+use App\Integration\Settings\HomeFavoritesPinnedProfileSettingsNamespaceRegistrar;
 use App\Integration\Settings\OutboundIntegrationsSettingsNamespaceRegistrar;
 use App\Integration\Settings\PhoneOtpReviewAccessSettingsNamespaceRegistrar;
 use App\Integration\Settings\TenantEnvironmentSnapshotRepairAdapter;
@@ -44,6 +45,7 @@ class SettingsIntegrationServiceProvider extends ServiceProvider
         $this->app->make(TenantPublicAuthMethodSettingsNamespaceRegistrar::class)->register($registry);
         $this->app->make(OutboundIntegrationsSettingsNamespaceRegistrar::class)->register($registry);
         $this->app->make(PhoneOtpReviewAccessSettingsNamespaceRegistrar::class)->register($registry);
+        $this->app->make(HomeFavoritesPinnedProfileSettingsNamespaceRegistrar::class)->register($registry);
 
         $registry->register(new SettingsNamespaceDefinition(
             namespace: 'telemetry',

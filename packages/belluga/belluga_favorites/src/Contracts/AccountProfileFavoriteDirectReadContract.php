@@ -14,4 +14,7 @@ interface AccountProfileFavoriteDirectReadContract
         int $page,
         int $pageSize,
     ): array;
+
+    /** @return array<string, mixed>|null */
+    public function pinnedProfile(): ?array;
 }

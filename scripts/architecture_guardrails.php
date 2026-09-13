@@ -29,6 +29,12 @@ final class ArchitectureGuardrailRunner
 
     public function run(): int
     {
+        $integrityStatus = 0;
+        passthru(escapeshellarg(PHP_BINARY).' '.escapeshellarg($this->repoRoot.'/scripts/migration_integrity_guard.php'), $integrityStatus);
+        if ($integrityStatus !== 0) {
+            return $integrityStatus;
+        }
+
         $abilityCatalog = $this->loadAbilityCatalog();
 
         if ($abilityCatalog !== null) {
