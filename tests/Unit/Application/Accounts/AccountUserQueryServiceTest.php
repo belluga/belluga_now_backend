@@ -22,6 +22,8 @@ class AccountUserQueryServiceTest extends TestCase
 
     private static bool $bootstrapped = false;
 
+    private static int $phoneFixtureSequence = 0;
+
     private AccountUserQueryService $service;
 
     private Account $account;
@@ -86,7 +88,7 @@ class AccountUserQueryServiceTest extends TestCase
 
     public function test_search_by_phone_number(): void
     {
-        $phone = '+551199999'.random_int(1000, 9999);
+        $phone = $this->nextPhoneFixture();
         $this->attachPhoneToFixture($this->phoneFixture, $phone);
 
         $paginator = $this->service->paginate(
@@ -149,7 +151,7 @@ class AccountUserQueryServiceTest extends TestCase
             'registered_at' => Carbon::now()->subHour(),
         ]);
 
-        $this->attachPhoneToFixture($this->phoneFixture, '+55119123'.random_int(1000, 9999));
+        $this->attachPhoneToFixture($this->phoneFixture, $this->nextPhoneFixture());
 
         $this->createUserWithRole($role, [
             'name' => 'Validated User',
@@ -163,6 +165,11 @@ class AccountUserQueryServiceTest extends TestCase
     {
         $user->phones = [$phone];
         $user->save();
+    }
+
+    private function nextPhoneFixture(): string
+    {
+        return sprintf('+551199999%04d', ++self::$phoneFixtureSequence);
     }
 
     /**
