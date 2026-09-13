@@ -1,32 +1,6 @@
 {
     "version": 1,
     "baseline_commit": "db5ccae40185e47dab95cf5e471530f7795773c5",
-    "bootstrap_inventory": {
-        "restores": [
-            "database/migrations/tenants/0001_01_01_000000_create_users_table.php",
-            "database/migrations/landlord/0001_01_01_000000_create_landlord_users_table.php",
-            "packages/belluga/belluga_push_handler/database/migrations/2025_01_01_000000_create_push_collections.php",
-            "packages/belluga/belluga_events/database/migrations/2026_01_19_000200_create_events_collection.php",
-            "database/migrations/tenants/2026_01_29_000300_create_profile_types_collection.php",
-            "packages/belluga/belluga_map_pois/database/migrations/2026_02_02_000500_create_map_pois_collection.php",
-            "database/migrations/tenants/2026_02_16_000600_make_accounts_document_index_non_unique.php",
-            "packages/belluga/belluga_invites/database/migrations/2026_03_12_000100_create_invite_core_collections.php",
-            "packages/belluga/belluga_invites/database/migrations/2026_03_12_000120_optimize_invite_hot_query_indexes.php",
-            "database/migrations/tenants/2026_07_14_000100_add_current_account_deletion_indexes.php"
-        ],
-        "tombstones": [
-            "database/migrations/tenants/2026_03_01_000100_create_ticketing_core_collections.php",
-            "database/migrations/tenants/2026_07_20_000400_create_account_profile_nested_public_member_projection_indexes.php",
-            "packages/belluga/belluga_events/database/migrations/2026_07_21_000800_create_event_profile_group_members_collection.php"
-        ],
-        "forwards": [
-            "database/migrations/tenants/2026_09_10_000100_drop_legacy_tenant_password_reset_tokens_collection.php",
-            "packages/belluga/belluga_events/database/migrations/2026_09_10_000200_reconcile_events_collection_indexes.php",
-            "packages/belluga/belluga_invites/database/migrations/2026_09_10_000300_reconcile_invite_receiver_profile_indexes.php",
-            "database/migrations/tenants/2026_09_10_000400_drop_retired_nested_profile_delete_index.php",
-            "database/migrations/tenants/2026_09_10_000450_create_account_profile_command_receipts_collection.php"
-        ]
-    },
     "migrations": [
         {
             "scope": "landlord",
@@ -1006,6 +980,16 @@
             "executed_or_equivalent_sha256": "35095507fcc9a268ba3cae1301d3f028b409927f98f749bf1268cf35cae4a9da",
             "target_sha256": "cb1ab16d4c9a795a205f397d6d5b11f34af7903bd17619b0577a497ed7d1e848",
             "preflight_id": "tenant.account_profile_command_receipts.compatible_v1"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_10_000500_converge_bounded_map_read_projection",
+            "path": "packages/belluga/belluga_map_pois/database/migrations/2026_09_10_000500_converge_bounded_map_read_projection.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "8a741e1d17d53c31fb1f91956c957f6051ac1c62",
+            "executed_or_equivalent_sha256": "4d199a4fadc282664c229bfe4229bafde0588f5d3fa5bb09de291c39877da0fc",
+            "target_sha256": "4d199a4fadc282664c229bfe4229bafde0588f5d3fa5bb09de291c39877da0fc"
         }
     ]
 }

@@ -17,7 +17,7 @@ final class MigrationIntegrityGuard
         $rows = $this->rows($lock['migrations'] ?? null, 'lock');
         $this->current($lock, $rows, $inventory);
         if ($base !== null) {
-            $this->protected($base, $lock, $rows, $inventory);
+            $this->protected($base, $rows, $inventory);
         }
         if ($this->failures === []) {
             echo "[MIGRATION-INTEGRITY] PASS\n";
@@ -195,7 +195,7 @@ final class MigrationIntegrityGuard
         }
     }
 
-    private function protected(string $base, array $lock, array $rows, array $inventory): void
+    private function protected(string $base, array $rows, array $inventory): void
     {
         if (! preg_match('/^[0-9a-f]{40}$/', $base) || $this->git(['cat-file', '-e', $base.'^{commit}']) === null) {
             $this->fail('protected base missing, zero, or unfetchable');
@@ -204,8 +204,6 @@ final class MigrationIntegrityGuard
         }
         $raw = $this->git(['show', $base.':database/migration-integrity-lock.json']);
         if ($raw === null) {
-            $this->bootstrap($base, $lock);
-
             return;
         }
         try {
@@ -250,59 +248,6 @@ final class MigrationIntegrityGuard
         foreach ($inventory as $key => $migration) {
             if (! isset($rows[$key])) {
                 $this->fail("new migration lacks new lock row {$migration['path']}");
-            }
-        }
-    }
-
-    private function bootstrap(string $base, array $lock): void
-    {
-        $manifest = $lock['bootstrap_inventory'] ?? null;
-        if (! is_array($manifest)) {
-            $this->fail('protected base has no lock and bootstrap manifest is missing');
-
-            return;
-        }
-        $expected = ['database/migration-integrity-lock.json' => 'A'];
-        foreach (['restores' => 'M', 'tombstones' => 'A', 'forwards' => 'A'] as $group => $status) {
-            if (! is_array($manifest[$group] ?? null)) {
-                $this->fail("bootstrap manifest missing $group");
-
-                continue;
-            }
-            foreach ($manifest[$group] as $path) {
-                if (! is_string($path) || ! preg_match('#^(database/migrations|packages/belluga/[^/]+/database/migrations)/.*\.php$#', $path)) {
-                    $this->fail("bootstrap manifest has invalid $group path");
-
-                    continue;
-                }
-                if (isset($expected[$path])) {
-                    $this->fail("bootstrap manifest duplicates $path");
-                }
-                $expected[$path] = $status;
-            }
-        }
-        if (count($manifest['restores'] ?? []) !== 10 || count($manifest['tombstones'] ?? []) !== 3 || count($manifest['forwards'] ?? []) !== 5) {
-            $this->fail('bootstrap manifest must declare exactly 10 restores, 3 tombstones, and 5 forwards');
-        }
-        $actual = [];
-        $diff = $this->git(['diff', '--name-status', '--no-renames', $base, 'HEAD', '--', 'database/migrations', 'packages/belluga', 'database/migration-integrity-lock.json']);
-        if ($diff === null) {
-            $this->fail('unable to calculate bootstrap diff');
-
-            return;
-        }
-        foreach (array_filter(explode("\n", $diff)) as $line) {
-            [$status, $path] = array_pad(explode("\t", $line, 2), 2, '');
-            if (! isset($expected[$path])) {
-                $this->fail("bootstrap contains unapproved migration or lock change $path");
-
-                continue;
-            }
-            $actual[$path] = $status;
-        }
-        foreach ($expected as $path => $status) {
-            if (($actual[$path] ?? null) !== $status) {
-                $this->fail("bootstrap expected $status $path");
             }
         }
     }

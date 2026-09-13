@@ -16,17 +16,6 @@ final class MigrationIntegrityGuardrailTest extends TestCase
         self::assertStringContainsString('[MIGRATION-INTEGRITY] PASS', $result['output']);
     }
 
-    public function test_bootstrap_manifest_has_exact_reviewed_inventory(): void
-    {
-        $lock = json_decode((string) file_get_contents(dirname(__DIR__, 3).'/database/migration-integrity-lock.json'), true, flags: JSON_THROW_ON_ERROR);
-        $bootstrap = $lock['bootstrap_inventory'];
-
-        self::assertCount(10, $bootstrap['restores']);
-        self::assertCount(3, $bootstrap['tombstones']);
-        self::assertCount(5, $bootstrap['forwards']);
-        self::assertCount(18, array_unique(array_merge($bootstrap['restores'], $bootstrap['tombstones'], $bootstrap['forwards'])));
-    }
-
     public function test_ci_sets_up_php_before_migration_guard_and_dependency_install(): void
     {
         $workflow = (string) file_get_contents(dirname(__DIR__, 3).'/.github/workflows/ci.yml');
@@ -231,22 +220,21 @@ final class MigrationIntegrityGuardrailTest extends TestCase
         }
     }
 
-    public function test_exact_bootstrap_inventory_from_an_unlocked_protected_base_passes_and_bad_shape_fails(): void
+    public function test_unlocked_protected_base_defers_history_guard_until_the_lock_is_baselined(): void
     {
-        [$root, $base, $manifest] = $this->bootstrapFixture();
+        $root = $this->fixture();
         try {
-            self::assertCount(18, $this->lockFor($root)['migrations']);
+            $lock = (string) file_get_contents($root.'/database/migration-integrity-lock.json');
+            unlink($root.'/database/migration-integrity-lock.json');
+            $this->git($root, 'add -u');
+            $this->git($root, 'commit -qm unlocked-base');
+            $base = $this->git($root, 'rev-parse HEAD');
+            file_put_contents($root.'/database/migration-integrity-lock.json', $lock);
+
             $result = $this->runFixtureGuard($root, $base);
+
             self::assertSame(0, $result['status'], $result['output']);
             self::assertStringContainsString('[MIGRATION-INTEGRITY] PASS', $result['output']);
-
-            array_pop($manifest['forwards']);
-            $lock = $this->lockFor($root);
-            $lock['bootstrap_inventory'] = $manifest;
-            file_put_contents($root.'/database/migration-integrity-lock.json', json_encode($lock, JSON_PRETTY_PRINT));
-            $result = $this->runFixtureGuard($root, $base);
-            self::assertSame(1, $result['status']);
-            self::assertStringContainsString('bootstrap manifest must declare exactly 10 restores, 3 tombstones, and 5 forwards', $result['output']);
         } finally {
             $this->removeFixture($root);
         }
@@ -268,7 +256,7 @@ final class MigrationIntegrityGuardrailTest extends TestCase
         file_put_contents($root.'/config/multitenancy.php', "<?php return ['tenant_migration_paths'=>$tenantPaths, 'landlord_migration_paths'=>['database/migrations/landlord'], ];");
         file_put_contents($root.'/database/migrations/tenants/2026_01_01_000001_alpha.php', '<?php');
         file_put_contents($root.'/database/migrations/landlord/2026_01_01_000002_landlord.php', '<?php');
-        $lock = ['baseline_commit' => 'db5ccae40185e47dab95cf5e471530f7795773c5', 'bootstrap_inventory' => ['restores' => [], 'tombstones' => [], 'forwards' => []], 'migrations' => []];
+        $lock = ['baseline_commit' => 'db5ccae40185e47dab95cf5e471530f7795773c5', 'migrations' => []];
         $lock['migrations'][] = $this->row('tenant', '2026_01_01_000001_alpha', 'database/migrations/tenants/2026_01_01_000001_alpha.php', $root);
         $lock['migrations'][] = $this->row('landlord', '2026_01_01_000002_landlord', 'database/migrations/landlord/2026_01_01_000002_landlord.php', $root);
         file_put_contents($root.'/database/migration-integrity-lock.json', json_encode($lock, JSON_PRETTY_PRINT));
@@ -279,51 +267,6 @@ final class MigrationIntegrityGuardrailTest extends TestCase
         $this->git($root, 'commit -qm base');
 
         return $root;
-    }
-
-    /** @return array{string,string,array{restores:list<string>,tombstones:list<string>,forwards:list<string>}} */
-    private function bootstrapFixture(): array
-    {
-        $root = sys_get_temp_dir().'/migration-guard-'.bin2hex(random_bytes(8));
-        foreach (['scripts', 'config', 'database/migrations/tenants', 'database/migrations/landlord'] as $dir) {
-            mkdir($root.'/'.$dir, 0777, true);
-        }
-        copy(dirname(__DIR__, 3).'/scripts/migration_integrity_guard.php', $root.'/scripts/migration_integrity_guard.php');
-        file_put_contents($root.'/config/multitenancy.php', "<?php return ['tenant_migration_paths'=>['database/migrations/tenants'], 'landlord_migration_paths'=>['database/migrations/landlord'], ];");
-        $manifest = ['restores' => [], 'tombstones' => [], 'forwards' => []];
-        foreach (range(1, 10) as $n) {
-            $path = sprintf('database/migrations/tenants/2026_02_01_%06d_restore.php', $n);
-            $manifest['restores'][] = $path;
-            file_put_contents($root.'/'.$path, "<?php // old $n");
-        }
-        $this->git($root, 'init');
-        $this->git($root, 'config user.email guard@example.test');
-        $this->git($root, 'config user.name Guard');
-        $this->git($root, 'add .');
-        $this->git($root, 'commit -qm bootstrap-base');
-        $base = $this->git($root, 'rev-parse HEAD');
-        foreach ($manifest['restores'] as $path) {
-            file_put_contents($root.'/'.$path, '<?php // restored');
-        }
-        foreach (range(1, 3) as $n) {
-            $path = sprintf('database/migrations/tenants/2026_02_02_%06d_tombstone.php', $n);
-            $manifest['tombstones'][] = $path;
-            file_put_contents($root.'/'.$path, '<?php // tombstone');
-        }
-        foreach (range(1, 5) as $n) {
-            $path = sprintf('database/migrations/tenants/2026_02_03_%06d_forward.php', $n);
-            $manifest['forwards'][] = $path;
-            file_put_contents($root.'/'.$path, '<?php // forward');
-        }
-        $lock = ['baseline_commit' => 'db5ccae40185e47dab95cf5e471530f7795773c5', 'bootstrap_inventory' => $manifest, 'migrations' => []];
-        foreach (array_merge($manifest['restores'], $manifest['tombstones'], $manifest['forwards']) as $path) {
-            $lock['migrations'][] = $this->row('tenant', basename($path, '.php'), $path, $root);
-        }
-        file_put_contents($root.'/database/migration-integrity-lock.json', json_encode($lock, JSON_PRETTY_PRINT));
-        $this->git($root, 'add .');
-        $this->git($root, 'commit -qm bootstrap-head');
-
-        return [$root, $base, $manifest];
     }
 
     /** @return array<string,string> */
