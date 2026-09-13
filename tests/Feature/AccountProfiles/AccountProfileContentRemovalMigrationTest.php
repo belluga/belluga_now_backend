@@ -17,6 +17,16 @@ final class AccountProfileContentRemovalMigrationTest extends TestCase
 
     private const RETIRED_INDEX = 'idx_account_profile_types_capability_has_content_v1';
 
+    private const WRITER_BATCH_COUNT = 3;
+
+    private const WRITER_COUNT = 10;
+
+    private const WRITER_READY_TIMEOUT_SECONDS = 60;
+
+    private const WRITER_RELEASE_TIMEOUT_SECONDS = 90;
+
+    private const WRITER_PROCESS_TIMEOUT_SECONDS = 120;
+
     public function test_migration_removes_only_account_legacy_fields_and_is_idempotent(): void
     {
         $this->refreshLandlordAndTenantDatabases();
@@ -134,10 +144,10 @@ final class AccountProfileContentRemovalMigrationTest extends TestCase
         $migration = $this->migration();
         $migration->up();
 
-        for ($batch = 0; $batch < 3; $batch++) {
+        for ($batch = 0; $batch < self::WRITER_BATCH_COUNT; $batch++) {
             $goId = 'go-'.$batch;
             $writers = [];
-            for ($write = 0; $write < 10; $write++) {
+            for ($write = 0; $write < self::WRITER_COUNT; $write++) {
                 $suffix = $batch.'-'.$write;
                 $writer = new Process([
                     PHP_BINARY,
@@ -145,14 +155,33 @@ final class AccountProfileContentRemovalMigrationTest extends TestCase
                     $this->legacyWriterProcessCode(),
                     $suffix,
                     $goId,
-                ], base_path());
+                    base_path(),
+                    (string) self::WRITER_RELEASE_TIMEOUT_SECONDS,
+                ], base_path(), timeout: self::WRITER_PROCESS_TIMEOUT_SECONDS);
                 $writer->start();
                 $writers[] = $writer;
             }
 
-            $deadline = microtime(true) + 15;
-            while ($probe->countDocuments(['batch' => $batch, 'ready' => true]) < 10) {
-                self::assertLessThan($deadline, microtime(true), 'Concurrent writers did not become ready.');
+            $deadline = microtime(true) + self::WRITER_READY_TIMEOUT_SECONDS;
+            while ($probe->countDocuments(['batch' => $batch, 'ready' => true]) < self::WRITER_COUNT) {
+                foreach ($writers as $writer) {
+                    if ($writer->isTerminated()) {
+                        self::fail(sprintf(
+                            "Concurrent writer exited before readiness (exit %s).\n%s%s",
+                            (string) $writer->getExitCode(),
+                            $writer->getOutput(),
+                            $writer->getErrorOutput(),
+                        ));
+                    }
+                }
+                if (microtime(true) >= $deadline) {
+                    self::fail(sprintf(
+                        'Concurrent writers did not become ready: %d/%d ready after %d seconds.',
+                        $probe->countDocuments(['batch' => $batch, 'ready' => true]),
+                        self::WRITER_COUNT,
+                        self::WRITER_READY_TIMEOUT_SECONDS,
+                    ));
+                }
                 usleep(10_000);
             }
             $probe->insertOne(['_id' => $goId, 'batch' => $batch]);
@@ -175,10 +204,11 @@ final class AccountProfileContentRemovalMigrationTest extends TestCase
         self::assertSame(0, $profileTypes->countDocuments([
             'capabilities.has_content' => ['$exists' => true],
         ]));
-        self::assertSame(30, $profiles->countDocuments([
+        $expectedWriterDocuments = self::WRITER_BATCH_COUNT * self::WRITER_COUNT;
+        self::assertSame($expectedWriterDocuments, $profiles->countDocuments([
             'bio' => ['$exists' => true],
         ]));
-        self::assertSame(30, $profileTypes->countDocuments([
+        self::assertSame($expectedWriterDocuments, $profileTypes->countDocuments([
             'capabilities.has_bio' => true,
         ]));
     }
@@ -186,8 +216,10 @@ final class AccountProfileContentRemovalMigrationTest extends TestCase
     private function legacyWriterProcessCode(): string
     {
         return <<<'PHP'
-require '/var/www/vendor/autoload.php';
-$app = require '/var/www/bootstrap/app.php';
+$basePath = $argv[3];
+$releaseTimeoutSeconds = (int) $argv[4];
+require $basePath.'/vendor/autoload.php';
+$app = require $basePath.'/bootstrap/app.php';
 $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 $database = Illuminate\Support\Facades\DB::connection('tenant')->getDatabase();
 $probe = $database->selectCollection('account_profile_content_cutover_probe');
@@ -195,7 +227,7 @@ $suffix = $argv[1];
 $goId = $argv[2];
 [$batch] = explode('-', $suffix, 2);
 $probe->insertOne(['_id' => 'ready-'.$suffix, 'batch' => (int) $batch, 'ready' => true]);
-$deadline = microtime(true) + 15;
+$deadline = microtime(true) + $releaseTimeoutSeconds;
 while ($probe->countDocuments(['_id' => $goId]) === 0) {
     if (microtime(true) >= $deadline) {
         fwrite(STDERR, 'Timed out waiting for migration probe release.');
