@@ -2,12 +2,14 @@
 
 Canonical Map + POIs projection package for tenant discovery surfaces.
 
-This package owns the materialized `map_pois` projection and the read contracts that power map stack, near, and filter queries. It does not own the upstream source aggregates themselves.
+This package owns the materialized `map_pois` projection and the read contracts
+that power map stack, typed lookup, and nearby-item queries. It does not own the
+upstream source aggregates or the discovery-filter catalog.
 
 ## Scope
 
 - Map POI projection runtime for `event`, `account_profile`, and `static` sources.
-- Read endpoints for map stacks, nearby items, and filter catalogs.
+- Read endpoints for map stacks, typed POI lookup, and nearby items.
 - Tenant-scoped `map_pois` collection migrations and indexes.
 - Rebuild command for projection repair and backfill.
 - Host integration via contracts, listeners/jobs, and adapters.
@@ -134,16 +136,13 @@ Response shape:
 - `has_more`
 - `items[]`
 
-### `GET /api/v1/map/filters`
+## Discovery Filter Boundary
 
-Returns filter catalogs derived from current POIs.
-
-Response shape:
-
-- `tenant_id`
-- `categories`
-- `tags`
-- `taxonomy_terms`
+`GET /api/v1/map/filters` is retired and intentionally returns `404`. Public map
+filter definitions and their type/taxonomy options come from
+`GET /api/v1/discovery-filters/public_map.primary`, backed by the tenant's
+`discovery_filters` settings. The environment payload also projects those
+definitions through `settings.map_ui.filters`.
 
 ## Auth Boundary
 
