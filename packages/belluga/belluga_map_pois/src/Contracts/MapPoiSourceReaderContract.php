@@ -15,6 +15,8 @@ interface MapPoiSourceReaderContract
 
     public function findAccountProfileById(string $profileId): ?object;
 
+    public function isParentAccountPublished(object $profile): bool;
+
     public function findStaticAssetById(string $assetId): ?object;
 
     /**

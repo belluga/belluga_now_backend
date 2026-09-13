@@ -27,7 +27,6 @@ use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
-use Laravel\Sanctum\Sanctum;
 use MongoDB\Model\BSONDocument;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
@@ -70,6 +69,11 @@ class MapPoisControllerTest extends TestCaseTenant
         TenantSettings::query()->delete();
         TenantSettings::create([
             'map_ui' => [
+                'radius' => [
+                    'min_km' => 0.5,
+                    'default_km' => 5,
+                    'max_km' => 200,
+                ],
                 'poi_time_window_days' => [
                     'past' => 0,
                     'future' => 0,
@@ -103,6 +107,21 @@ class MapPoisControllerTest extends TestCaseTenant
 
         $response = $this->getJson("{$this->base_api_tenant}map/pois");
         $response->assertStatus(401);
+    }
+
+    public function test_map_filters_endpoint_is_retired(): void
+    {
+        $this->getJson("{$this->base_api_tenant}map/filters")
+            ->assertNotFound();
+    }
+
+    public function test_map_pois_rejects_caller_selected_sort(): void
+    {
+        $this->getJson(
+            "{$this->base_api_tenant}map/pois?ne_lat=-19.99&ne_lng=-39.99&sw_lat=-20.01&sw_lng=-40.01&sort=distance"
+        )
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['sort']);
     }
 
     public function test_map_poi_lookup_returns_poi_by_typed_reference(): void
@@ -156,7 +175,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertJsonPath('poi.ref_slug', 'event-lookup');
         $response->assertJsonPath('poi.ref_path', '/agenda/evento/event-lookup');
         $response->assertJsonPath('poi.stack_key', $exactKey);
-        $response->assertJsonPath('poi.stack_count', 1);
+        $response->assertJsonMissingPath('poi.stack_count');
         $response->assertJsonPath('poi.visual.mode', 'icon');
         $response->assertJsonPath('poi.visual.icon', 'event');
         $response->assertJsonPath('poi.visual.color', '#3355AA');
@@ -223,7 +242,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertArrayHasKey('stack_key', $stacks[0]);
         $this->assertSame('event', $stacks[0]['top_poi']['ref_type'] ?? null);
         $this->assertArrayHasKey('updated_at', $stacks[0]['top_poi']);
-        $this->assertArrayHasKey('title', $stacks[0]['top_poi']);
+        $this->assertArrayNotHasKey('title', $stacks[0]['top_poi']);
         $this->assertArrayHasKey('subtitle', $stacks[0]['top_poi']);
         $this->assertArrayHasKey('ref_slug', $stacks[0]['top_poi']);
         $this->assertArrayHasKey('ref_path', $stacks[0]['top_poi']);
@@ -281,7 +300,7 @@ class MapPoisControllerTest extends TestCaseTenant
         ]);
 
         $response = $this->getJson(
-            "{$this->base_api_tenant}map/pois?stack_key={$exactKey}"
+            "{$this->base_api_tenant}map/pois?stack_key={$exactKey}&ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0"
         );
         $response->assertStatus(200);
 
@@ -490,6 +509,12 @@ class MapPoisControllerTest extends TestCaseTenant
             $profile->fresh()
         );
 
+        $projected = MapPoi::query()
+            ->where('ref_type', 'account_profile')
+            ->where('ref_id', (string) $profile->_id)
+            ->firstOrFail();
+        $this->assertFalse((bool) $projected->is_active);
+
         $this->getJson("{$this->base_api_tenant}map/pois?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0")
             ->assertStatus(200)
             ->assertJsonMissing([
@@ -505,6 +530,132 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->getJson("{$this->base_api_tenant}map/pois/lookup?ref_type=account_profile&ref_id={$profile->_id}")
             ->assertStatus(404)
             ->assertJsonPath('message', 'POI not found.');
+    }
+
+    public function test_map_reads_use_the_active_projection_without_source_joins(): void
+    {
+        MapPoi::create([
+            'ref_type' => 'account_profile',
+            'ref_id' => 'projection-only-profile',
+            'ref_slug' => 'projection-only-profile',
+            'ref_path' => '/perfis/projection-only-profile',
+            'name' => 'Projection-only profile',
+            'category' => 'venue',
+            'source_type' => 'venue',
+            'location' => $this->point(-40.0, -20.0),
+            'exact_key' => '-40.000000:-20.000000',
+            'priority' => 40,
+            'is_active' => true,
+        ]);
+
+        $this->getJson("{$this->base_api_tenant}map/pois?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0")
+            ->assertOk()
+            ->assertJsonPath('stacks.0.top_poi.ref_id', 'projection-only-profile');
+
+        $this->getJson("{$this->base_api_tenant}map/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10")
+            ->assertOk()
+            ->assertJsonPath('items.0.ref_id', 'projection-only-profile');
+
+        $this->getJson("{$this->base_api_tenant}map/pois/lookup?ref_type=account_profile&ref_id=projection-only-profile")
+            ->assertOk()
+            ->assertJsonPath('poi.ref_id', 'projection-only-profile');
+    }
+
+    public function test_map_pois_requires_a_coherent_viewport_and_rejects_geometry_mismatch(): void
+    {
+        $this->getJson("{$this->base_api_tenant}map/pois")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['ne_lat', 'ne_lng', 'sw_lat', 'sw_lng']);
+
+        $this->getJson(
+            "{$this->base_api_tenant}map/pois?ne_lat=-19.99&ne_lng=-39.99&sw_lat=-20.01&sw_lng=-40.01&origin_lat=-20.1&origin_lng=-40.0"
+        )
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.viewport.0', 'map_viewport_geometry_mismatch');
+    }
+
+    public function test_map_pois_normalizes_a_small_viewport_to_the_tenant_minimum_radius(): void
+    {
+        $bounds = 'ne_lat=-19.9999&ne_lng=-39.9999&sw_lat=-20.0001&sw_lng=-40.0001';
+
+        $this->getJson("{$this->base_api_tenant}map/pois?{$bounds}&origin_lat=-20&origin_lng=-40&max_distance_meters=500")
+            ->assertOk();
+
+        $this->getJson("{$this->base_api_tenant}map/pois?{$bounds}&origin_lat=-20&origin_lng=-40&max_distance_meters=15")
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.viewport.0', 'map_viewport_geometry_mismatch');
+    }
+
+    public function test_map_pois_rejects_viewport_above_tenant_maximum(): void
+    {
+        $settings = TenantSettings::current();
+        $settings?->setAttribute('map_ui', [
+            'radius' => [
+                'min_km' => 0.5,
+                'default_km' => 5,
+                'max_km' => 50,
+            ],
+            'poi_time_window_days' => [
+                'past' => 0,
+                'future' => 0,
+            ],
+        ]);
+        $settings?->save();
+
+        $this->getJson(
+            "{$this->base_api_tenant}map/pois?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0"
+        )
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.viewport.0', 'map_viewport_too_large');
+    }
+
+    public function test_map_pois_samples_only_the_nearest_fifty_candidates_and_reports_partial(): void
+    {
+        for ($index = 0; $index < 51; $index++) {
+            $lng = -40.0 + ($index * 0.00001);
+            MapPoi::create([
+                'ref_type' => 'static',
+                'ref_id' => "sample-{$index}",
+                'name' => "Sample {$index}",
+                'category' => 'sample',
+                'source_type' => 'sample',
+                'location' => $this->point($lng, -20.0),
+                'exact_key' => sprintf('%.6f:-20.000000', $lng),
+                'priority' => 1,
+                'is_active' => true,
+            ]);
+        }
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}map/pois?ne_lat=-19.99&ne_lng=-39.99&sw_lat=-20.01&sw_lng=-40.01"
+        );
+
+        $response->assertOk()->assertJsonPath('is_partial', true);
+        $this->assertCount(50, $response->json('stacks'));
+        $this->assertLessThanOrEqual(204800, strlen((string) $response->getContent()));
+    }
+
+    public function test_map_pois_fails_closed_when_the_bounded_payload_exceeds_two_hundred_kibibytes(): void
+    {
+        for ($index = 0; $index < 50; $index++) {
+            $lng = -40.0 + ($index * 0.00001);
+            MapPoi::create([
+                'ref_type' => 'static',
+                'ref_id' => "oversized-{$index}",
+                'name' => str_repeat((string) ($index % 10), 5000),
+                'category' => 'sample',
+                'location' => $this->point($lng, -20.0),
+                'exact_key' => "oversized-{$index}",
+                'priority' => 1,
+                'is_active' => true,
+            ]);
+        }
+
+        $this->getJson(
+            "{$this->base_api_tenant}map/pois?ne_lat=-19.99&ne_lng=-39.99&sw_lat=-20.01&sw_lng=-40.01"
+        )
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.payload.0', 'map_payload_too_large');
     }
 
     public function test_map_near_returns_cards_with_tags_and_taxonomy(): void
@@ -551,6 +702,64 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertSame('Cuisine', (string) data_get($items[0], 'taxonomy_terms.0.taxonomy_name'));
         $this->assertArrayHasKey('time_start', $items[0]);
         $this->assertArrayHasKey('time_end', $items[0]);
+    }
+
+    public function test_map_near_applies_source_local_types_and_global_event_order_before_pagination(): void
+    {
+        foreach ([
+            ['id' => 'later-near', 'type' => 'show', 'lng' => -40.0001, 'start' => '2026-09-13T12:00:00Z'],
+            ['id' => 'earlier-farther', 'type' => 'show', 'lng' => -40.01, 'start' => '2026-09-12T12:00:00Z'],
+            ['id' => 'wrong-type', 'type' => 'festival', 'lng' => -40.0, 'start' => '2026-09-11T12:00:00Z'],
+        ] as $item) {
+            MapPoi::create([
+                'ref_type' => 'event',
+                'ref_id' => $item['id'],
+                'name' => $item['id'],
+                'category' => 'event',
+                'source_type' => $item['type'],
+                'location' => $this->point($item['lng'], -20.0),
+                'exact_key' => $item['id'],
+                'time_start' => Carbon::parse($item['start']),
+                'priority' => 1,
+                'is_active' => true,
+            ]);
+        }
+
+        $query = 'origin_lat=-20.0&origin_lng=-40.0&source=event&types[]=show&page_size=1';
+        $this->getJson("{$this->base_api_tenant}map/near?{$query}&page=1")
+            ->assertOk()
+            ->assertJsonPath('items.0.ref_id', 'earlier-farther')
+            ->assertJsonPath('has_more', true);
+        $this->getJson("{$this->base_api_tenant}map/near?{$query}&page=2")
+            ->assertOk()
+            ->assertJsonPath('items.0.ref_id', 'later-near')
+            ->assertJsonPath('has_more', false);
+    }
+
+    public function test_map_near_caps_caller_distance_to_the_tenant_maximum(): void
+    {
+        $settings = TenantSettings::current();
+        $settings?->setAttribute('map_ui', [
+            'radius' => ['min_km' => 0.5, 'default_km' => 5, 'max_km' => 50],
+            'poi_time_window_days' => ['past' => 0, 'future' => 0],
+        ]);
+        $settings?->save();
+        MapPoi::create([
+            'ref_type' => 'static',
+            'ref_id' => 'outside-tenant-envelope',
+            'name' => 'Outside tenant envelope',
+            'category' => 'sample',
+            'location' => $this->point(-39.4, -20.0),
+            'exact_key' => 'outside-tenant-envelope',
+            'priority' => 1,
+            'is_active' => true,
+        ]);
+
+        $this->getJson(
+            "{$this->base_api_tenant}map/near?origin_lat=-20.0&origin_lng=-40.0&max_distance_meters=100000&page=1&page_size=10"
+        )
+            ->assertOk()
+            ->assertJsonCount(0, 'items');
     }
 
     public function test_map_near_supports_partial_text_search(): void
@@ -783,486 +992,6 @@ class MapPoisControllerTest extends TestCaseTenant
         } finally {
             Carbon::setTestNow();
         }
-    }
-
-    public function test_map_filters_returns_catalogs(): void
-    {
-        $location = $this->point(-40.0, -20.0);
-        $taxonomy = Taxonomy::create([
-            'slug' => 'map_cuisine',
-            'name' => 'Cuisine',
-            'applies_to' => ['event', 'account_profile', 'static_asset'],
-        ]);
-        TaxonomyTerm::create([
-            'taxonomy_id' => (string) $taxonomy->_id,
-            'slug' => 'italian',
-            'name' => 'Italian',
-        ]);
-
-        TenantSettings::query()->firstOrFail()->update([
-            'map_ui' => [
-                'poi_time_window_days' => [
-                    'past' => 0,
-                    'future' => 0,
-                ],
-                'filters' => [
-                    [
-                        'key' => 'events',
-                        'label' => 'Eventos em destaque',
-                        'image_uri' => 'https://tenant-zeta.test/map-filters/events/image?v=1710000000',
-                        'override_marker' => true,
-                        'marker_override' => [
-                            'mode' => 'icon',
-                            'icon' => 'celebration',
-                            'color' => '#FF2200',
-                            'icon_color' => '#101010',
-                        ],
-                        'query' => [
-                            'source' => 'event',
-                        ],
-                    ],
-                    [
-                        'key' => 'praia',
-                        'label' => 'Praias',
-                        'override_marker' => true,
-                        'marker_override' => [
-                            'mode' => 'image',
-                            'image_uri' => 'https://tenant-zeta.test/map-filters/praia/image?v=1710000002',
-                        ],
-                        'query' => [
-                            'source' => 'static_asset',
-                            'types' => ['beach_spot'],
-                        ],
-                    ],
-                ],
-            ],
-        ]);
-
-        MapPoi::create([
-            'ref_type' => 'event',
-            'ref_id' => 'event-3',
-            'ref_slug' => 'event-three',
-            'ref_path' => '/agenda/evento/event-three',
-            'name' => 'Event Three',
-            'category' => 'event',
-            'source_type' => 'show',
-            'location' => $location,
-            'priority' => 60,
-            'is_active' => true,
-            'tags' => ['live'],
-            'taxonomy_terms' => [
-                [
-                    'type' => 'map_cuisine',
-                    'value' => 'italian',
-                    'name' => 'italian',
-                    'taxonomy_name' => 'map_cuisine',
-                    'label' => 'italian',
-                ],
-            ],
-            'taxonomy_terms_flat' => ['map_cuisine:italian'],
-            'exact_key' => $this->exactKey($location),
-        ]);
-        MapPoi::create([
-            'ref_type' => 'static',
-            'ref_id' => 'static-beach',
-            'ref_slug' => 'praia-azul',
-            'ref_path' => '/static/praia-azul',
-            'name' => 'Praia Azul',
-            'category' => 'beach',
-            'source_type' => 'beach_spot',
-            'location' => $location,
-            'priority' => 40,
-            'is_active' => true,
-            'exact_key' => $this->exactKey($location),
-        ]);
-
-        $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
-        $response->assertStatus(200);
-
-        $this->assertNotEmpty($response->json('categories'));
-        $this->assertNotEmpty($response->json('tags'));
-        $this->assertNotEmpty($response->json('taxonomy_terms'));
-        $response->assertJsonPath('taxonomy_terms.0.type', 'map_cuisine');
-        $response->assertJsonPath('taxonomy_terms.0.value', 'italian');
-        $response->assertJsonPath('taxonomy_terms.0.name', 'Italian');
-        $response->assertJsonPath('taxonomy_terms.0.taxonomy_name', 'Cuisine');
-        $response->assertJsonPath('taxonomy_terms.0.label', 'Italian');
-        $response->assertJsonPath('categories.0.key', 'events');
-        $response->assertJsonPath('categories.0.label', 'Eventos em destaque');
-        $imageUri = (string) $response->json('categories.0.image_uri');
-        $this->assertNotSame('', $imageUri);
-        $this->assertSame('/api/v1/media/map-filters/events', parse_url($imageUri, PHP_URL_PATH));
-        parse_str((string) parse_url($imageUri, PHP_URL_QUERY), $imageQuery);
-        $this->assertSame('1710000000', $imageQuery['v'] ?? null);
-        $response->assertJsonPath('categories.0.query.source', 'event');
-        $response->assertJsonPath('categories.0.override_marker', true);
-        $response->assertJsonPath('categories.0.marker_override.mode', 'icon');
-        $response->assertJsonPath('categories.0.marker_override.icon', 'celebration');
-        $response->assertJsonPath('categories.0.marker_override.color', '#FF2200');
-        $response->assertJsonPath('categories.0.marker_override.icon_color', '#101010');
-        $response->assertJsonPath('categories.1.key', 'praia');
-        $response->assertJsonPath('categories.1.label', 'Praias');
-        $response->assertJsonPath('categories.1.query.source', 'static_asset');
-        $response->assertJsonPath('categories.1.query.types.0', 'beach_spot');
-        $response->assertJsonPath('categories.1.override_marker', true);
-        $response->assertJsonPath('categories.1.marker_override.mode', 'image');
-        $overrideImageUri = (string) $response->json('categories.1.marker_override.image_uri');
-        $this->assertSame('/api/v1/media/map-filters/praia', parse_url($overrideImageUri, PHP_URL_PATH));
-    }
-
-    public function test_map_filters_normalize_bson_marker_override_icon_color(): void
-    {
-        $location = $this->point(-40.0, -20.0);
-
-        TenantSettings::query()->firstOrFail()->update([
-            'map_ui' => [
-                'poi_time_window_days' => [
-                    'past' => 0,
-                    'future' => 0,
-                ],
-                'filters' => [
-                    new BSONDocument([
-                        'key' => 'events',
-                        'label' => 'Eventos',
-                        'override_marker' => true,
-                        'marker_override' => new BSONDocument([
-                            'mode' => 'icon',
-                            'icon' => 'music',
-                            'color' => '#C6141F',
-                            'icon_color' => '#101010',
-                        ]),
-                        'query' => new BSONDocument([
-                            'source' => 'event',
-                        ]),
-                    ]),
-                ],
-            ],
-        ]);
-
-        MapPoi::create([
-            'ref_type' => 'event',
-            'ref_id' => 'event-visual',
-            'ref_slug' => 'event-visual',
-            'ref_path' => '/agenda/evento/event-visual',
-            'name' => 'Event Visual',
-            'category' => 'event',
-            'source_type' => 'show',
-            'location' => $location,
-            'priority' => 60,
-            'is_active' => true,
-            'exact_key' => $this->exactKey($location),
-        ]);
-
-        $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
-        $response->assertStatus(200);
-
-        $response->assertJsonPath('categories.0.key', 'events');
-        $response->assertJsonPath('categories.0.query.source', 'event');
-        $response->assertJsonPath('categories.0.override_marker', true);
-        $response->assertJsonPath('categories.0.marker_override.mode', 'icon');
-        $response->assertJsonPath('categories.0.marker_override.icon', 'music');
-        $response->assertJsonPath('categories.0.marker_override.color', '#C6141F');
-        $response->assertJsonPath('categories.0.marker_override.icon_color', '#101010');
-    }
-
-    public function test_map_filters_exposes_configured_visual_when_marker_override_is_off(): void
-    {
-        TenantSettings::query()->firstOrFail()->update([
-            'map_ui' => [
-                'poi_time_window_days' => [
-                    'past' => 0,
-                    'future' => 0,
-                ],
-                'filters' => [
-                    [
-                        'key' => 'events',
-                        'label' => 'Eventos',
-                        'override_marker' => false,
-                        'marker_override' => [
-                            'mode' => 'icon',
-                            'icon' => 'music',
-                            'color' => '#C6141F',
-                            'icon_color' => '#FFFFFF',
-                        ],
-                        'query' => [
-                            'source' => 'event',
-                        ],
-                    ],
-                ],
-            ],
-        ]);
-
-        $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
-        $response->assertStatus(200);
-
-        $response->assertJsonPath('categories.0.key', 'events');
-        $response->assertJsonPath('categories.0.override_marker', false);
-        $response->assertJsonPath('categories.0.marker_override.mode', 'icon');
-        $response->assertJsonPath('categories.0.marker_override.icon', 'music');
-        $response->assertJsonPath('categories.0.marker_override.color', '#C6141F');
-        $response->assertJsonPath('categories.0.marker_override.icon_color', '#FFFFFF');
-    }
-
-    public function test_map_filters_normalize_bson_marker_override_image_uri(): void
-    {
-        $location = $this->point(-40.0, -20.0);
-
-        TenantSettings::query()->firstOrFail()->update([
-            'map_ui' => [
-                'poi_time_window_days' => [
-                    'past' => 0,
-                    'future' => 0,
-                ],
-                'filters' => [
-                    new BSONDocument([
-                        'key' => 'praia',
-                        'label' => 'Praias',
-                        'override_marker' => true,
-                        'marker_override' => new BSONDocument([
-                            'mode' => 'image',
-                            'image_uri' => 'https://tenant-zeta.test/map-filters/praia/image?v=1710000002',
-                        ]),
-                        'query' => new BSONDocument([
-                            'source' => 'static_asset',
-                            'types' => ['beach_spot'],
-                        ]),
-                    ]),
-                ],
-            ],
-        ]);
-
-        MapPoi::create([
-            'ref_type' => 'static',
-            'ref_id' => 'static-beach',
-            'ref_slug' => 'praia-azul',
-            'ref_path' => '/static/praia-azul',
-            'name' => 'Praia Azul',
-            'category' => 'beach',
-            'source_type' => 'beach_spot',
-            'location' => $location,
-            'priority' => 40,
-            'is_active' => true,
-            'exact_key' => $this->exactKey($location),
-        ]);
-
-        $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
-        $response->assertStatus(200);
-
-        $response->assertJsonPath('categories.0.key', 'praia');
-        $response->assertJsonPath('categories.0.override_marker', true);
-        $response->assertJsonPath('categories.0.marker_override.mode', 'image');
-        $overrideImageUri = (string) $response->json('categories.0.marker_override.image_uri');
-        $this->assertNotSame('', $overrideImageUri);
-        $this->assertSame('/api/v1/media/map-filters/praia', parse_url($overrideImageUri, PHP_URL_PATH));
-        parse_str((string) parse_url($overrideImageUri, PHP_URL_QUERY), $imageQuery);
-        $this->assertSame('1710000002', $imageQuery['v'] ?? null);
-    }
-
-    public function test_map_filters_returns_configured_filters_even_when_count_is_zero(): void
-    {
-        $location = $this->point(-40.0, -20.0);
-
-        TenantSettings::query()->firstOrFail()->update([
-            'map_ui' => [
-                'poi_time_window_days' => [
-                    'past' => 0,
-                    'future' => 0,
-                ],
-                'filters' => [
-                    [
-                        'key' => 'events',
-                        'label' => 'Eventos',
-                        'query' => [
-                            'source' => 'event',
-                        ],
-                    ],
-                    [
-                        'key' => 'restaurantes',
-                        'label' => 'Restaurantes',
-                        'query' => [
-                            'source' => 'account_profile',
-                            'types' => ['restaurant'],
-                        ],
-                    ],
-                ],
-            ],
-        ]);
-
-        MapPoi::create([
-            'ref_type' => 'event',
-            'ref_id' => 'event-only',
-            'ref_slug' => 'event-only',
-            'ref_path' => '/agenda/evento/event-only',
-            'name' => 'Event only',
-            'category' => 'event',
-            'source_type' => 'show',
-            'location' => $location,
-            'priority' => 60,
-            'is_active' => true,
-            'exact_key' => $this->exactKey($location),
-        ]);
-
-        $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
-        $response->assertStatus(200);
-
-        $response->assertJsonPath('categories.0.key', 'events');
-        $response->assertJsonPath('categories.0.count', 1);
-        $response->assertJsonPath('categories.1.key', 'restaurantes');
-        $response->assertJsonPath('categories.1.count', 0);
-    }
-
-    public function test_map_filters_prefer_canonical_public_map_discovery_surface_over_legacy_map_ui_filters(): void
-    {
-        $location = $this->point(-40.0, -20.0);
-
-        TenantSettings::query()->firstOrFail()->update([
-            'map_ui' => [
-                'poi_time_window_days' => [
-                    'past' => 0,
-                    'future' => 0,
-                ],
-                'filters' => [
-                    [
-                        'key' => 'legacy',
-                        'label' => 'Legacy',
-                        'override_marker' => true,
-                        'marker_override' => [
-                            'mode' => 'icon',
-                            'icon' => 'store',
-                            'color' => '#111111',
-                            'icon_color' => '#EEEEEE',
-                        ],
-                        'query' => [
-                            'source' => 'account_profile',
-                        ],
-                    ],
-                ],
-            ],
-            'discovery_filters' => [
-                'surfaces' => [
-                    'public_map.primary' => [
-                        'filters' => [
-                            [
-                                'key' => 'events',
-                                'target' => 'map_poi',
-                                'label' => 'Eventos',
-                                'override_marker' => true,
-                                'marker_override' => [
-                                    'mode' => 'icon',
-                                    'icon' => 'music',
-                                    'color' => '#D71920',
-                                    'icon_color' => '#FFFFFF',
-                                ],
-                                'query' => [
-                                    'entities' => ['event'],
-                                    'types_by_entity' => [
-                                        'event' => ['show'],
-                                    ],
-                                    'taxonomy' => [
-                                        'music_genre' => ['rock'],
-                                    ],
-                                ],
-                            ],
-                        ],
-                    ],
-                ],
-            ],
-        ]);
-
-        MapPoi::create([
-            'ref_type' => 'event',
-            'ref_id' => 'event-rock',
-            'ref_slug' => 'event-rock',
-            'ref_path' => '/agenda/evento/event-rock',
-            'name' => 'Rock Event',
-            'category' => 'event',
-            'source_type' => 'show',
-            'location' => $location,
-            'priority' => 60,
-            'is_active' => true,
-            'taxonomy_terms' => [
-                [
-                    'type' => 'music_genre',
-                    'value' => 'rock',
-                    'name' => 'Rock',
-                    'taxonomy_name' => 'Gênero musical',
-                    'label' => 'Rock',
-                ],
-            ],
-            'taxonomy_terms_flat' => ['music_genre:rock'],
-            'exact_key' => $this->exactKey($location),
-        ]);
-
-        $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
-        $response->assertStatus(200);
-
-        $keys = collect($response->json('categories') ?? [])
-            ->map(static fn (array $category): string => (string) ($category['key'] ?? ''))
-            ->all();
-        $this->assertContains('events', $keys);
-        $this->assertNotContains('legacy', $keys);
-        $response->assertJsonPath('categories.0.key', 'events');
-        $response->assertJsonPath('categories.0.label', 'Eventos');
-        $response->assertJsonPath('categories.0.override_marker', true);
-        $response->assertJsonPath('categories.0.marker_override.mode', 'icon');
-        $response->assertJsonPath('categories.0.marker_override.icon', 'music');
-        $response->assertJsonPath('categories.0.marker_override.color', '#D71920');
-        $response->assertJsonPath('categories.0.marker_override.icon_color', '#FFFFFF');
-        $response->assertJsonPath('categories.0.query.source', 'event');
-        $response->assertJsonPath('categories.0.query.types.0', 'show');
-        $response->assertJsonPath('categories.0.query.taxonomy.0', 'music_genre:rock');
-    }
-
-    public function test_map_filters_preserve_canonical_visual_when_marker_override_is_disabled(): void
-    {
-        TenantSettings::query()->firstOrFail()->update([
-            'map_ui' => [
-                'filters' => [
-                    [
-                        'key' => 'legacy-events',
-                        'label' => 'Legacy Events',
-                        'override_marker' => true,
-                        'marker_override' => [
-                            'mode' => 'icon',
-                            'icon' => 'event',
-                            'color' => '#111111',
-                            'icon_color' => '#EEEEEE',
-                        ],
-                    ],
-                ],
-            ],
-            'discovery_filters' => [
-                'surfaces' => [
-                    'public_map.primary' => [
-                        'filters' => [
-                            [
-                                'key' => 'agenda-custom',
-                                'target' => 'map_poi',
-                                'label' => 'Agenda Custom',
-                                'icon' => 'music_note',
-                                'color' => '#0F766E',
-                                'override_marker' => false,
-                                'query' => [
-                                    'entities' => ['event'],
-                                ],
-                            ],
-                        ],
-                    ],
-                ],
-            ],
-        ]);
-
-        $response = $this->getJson("{$this->base_api_tenant}map/filters?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
-        $response->assertStatus(200);
-
-        $response->assertJsonPath('categories.0.key', 'agenda-custom');
-        $response->assertJsonPath('categories.0.label', 'Agenda Custom');
-        $response->assertJsonPath('categories.0.override_marker', false);
-        $response->assertJsonPath('categories.0.marker_override.mode', 'icon');
-        $response->assertJsonPath('categories.0.marker_override.icon', 'music_note');
-        $response->assertJsonPath('categories.0.marker_override.color', '#0F766E');
-        $response->assertJsonPath('categories.0.marker_override.icon_color', '#FFFFFF');
-        $response->assertJsonPath('categories.0.query.source', 'event');
     }
 
     public function test_discovery_filters_backfill_map_ui_filters_is_idempotent(): void
@@ -2048,7 +1777,7 @@ class MapPoisControllerTest extends TestCaseTenant
             'ref_path' => '/agenda/evento/event-polygon',
             'name' => 'Polygon Event',
             'category' => 'event',
-            'location' => $this->point(-45.0, -25.0),
+            'location' => $this->point(-40.0, -21.2),
             'discovery_scope' => [
                 'type' => 'polygon',
                 'polygon' => [
@@ -2064,7 +1793,7 @@ class MapPoisControllerTest extends TestCaseTenant
             ],
             'priority' => 60,
             'is_active' => true,
-            'exact_key' => '-25.00000,-45.00000',
+            'exact_key' => '-21.20000,-40.00000',
         ]);
 
         $response = $this->getJson("{$this->base_api_tenant}map/pois?ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");

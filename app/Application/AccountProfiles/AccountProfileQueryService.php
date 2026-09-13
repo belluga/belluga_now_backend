@@ -1010,13 +1010,6 @@ class AccountProfileQueryService extends AbstractQueryService
                 resourceId: (string) $profile->getKey(),
                 field: 'bio',
             ),
-            'content' => $this->richTextReadCanonicalizer->canonicalize(
-                $profile->content,
-                allowExplicitHttpsLinks: true,
-                resource: 'account_profile',
-                resourceId: (string) $profile->getKey(),
-                field: 'content',
-            ),
             'taxonomy_terms' => $this->taxonomyTermSummaryResolver->ensureSnapshots(
                 is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
             ),

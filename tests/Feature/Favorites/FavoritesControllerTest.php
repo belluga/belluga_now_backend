@@ -17,6 +17,7 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Favorites\Models\Tenants\FavoriteEdge;
+use Belluga\Settings\Models\Tenants\TenantSettings;
 use Belluga\PushHandler\Contracts\PushTopicTransportContract;
 use Belluga\PushHandler\Models\Tenants\PushCredential;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
@@ -87,6 +88,12 @@ class FavoritesControllerTest extends TestCaseTenant
         FavoriteEdge::query()->delete();
         AccountProfile::query()->withTrashed()->forceDelete();
         EventOccurrence::query()->withTrashed()->forceDelete();
+        $settings = TenantSettings::current() ?? new TenantSettings;
+        $settings->setAttribute('_id', 'settings_root');
+        $settings->setAttribute('home_favorites_pinned_profile', [
+            'account_profile_id' => null,
+        ]);
+        $settings->save();
 
         [$this->account] = $this->seedAccountWithRole([
             'account-users:view',
@@ -220,6 +227,52 @@ class FavoritesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('has_more', false);
         $this->assertSame([], $response->json('items'));
+    }
+
+    public function test_favorites_returns_a_separate_pin_without_requiring_a_favorite_edge(): void
+    {
+        $profile = $this->createProfile('Pinned Profile', 'pinned-profile');
+        $profile->account()->firstOrFail()->update(['ownership_state' => 'tenant_owned']);
+        $settings = TenantSettings::current();
+        $settings?->setAttribute('home_favorites_pinned_profile', [
+            'account_profile_id' => (string) $profile->_id,
+        ]);
+        $settings?->save();
+
+        $response = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=10&registry_key=account_profile&target_type=account_profile");
+
+        $response->assertOk();
+        $response->assertJsonCount(0, 'items');
+        $response->assertJsonPath('has_more', false);
+        $response->assertJsonPath('pinned.target_id', (string) $profile->_id);
+        $response->assertJsonPath('pinned.registry_key', 'account_profile');
+        $response->assertJsonPath('pinned.target_type', 'account_profile');
+        $this->assertArrayNotHasKey('favorite_id', $response->json('pinned'));
+        $this->assertArrayNotHasKey('favorited_at', $response->json('pinned'));
+    }
+
+    public function test_favorites_keeps_matching_favorite_item_and_returns_pin_only_on_page_one(): void
+    {
+        $profile = $this->createProfile('Pinned Favorite', 'pinned-favorite');
+        $profile->account()->firstOrFail()->update(['ownership_state' => 'tenant_owned']);
+        $this->createEdge((string) $profile->_id, Carbon::now());
+        $settings = TenantSettings::current();
+        $settings?->setAttribute('home_favorites_pinned_profile', [
+            'account_profile_id' => (string) $profile->_id,
+        ]);
+        $settings?->save();
+
+        $pageOne = $this->getJson("{$this->base_api_tenant}favorites?page=1&page_size=10&registry_key=account_profile&target_type=account_profile");
+        $pageOne->assertOk()
+            ->assertJsonPath('pinned.target_id', (string) $profile->_id)
+            ->assertJsonPath('items.0.target_id', (string) $profile->_id);
+
+        $pageTwo = $this->getJson("{$this->base_api_tenant}favorites?page=2&page_size=10&registry_key=account_profile&target_type=account_profile");
+        $pageTwo->assertOk()->assertJsonPath('pinned', null);
+        $this->assertTrue(FavoriteEdge::query()
+            ->where('owner_user_id', (string) $this->user->getAuthIdentifier())
+            ->where('target_id', (string) $profile->_id)
+            ->exists());
     }
 
     public function test_favorites_uses_default_registry_when_registry_filter_is_omitted(): void

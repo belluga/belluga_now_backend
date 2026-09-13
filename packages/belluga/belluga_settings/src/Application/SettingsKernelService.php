@@ -53,6 +53,20 @@ class SettingsKernelService
         return $values;
     }
 
+    /** @return array<string, mixed> */
+    public function namespaceValues(string $scope, mixed $user, string $namespace): array
+    {
+        $definition = $this->registry->find($namespace, $scope);
+        if (! $definition) {
+            throw new SettingsNamespaceNotFoundException($namespace, $scope);
+        }
+        if (! $this->canAccess($user, $definition)) {
+            throw new AuthorizationException('Not authorized for this settings namespace.');
+        }
+
+        return $this->resolvedNamespaceValue($scope, $definition);
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>

@@ -24,6 +24,9 @@
         <testsuite name="Feature-Map">
             <directory>tests/Feature/Map</directory>
         </testsuite>
+        <testsuite name="Feature-Migrations">
+            <directory>tests/Feature/Migrations</directory>
+        </testsuite>
         <testsuite name="Feature-StaticAssets">
             <directory>tests/Feature/StaticAssets</directory>
         </testsuite>

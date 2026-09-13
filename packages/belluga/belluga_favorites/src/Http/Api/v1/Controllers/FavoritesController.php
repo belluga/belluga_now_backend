@@ -32,6 +32,7 @@ class FavoritesController extends Controller
             return response()->json([
                 'items' => [],
                 'has_more' => false,
+                'pinned' => null,
             ]);
         }
 
@@ -47,6 +48,7 @@ class FavoritesController extends Controller
         return response()->json([
             'items' => $payload['items'],
             'has_more' => $payload['has_more'],
+            'pinned' => $payload['pinned'],
         ]);
     }
 

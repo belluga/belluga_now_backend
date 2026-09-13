@@ -370,10 +370,6 @@ final class AccountProfileTypeCapabilityCatalogGuardrailTest extends TestCase
                 'default' => false,
                 'requires' => [],
             ],
-            AccountProfileTypeCapabilityCatalog::HAS_CONTENT => [
-                'default' => false,
-                'requires' => [],
-            ],
             AccountProfileTypeCapabilityCatalog::HAS_TAXONOMIES => [
                 'default' => false,
                 'requires' => [],

@@ -75,6 +75,11 @@ return [
         'packages/belluga/belluga_favorites/database/migrations',
     ],
 
+    'landlord_migration_paths' => [
+        'database/migrations/landlord',
+        'packages/belluga/belluga_settings/database/migrations_landlord',
+    ],
+
     /*
      * The connection name to reach the landlord database.
      */
