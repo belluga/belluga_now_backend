@@ -74,7 +74,7 @@ final class MigrationSchemaConvergenceTest extends TestCase
         $this->seedSentinel($freshTenant, 'fresh-tenant');
         $this->migrateComplete($freshLandlord, $freshTenant);
         self::assertSame(14, $this->ledgerCount($freshLandlord));
-        self::assertSame(83, $this->ledgerCount($freshTenant));
+        self::assertSame(84, $this->ledgerCount($freshTenant));
         self::assertSame([], $this->retiredSchema($freshLandlord));
         self::assertSame([], $this->retiredSchema($freshTenant));
         $this->assertSentinel($freshLandlord, 'fresh-landlord');
@@ -98,7 +98,7 @@ final class MigrationSchemaConvergenceTest extends TestCase
         self::assertSame(['_id_'], $this->indexNames($productionTenant, 'account_profile_command_receipts'));
         $this->migrateComplete($productionLandlord, $productionTenant);
         self::assertSame(14, $this->ledgerCount($productionLandlord));
-        self::assertSame(83, $this->ledgerCount($productionTenant));
+        self::assertSame(84, $this->ledgerCount($productionTenant));
         self::assertSame($productionRetiredBefore, $this->retiredSchema($productionTenant));
         $this->assertSentinel($productionLandlord, 'production-landlord');
         $this->assertSentinel($productionTenant, 'production-tenant');
@@ -109,7 +109,7 @@ final class MigrationSchemaConvergenceTest extends TestCase
         $evidence = [
             'frozen' => [
                 'landlord' => ['counts' => [18, 70, 1], 'fingerprint' => '1888c52bc3fb0920e2d600eb6b3ce44b80bc12be731b441fbd5d6db90566b956'],
-                'tenant' => ['counts' => [47, 291, 1], 'fingerprint' => '96bd209691969954445a5f3e3bd1fa17ba8b214c6aa044e0bab291b8e341dd2d'],
+                'tenant' => ['counts' => [47, 291, 1], 'fingerprint' => 'd59a105b704dd0ebeaac0f25df221a6213ccd6427dab6ad3c5f9a8da7e8913bf'],
             ],
             'actual' => [
                 'fresh' => [
@@ -225,8 +225,8 @@ final class MigrationSchemaConvergenceTest extends TestCase
         $this->assertSentinel($landlord, 'isolation-landlord');
         $this->assertSentinel($tenantA, 'isolation-a');
         $this->assertSentinel($tenantB, 'isolation-b');
-        self::assertSame(83, $this->ledgerCount($tenantA));
-        self::assertSame(83, $this->ledgerCount($tenantB));
+        self::assertSame(84, $this->ledgerCount($tenantA));
+        self::assertSame(84, $this->ledgerCount($tenantB));
     }
 
     public function test_fresh_schema_comparator_rejects_every_retired_name_and_includes_unknown_collections(): void

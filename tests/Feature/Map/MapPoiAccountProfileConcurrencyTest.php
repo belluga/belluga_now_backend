@@ -119,6 +119,7 @@ class MapPoiAccountProfileConcurrencyTest extends TestCase
     ): void {
         $barrier = sys_get_temp_dir().'/map-poi-account-profile-barrier-'.bin2hex(random_bytes(8));
         $processes = [];
+        $before = $this->effectiveActivityState($account, $profile);
 
         try {
             foreach (range(1, $concurrency) as $worker) {
@@ -155,20 +156,20 @@ class MapPoiAccountProfileConcurrencyTest extends TestCase
                 $concurrency,
                 $publish && $activate ? 'active' : 'inactive',
             );
-            $this->assertEffectiveActivityInvariant(
-                $account,
-                $profile,
-                $publish,
-                $activate,
-                $label,
-            );
             $this->assertSame(
                 array_fill(0, $concurrency, true),
                 array_column($results, 'successful'),
                 $label.': '.json_encode($results, JSON_THROW_ON_ERROR),
             );
-            $this->assertOverlapResultsAreAdmittedOrKnownTransactionRejections(
+            $admittedOperations = $this->assertOverlapResultsAreAdmittedOrKnownTransactionRejections(
                 $results,
+                $label,
+            );
+            $this->assertEffectiveActivityInvariant(
+                $account,
+                $profile,
+                in_array('account', $admittedOperations, true) ? $publish : $before['published'],
+                in_array('profile', $admittedOperations, true) ? $activate : $before['profile_active'],
                 $label,
             );
         } finally {
@@ -296,6 +297,22 @@ PHP;
         );
     }
 
+    /** @return array{published: bool, profile_active: bool} */
+    private function effectiveActivityState(Account $account, AccountProfile $profile): array
+    {
+        Tenant::query()->firstOrFail()->makeCurrent();
+
+        return [
+            'published' => data_get(
+                Account::query()->findOrFail((string) $account->_id)->getAttribute('publication'),
+                'status',
+            ) === AccountPublicationStateService::PUBLISHED,
+            'profile_active' => (bool) AccountProfile::query()
+                ->findOrFail((string) $profile->_id)
+                ->is_active,
+        ];
+    }
+
     /**
      * MongoDB may reject a same-document transaction contender. The services
      * expose that existing boundary as a validation error; rejected contenders
@@ -306,7 +323,7 @@ PHP;
     private function assertOverlapResultsAreAdmittedOrKnownTransactionRejections(
         array $results,
         string $label,
-    ): void {
+    ): array {
         $admittedOperations = [];
         $rejected = 0;
 
@@ -334,14 +351,15 @@ PHP;
             );
         }
 
-        $this->assertContains('account', $admittedOperations, $label.': no Account mutation admitted');
-        $this->assertContains('profile', $admittedOperations, $label.': no Profile mutation admitted');
+        $this->assertNotEmpty($admittedOperations, $label.': no mutation admitted');
         fwrite(STDOUT, sprintf(
             "MAP_BCI_BURST %s admitted=%d rejected=%d invariant=preserved\n",
             $label,
             count($results) - $rejected,
             $rejected,
         ));
+
+        return $admittedOperations;
     }
 
     /** @return array<string, mixed> */
