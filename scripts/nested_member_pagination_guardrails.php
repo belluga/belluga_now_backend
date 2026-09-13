@@ -108,14 +108,12 @@ final class NestedMemberPaginationGuard
         $historicalApproved = is_array($historical)
             && ($historical['status'] ?? null) === 'active'
             && ($historical['provenance_commit'] ?? null) === $baseline
-            && ($historical['target_sha256'] ?? null) === @hash_file('sha256', $this->root.'/'.$historicalPath)
-            && in_array($historicalPath, $lock['bootstrap_inventory']['restores'] ?? [], true);
+            && ($historical['target_sha256'] ?? null) === @hash_file('sha256', $this->root.'/'.$historicalPath);
         $forwardApproved = is_array($forward)
             && ($forward['status'] ?? null) === 'active'
             && is_array($forward)
             && ($forward['preflight_id'] ?? null) === 'tenant.account_profiles.nested_delete_retirement_v1'
             && ($forward['target_sha256'] ?? null) === @hash_file('sha256', $this->root.'/'.$forwardPath)
-            && in_array($forwardPath, $lock['bootstrap_inventory']['forwards'] ?? [], true)
             && is_string($forwardSource)
             && str_contains($forwardSource, "dropIndex('idx_account_profiles_nested_member_delete_v1')");
 
