@@ -9,6 +9,7 @@ use App\Application\Auth\TenantPublicAuthMethodResolver;
 use App\Application\Branding\BrandingManifestService;
 use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Telemetry\TelemetrySettingsKernelBridge;
+use App\Integration\DiscoveryFilters\DiscoveryFiltersSettingsPatchGuard;
 use App\Application\Tenants\TenantRequestLifecycleTrace;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
@@ -26,6 +27,7 @@ class TenantEnvironmentPayloadFactory
         private readonly AccountProfileRegistryService $profileRegistryService,
         private readonly BrandingManifestService $brandingManifestService,
         private readonly BrandingPublicWebMediaService $brandingPublicWebMediaService,
+        private readonly DiscoveryFiltersSettingsPatchGuard $discoveryFiltersPatchGuard,
     ) {}
 
     /**
@@ -135,9 +137,7 @@ class TenantEnvironmentPayloadFactory
         $canonicalFilters = $this->canonicalPublicMapFilters(
             $settings?->getAttribute('discovery_filters')
         );
-        if ($canonicalFilters !== []) {
-            $mapUi['filters'] = $canonicalFilters;
-        }
+        $mapUi['filters'] = $canonicalFilters;
 
         return $mapUi;
     }
@@ -157,6 +157,9 @@ class TenantEnvironmentPayloadFactory
 
         $canonical = [];
         foreach ($filters as $filter) {
+            if (! $this->discoveryFiltersPatchGuard->isValidPublicMapFilter($filter)) {
+                continue;
+            }
             $normalized = $this->normalizeBrandingData($filter);
             $key = strtolower(trim((string) ($normalized['key'] ?? '')));
             $label = trim((string) ($normalized['label'] ?? ''));

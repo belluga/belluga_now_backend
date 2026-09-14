@@ -6,8 +6,10 @@ namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
+use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
+use MongoDB\Model\BSONDocument;
 
 final class AccountProfileCandidateDiscoveryService
 {
@@ -15,12 +17,15 @@ final class AccountProfileCandidateDiscoveryService
 
     public const SCOPE_CONTACT_CAPABLE = 'contact_capable';
 
+    public const SCOPE_HOME_FAVORITES_PINNED_PROFILE = 'home_favorites_pinned_profile';
+
     private const MAX_PAGE = 50;
 
     private const MAX_BROWSE_ROWS = 2500;
 
     public function __construct(
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
+        private readonly HomeFavoritesPinnedProfileService $homeFavoritesPinnedProfileService,
     ) {}
 
     /**
@@ -28,7 +33,11 @@ final class AccountProfileCandidateDiscoveryService
      */
     public static function scopes(): array
     {
-        return [self::SCOPE_QUERYABLE, self::SCOPE_CONTACT_CAPABLE];
+        return [
+            self::SCOPE_QUERYABLE,
+            self::SCOPE_CONTACT_CAPABLE,
+            self::SCOPE_HOME_FAVORITES_PINNED_PROFILE,
+        ];
     }
 
     /**
@@ -41,6 +50,15 @@ final class AccountProfileCandidateDiscoveryService
         int $perPage,
         ?string $excludedProfileId = null,
     ): array {
+        if ($scope === self::SCOPE_HOME_FAVORITES_PINNED_PROFILE) {
+            return $this->homeFavoritesPinnedProfilePage(
+                $normalizedSearch,
+                $page,
+                $perPage,
+                $excludedProfileId,
+            );
+        }
+
         $scopeExpression = $this->scopeExpression($scope);
         if ($scopeExpression === null) {
             return $this->terminalEnvelope($page, $perPage);
@@ -107,6 +125,15 @@ final class AccountProfileCandidateDiscoveryService
             ->all();
         if ($profileIds === []) {
             return collect();
+        }
+
+        if ($scope === self::SCOPE_HOME_FAVORITES_PINNED_PROFILE) {
+            return collect($profileIds)
+                ->reject(static fn (string $profileId): bool => $profileId === $excludedProfileId)
+                ->map(fn (string $profileId): ?AccountProfile =>
+                    $this->homeFavoritesPinnedProfileService->findEligibleProfile($profileId))
+                ->filter(static fn (?AccountProfile $profile): bool => $profile instanceof AccountProfile)
+                ->values();
         }
 
         $query = AccountProfile::query()
@@ -289,6 +316,72 @@ final class AccountProfileCandidateDiscoveryService
         }
 
         return ['$and' => $clauses];
+    }
+
+    /**
+     * @return array{data: array<int, array{id: string, display_name: string}>, page: int, per_page: int, has_more: bool, browse_limit_reached: bool}
+     */
+    private function homeFavoritesPinnedProfilePage(
+        string $normalizedSearch,
+        int $page,
+        int $perPage,
+        ?string $excludedProfileId,
+    ): array {
+        $skip = ($page - 1) * $perPage;
+        $match = $this->homeFavoritesPinnedProfileService
+            ->candidateProfileMatchExpression($normalizedSearch);
+        if ($excludedProfileId !== null) {
+            $match = [
+                '$and' => [
+                    $match,
+                    ['$expr' => ['$ne' => [['$toString' => '$_id'], $excludedProfileId]]],
+                ],
+            ];
+        }
+
+        $pipeline = [
+            ['$match' => $match],
+            ...$this->homeFavoritesPinnedProfileService->candidateAccountGateStages(),
+            ['$sort' => ['name_search_key' => 1, '_id' => 1]],
+            ['$skip' => $skip],
+            ['$limit' => $perPage + 1],
+            ['$project' => ['_id' => 1, 'display_name' => 1]],
+        ];
+        $rows = AccountProfile::raw(fn ($collection) => $collection->aggregate($pipeline));
+        $documents = collect($rows)->map(static function (mixed $row): array {
+            if ($row instanceof AccountProfile) {
+                return [
+                    '_id' => (string) $row->getKey(),
+                    'display_name' => (string) $row->display_name,
+                ];
+            }
+            if ($row instanceof BSONDocument) {
+                return $row->getArrayCopy();
+            }
+            if ($row instanceof Arrayable) {
+                return $row->toArray();
+            }
+
+            return (array) $row;
+        });
+        $hasSentinel = $documents->count() > $perPage;
+        $nextSameSizePageIsAdmissible = $page < self::MAX_PAGE
+            && ($skip + (2 * $perPage)) <= self::MAX_BROWSE_ROWS;
+
+        return [
+            'data' => $documents
+                ->take($perPage)
+                ->map(static fn (array $profile): array => [
+                    'id' => (string) ($profile['_id'] ?? ''),
+                    'display_name' => (string) ($profile['display_name'] ?? ''),
+                ])
+                ->values()
+                ->all(),
+            'page' => $page,
+            'per_page' => $perPage,
+            'has_more' => $hasSentinel && $nextSameSizePageIsAdmissible,
+            'browse_limit_reached' => $hasSentinel && ! $nextSameSizePageIsAdmissible,
+        ];
     }
 
     /**

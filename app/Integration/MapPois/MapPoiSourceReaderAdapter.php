@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Integration\MapPois;
 
+use App\Application\Accounts\AccountPublicationStateService;
+use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\StaticAsset;
 use Belluga\Events\Models\Tenants\Event;
@@ -40,6 +42,20 @@ class MapPoiSourceReaderAdapter implements MapPoiSourceReaderContract
     public function findAccountProfileById(string $profileId): ?object
     {
         return AccountProfile::query()->find($profileId);
+    }
+
+    public function isParentAccountPublished(object $profile): bool
+    {
+        $accountId = trim((string) ($profile->account_id ?? ''));
+        if ($accountId === '') {
+            return false;
+        }
+
+        $account = Account::query()->find($accountId);
+
+        return $account !== null
+            && data_get($account->getAttribute('publication'), 'status')
+                === AccountPublicationStateService::PUBLISHED;
     }
 
     public function findStaticAssetById(string $assetId): ?object

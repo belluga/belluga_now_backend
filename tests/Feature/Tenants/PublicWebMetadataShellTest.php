@@ -128,7 +128,6 @@ class PublicWebMetadataShellTest extends TestCaseTenant
             'slug' => 'casa-marracini',
             'visibility' => 'public',
             'bio' => 'Cozinha italiana perto do mar.',
-            'content' => '<p>Massa fresca e carta de vinhos curada.</p>',
             'cover_url' => 'https://tenant.example/media/casa-cover.png',
             'avatar_url' => 'https://tenant.example/media/casa-avatar.png',
             'is_active' => true,
@@ -138,7 +137,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response->assertOk();
         $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
         $response->assertSee('<meta property="og:title" content="Casa Marracini | '.$this->resolvedSiteName.'">', false);
-        $response->assertSee('<meta property="og:description" content="Massa fresca e carta de vinhos curada.">', false);
+        $response->assertSee('<meta property="og:description" content="Cozinha italiana perto do mar.">', false);
         $response->assertSee('<meta property="og:image" content="https://tenant.example/media/casa-cover.png">', false);
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/parceiro/casa-marracini">', false);
     }
@@ -258,7 +257,6 @@ class PublicWebMetadataShellTest extends TestCaseTenant
             'slug' => 'casa-marracini',
             'visibility' => 'public',
             'bio' => 'Cozinha italiana perto do mar.',
-            'content' => '<p>Massa fresca e carta de vinhos curada.</p>',
             'cover_url' => 'https://tenant.example/media/casa-cover.png',
             'avatar_url' => 'https://tenant.example/media/casa-avatar.png',
             'is_active' => true,

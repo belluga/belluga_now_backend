@@ -13,6 +13,7 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
+use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +32,7 @@ class AccountManagementService
         private readonly AccountProfileLifecycleService $accountProfileLifecycleService,
         private readonly AccountProfileOutboxDispatcher $accountProfileOutboxDispatcher,
         private readonly AccountProfileQueryService $accountProfileQueryService,
+        private readonly MapPoiProjectionService $mapPois,
     ) {}
 
     public function paginateForUser(
@@ -187,6 +189,17 @@ class AccountManagementService
                 $account->save();
 
                 if ($publicationChanged) {
+                    $profile = AccountProfile::query()
+                        ->where('account_id', (string) $account->_id)
+                        ->first();
+                    if ($profile !== null && $profile->deleted_at === null) {
+                        $this->mapPois->upsertFromAccountProfile(
+                            $profile,
+                            parentAccountPublished: $this->accountPublicationStateService->isPublished(
+                                $account->getAttribute('publication')
+                            ),
+                        );
+                    }
                 }
 
                 return $account->fresh();

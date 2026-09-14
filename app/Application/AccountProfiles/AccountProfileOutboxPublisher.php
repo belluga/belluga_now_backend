@@ -286,13 +286,6 @@ final class AccountProfileOutboxPublisher
                 (string) $profile->getKey(),
                 'bio',
             ),
-            'content' => $this->richTextReadCanonicalizer->canonicalize(
-                $profile->content,
-                true,
-                'account_profile',
-                (string) $profile->getKey(),
-                'content',
-            ),
             'location' => $profile->location,
             'taxonomy_terms' => $profile->taxonomy_terms,
             'contact_mode' => $profile->contact_mode,

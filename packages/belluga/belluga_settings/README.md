@@ -40,6 +40,7 @@ Mounted under the host tenant settings prefix.
 Endpoints:
 - `GET /settings/schema`
 - `GET /settings/values`
+- host integrations may expose a type-scoped `GET /settings/values/{namespace}` when a namespace needs a dedicated projection
 - `PATCH /settings/values/{namespace}`
 
 Middleware:
