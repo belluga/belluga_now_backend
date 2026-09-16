@@ -4,140 +4,147 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Map;
 
-use App\Application\Initialization\InitializationPayload;
-use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
-use App\Models\Tenants\StaticAsset;
-use App\Models\Tenants\StaticProfileType;
-use App\Models\Tenants\TenantSettings;
+use Belluga\MapPois\Application\MapPoiProjectionService;
+use Belluga\MapPois\Contracts\MapPoiSettingsContract;
+use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
 use Belluga\MapPois\Models\Tenants\MapPoi;
-use Tests\Helpers\TenantLabels;
-use Tests\TestCaseTenant;
+use Illuminate\Support\Facades\DB;
+use Mockery;
+use Mockery\MockInterface;
+use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
-class MapPoiRebuildCommandTest extends TestCaseTenant
+final class MapPoiRebuildCommandTest extends TestCase
 {
     use RefreshLandlordAndTenantDatabases;
-
-    protected TenantLabels $tenant {
-        get {
-            return $this->landlord->tenant_primary;
-        }
-    }
-
-    private static bool $bootstrapped = false;
 
     protected function setUp(): void
     {
         parent::setUp();
+        $this->refreshLandlordAndTenantDatabases();
+        Tenant::withoutEvents(fn (): Tenant => Tenant::query()->create([
+            'name' => 'Map rebuild',
+            'slug' => 'map-rebuild',
+            'subdomain' => 'map-rebuild',
+            'database' => Tenant::tenantDatabasePrefix().'map-rebuild',
+            'app_domains' => ['map-rebuild.test'],
+        ]))->makeCurrent();
+    }
 
-        if (! self::$bootstrapped) {
-            $this->refreshLandlordAndTenantDatabases();
-            $this->initializeSystem();
-            self::$bootstrapped = true;
+    protected function tearDown(): void
+    {
+        Tenant::forgetCurrent();
+        parent::tearDown();
+    }
+
+    public function test_rebuild_rejects_every_retired_static_source_token_before_purge(): void
+    {
+        $this->bindRebuildCollaborators();
+        $this->seedProjection('event', 'event-old');
+        $this->seedProjection('account_profile', 'profile-old');
+
+        foreach (['static_assets', 'static', 'assets'] as $source) {
+            $this->artisan("map-pois:rebuild {$source}")
+                ->expectsOutputToContain('Invalid source')
+                ->assertExitCode(2);
         }
 
-        Tenant::query()->firstOrFail()->makeCurrent();
-
-        MapPoi::query()->delete();
-        StaticAsset::query()->delete();
-        StaticProfileType::query()->delete();
-        TenantSettings::query()->delete();
+        self::assertSame(1, MapPoi::query()->where('ref_type', 'event')->count());
+        self::assertSame(1, MapPoi::query()->where('ref_type', 'account_profile')->count());
     }
 
-    public function test_rebuild_command_respects_map_ingest_enable_toggle(): void
+    public function test_events_rebuild_purges_and_processes_only_events(): void
     {
-        TenantSettings::create([
-            'map_ingest' => [
-                'rebuild' => [
-                    'enabled' => false,
-                    'batch_size' => 200,
-                ],
-            ],
-        ]);
+        $event = (object) ['id' => 'event-new'];
+        $reader = $this->bindRebuildCollaborators();
+        $reader->shouldReceive('allEventIds')->once()->andReturn(['event-new']);
+        $reader->shouldReceive('findEventById')->once()->with('event-new')->andReturn($event);
+        $reader->shouldNotReceive('allAccountProfileIds');
+        $this->projectionService()->shouldReceive('upsertFromEvent')->once()->with($event);
+        $this->seedProjection('event', 'event-old');
+        $this->seedProjection('account_profile', 'profile-old');
 
-        Tenant::query()->firstOrFail()->makeCurrent();
-
-        $this->artisan('map-pois:rebuild static_assets')
-            ->expectsOutputToContain('Map rebuild is disabled by tenant settings')
-            ->assertExitCode(1);
-    }
-
-    public function test_rebuild_command_rebuilds_static_asset_projections(): void
-    {
-        TenantSettings::create([
-            'map_ingest' => [
-                'rebuild' => [
-                    'enabled' => true,
-                    'batch_size' => 50,
-                ],
-            ],
-        ]);
-
-        StaticProfileType::create([
-            'type' => 'poi',
-            'label' => 'POI',
-            'map_category' => 'beach',
-            'allowed_taxonomies' => [],
-            'capabilities' => [
-                'is_poi_enabled' => true,
-                'has_taxonomies' => false,
-            ],
-        ]);
-
-        $asset = StaticAsset::query()->create([
-            'profile_type' => 'poi',
-            'display_name' => 'Rebuild Static Asset',
-            'location' => [
-                'type' => 'Point',
-                'coordinates' => [-40.00001, -20.00001],
-            ],
-            'is_active' => true,
-        ]);
-
-        $this->assertFalse(
-            MapPoi::query()
-                ->where('ref_type', 'static')
-                ->where('ref_id', (string) $asset->_id)
-                ->exists()
-        );
-
-        Tenant::query()->firstOrFail()->makeCurrent();
-
-        $this->artisan('map-pois:rebuild static_assets --batch-size=25')
-            ->expectsOutputToContain('Map rebuild completed')
+        $this->artisan('map-pois:rebuild events')
+            ->expectsOutputToContain('Map rebuild completed. processed=1 upserted=1')
             ->assertExitCode(0);
 
-        $projection = MapPoi::query()
-            ->where('ref_type', 'static')
-            ->where('ref_id', (string) $asset->_id)
-            ->first();
-
-        $this->assertNotNull($projection);
-        $this->assertSame('beach', $projection?->category);
-        $this->assertTrue((bool) $projection?->is_active);
+        self::assertSame(0, MapPoi::query()->where('ref_type', 'event')->count());
+        self::assertSame(1, MapPoi::query()->where('ref_type', 'account_profile')->count());
     }
 
-    private function initializeSystem(): void
+    public function test_account_profiles_rebuild_purges_and_processes_only_account_profiles(): void
     {
-        /** @var SystemInitializationService $service */
-        $service = $this->app->make(SystemInitializationService::class);
+        $profile = (object) ['id' => 'profile-new'];
+        $reader = $this->bindRebuildCollaborators();
+        $reader->shouldReceive('allAccountProfileIds')->once()->andReturn(['profile-new']);
+        $reader->shouldReceive('findAccountProfileById')->once()->with('profile-new')->andReturn($profile);
+        $reader->shouldNotReceive('allEventIds');
+        $this->projectionService()->shouldReceive('upsertFromAccountProfile')->once()->with($profile);
+        $this->seedProjection('event', 'event-old');
+        $this->seedProjection('account_profile', 'profile-old');
 
-        $payload = new InitializationPayload(
-            landlord: ['name' => 'Landlord HQ'],
-            tenant: ['name' => 'Tenant Zeta', 'subdomain' => 'tenant-zeta'],
-            role: ['name' => 'Root', 'permissions' => ['*']],
-            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
-            themeDataSettings: [
-                'brightness_default' => 'light',
-                'primary_seed_color' => '#fff',
-                'secondary_seed_color' => '#000',
-            ],
-            logoSettings: ['light_logo_uri' => '/logos/light.png'],
-            pwaIcon: ['icon192_uri' => '/pwa/icon192.png'],
-            tenantDomains: ['tenant-zeta.test'],
-        );
+        $this->artisan('map-pois:rebuild account_profiles')
+            ->expectsOutputToContain('Map rebuild completed. processed=1 upserted=1')
+            ->assertExitCode(0);
 
-        $service->initialize($payload);
+        self::assertSame(1, MapPoi::query()->where('ref_type', 'event')->count());
+        self::assertSame(0, MapPoi::query()->where('ref_type', 'account_profile')->count());
+    }
+
+    public function test_all_rebuild_processes_exactly_the_two_surviving_source_families(): void
+    {
+        $event = (object) ['id' => 'event-new'];
+        $profile = (object) ['id' => 'profile-new'];
+        $reader = $this->bindRebuildCollaborators();
+        $reader->shouldReceive('allEventIds')->once()->andReturn(['event-new']);
+        $reader->shouldReceive('findEventById')->once()->with('event-new')->andReturn($event);
+        $reader->shouldReceive('allAccountProfileIds')->once()->andReturn(['profile-new']);
+        $reader->shouldReceive('findAccountProfileById')->once()->with('profile-new')->andReturn($profile);
+        $projection = $this->projectionService();
+        $projection->shouldReceive('upsertFromEvent')->once()->with($event);
+        $projection->shouldReceive('upsertFromAccountProfile')->once()->with($profile);
+        $this->seedProjection('event', 'event-old');
+        $this->seedProjection('account_profile', 'profile-old');
+
+        $this->artisan('map-pois:rebuild all')
+            ->expectsOutputToContain('Rebuilding events...')
+            ->expectsOutputToContain('Rebuilding account profiles...')
+            ->expectsOutputToContain('Map rebuild completed. processed=2 upserted=2')
+            ->assertExitCode(0);
+
+        self::assertSame(0, MapPoi::query()->whereIn('ref_type', ['event', 'account_profile'])->count());
+    }
+
+    private function bindRebuildCollaborators(): MapPoiSourceReaderContract&MockInterface
+    {
+        $settings = Mockery::mock(MapPoiSettingsContract::class);
+        $settings->shouldReceive('resolveMapIngestSettings')->andReturn([
+            'rebuild' => ['enabled' => true, 'batch_size' => 20],
+        ]);
+        $reader = Mockery::mock(MapPoiSourceReaderContract::class);
+        $projection = Mockery::mock(MapPoiProjectionService::class);
+        $this->app->instance(MapPoiSettingsContract::class, $settings);
+        $this->app->instance(MapPoiSourceReaderContract::class, $reader);
+        $this->app->instance(MapPoiProjectionService::class, $projection);
+
+        return $reader;
+    }
+
+    private function projectionService(): MapPoiProjectionService&MockInterface
+    {
+        /** @var MapPoiProjectionService&MockInterface $projection */
+        $projection = $this->app->make(MapPoiProjectionService::class);
+
+        return $projection;
+    }
+
+    private function seedProjection(string $refType, string $refId): void
+    {
+        DB::connection('tenant')->getDatabase()->selectCollection((new MapPoi)->getTable())->insertOne([
+            'ref_type' => $refType,
+            'ref_id' => $refId,
+            'projection_key' => "{$refType}:{$refId}",
+        ]);
     }
 }

@@ -6,7 +6,6 @@ namespace App\Providers\PackageIntegration;
 
 use App\Integration\DiscoveryFilters\AccountProfileDiscoveryFilterEntityProvider;
 use App\Integration\DiscoveryFilters\EventDiscoveryFilterEntityProvider;
-use App\Integration\DiscoveryFilters\StaticAssetDiscoveryFilterEntityProvider;
 use App\Integration\DiscoveryFilters\TenantDiscoveryFilterSettingsAdapter;
 use Belluga\DiscoveryFilters\Contracts\DiscoveryFilterSettingsContract;
 use Belluga\DiscoveryFilters\Registry\DiscoveryFilterEntityRegistry;
@@ -33,7 +32,6 @@ final class DiscoveryFiltersIntegrationServiceProvider extends ServiceProvider
         $entityRegistry = $this->app->make(DiscoveryFilterEntityRegistry::class);
         $entityRegistry->register($this->app->make(EventDiscoveryFilterEntityProvider::class));
         $entityRegistry->register($this->app->make(AccountProfileDiscoveryFilterEntityProvider::class));
-        $entityRegistry->register($this->app->make(StaticAssetDiscoveryFilterEntityProvider::class));
 
         $registry->register(new SettingsNamespaceDefinition(
             namespace: 'discovery_filters',

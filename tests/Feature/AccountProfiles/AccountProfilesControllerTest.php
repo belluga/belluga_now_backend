@@ -149,7 +149,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $taxonomy = Taxonomy::create([
             'slug' => 'cuisine',
             'name' => 'Cuisine',
-            'applies_to' => ['account_profile', 'event', 'static_asset'],
+            'applies_to' => ['account_profile', 'event'],
             'icon' => 'restaurant',
             'color' => '#FFAA00',
         ]);

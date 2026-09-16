@@ -74,7 +74,7 @@ final class MigrationSchemaConvergenceTest extends TestCase
         $this->seedSentinel($freshTenant, 'fresh-tenant');
         $this->migrateComplete($freshLandlord, $freshTenant);
         self::assertSame(14, $this->ledgerCount($freshLandlord));
-        self::assertSame(84, $this->ledgerCount($freshTenant));
+        self::assertSame(85, $this->ledgerCount($freshTenant));
         self::assertSame([], $this->retiredSchema($freshLandlord));
         self::assertSame([], $this->retiredSchema($freshTenant));
         $this->assertSentinel($freshLandlord, 'fresh-landlord');
@@ -98,7 +98,7 @@ final class MigrationSchemaConvergenceTest extends TestCase
         self::assertSame(['_id_'], $this->indexNames($productionTenant, 'account_profile_command_receipts'));
         $this->migrateComplete($productionLandlord, $productionTenant);
         self::assertSame(14, $this->ledgerCount($productionLandlord));
-        self::assertSame(84, $this->ledgerCount($productionTenant));
+        self::assertSame(85, $this->ledgerCount($productionTenant));
         self::assertSame($productionRetiredBefore, $this->retiredSchema($productionTenant));
         $this->assertSentinel($productionLandlord, 'production-landlord');
         $this->assertSentinel($productionTenant, 'production-tenant');
@@ -109,7 +109,7 @@ final class MigrationSchemaConvergenceTest extends TestCase
         $evidence = [
             'frozen' => [
                 'landlord' => ['counts' => [18, 70, 1], 'fingerprint' => '1888c52bc3fb0920e2d600eb6b3ce44b80bc12be731b441fbd5d6db90566b956'],
-                'tenant' => ['counts' => [47, 291, 1], 'fingerprint' => 'd59a105b704dd0ebeaac0f25df221a6213ccd6427dab6ad3c5f9a8da7e8913bf'],
+                'tenant' => ['counts' => [45, 280, 1], 'fingerprint' => '2ea8b7c9c8d0ebb8767dd6460624349bc6352c4b3a5294c1a909d1cde9714e2f'],
             ],
             'actual' => [
                 'fresh' => [
@@ -122,7 +122,7 @@ final class MigrationSchemaConvergenceTest extends TestCase
                 ],
             ],
             'nominal_delta' => [
-                'tenant_indexes' => 'frozen 291 - actual 291 = 0',
+                'tenant_indexes' => 'frozen 280 - actual 280 = 0',
                 'production_initial_has_content_index' => true,
                 'after_current_tail_has_content_index' => in_array('idx_account_profile_types_capability_has_content_v1', $this->indexNames($productionTenant, 'account_profile_types'), true),
                 'production_command_receipts_indexes' => $this->indexNames($productionTenant, 'account_profile_command_receipts'),
@@ -225,8 +225,8 @@ final class MigrationSchemaConvergenceTest extends TestCase
         $this->assertSentinel($landlord, 'isolation-landlord');
         $this->assertSentinel($tenantA, 'isolation-a');
         $this->assertSentinel($tenantB, 'isolation-b');
-        self::assertSame(84, $this->ledgerCount($tenantA));
-        self::assertSame(84, $this->ledgerCount($tenantB));
+        self::assertSame(85, $this->ledgerCount($tenantA));
+        self::assertSame(85, $this->ledgerCount($tenantB));
     }
 
     public function test_fresh_schema_comparator_rejects_every_retired_name_and_includes_unknown_collections(): void
@@ -346,7 +346,7 @@ final class MigrationSchemaConvergenceTest extends TestCase
 
     private function migrateTenant(object $tenant): void
     {
-        $this->withDatabases(DB::connection('landlord')->getDatabase(), $tenant, function (): void {
+        $this->withDatabases(DB::connection('landlord')->getDatabase(), $tenant, function () use ($tenant): void {
             $tenantId = new ObjectId;
             DB::connection('landlord')->getDatabase()->selectCollection('tenants')->insertOne([
                 '_id' => $tenantId,

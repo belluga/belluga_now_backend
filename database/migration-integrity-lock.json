@@ -990,6 +990,16 @@
             "provenance_commit": "8a741e1d17d53c31fb1f91956c957f6051ac1c62",
             "executed_or_equivalent_sha256": "4d199a4fadc282664c229bfe4229bafde0588f5d3fa5bb09de291c39877da0fc",
             "target_sha256": "4d199a4fadc282664c229bfe4229bafde0588f5d3fa5bb09de291c39877da0fc"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_14_000100_retire_static_profile_and_assets",
+            "path": "database/migrations/tenants/2026_09_14_000100_retire_static_profile_and_assets.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "4cf03a037c3b60aa612470044f927abae7a1fd6e",
+            "executed_or_equivalent_sha256": "1537c176a5127e30ad93e8b0427102a26af9b9f2499eb0828057006136ee9ec6",
+            "target_sha256": "1537c176a5127e30ad93e8b0427102a26af9b9f2499eb0828057006136ee9ec6"
         }
     ]
 }

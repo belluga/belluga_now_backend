@@ -9,14 +9,12 @@ use App\Application\Accounts\AccountUserService;
 use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
-use App\Application\StaticAssets\StaticAssetManagementService;
 use App\Application\Taxonomies\TaxonomyTermManagementService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\EventType;
-use App\Models\Tenants\StaticProfileType;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
@@ -124,6 +122,28 @@ class MapPoisControllerTest extends TestCaseTenant
             ->assertJsonValidationErrors(['sort']);
     }
 
+    public function test_map_requests_reject_every_retired_static_source_alias(): void
+    {
+        $bounds = 'ne_lat=-19.99&ne_lng=-39.99&sw_lat=-20.01&sw_lng=-40.01';
+        $origin = 'origin_lat=-20.0&origin_lng=-40.0';
+
+        foreach (['static', 'static_asset', 'asset'] as $retiredAlias) {
+            $this->getJson(
+                "{$this->base_api_tenant}map/pois/lookup?ref_type={$retiredAlias}&ref_id=retired",
+            )
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors(['ref_type']);
+
+            $this->getJson("{$this->base_api_tenant}map/pois?{$bounds}&source={$retiredAlias}")
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors(['source']);
+
+            $this->getJson("{$this->base_api_tenant}map/near?{$origin}&source={$retiredAlias}")
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors(['source']);
+        }
+    }
+
     public function test_map_poi_lookup_returns_poi_by_typed_reference(): void
     {
         $location = $this->point(-40.0, -20.0);
@@ -151,13 +171,13 @@ class MapPoisControllerTest extends TestCaseTenant
             'exact_key' => $exactKey,
         ]);
         MapPoi::create([
-            'ref_type' => 'static',
-            'ref_id' => 'static-same-stack',
-            'ref_slug' => 'static-same-stack',
-            'ref_path' => '/static/static-same-stack',
-            'name' => 'Static Same Stack',
-            'category' => 'beach',
-            'source_type' => 'poi',
+            'ref_type' => 'account_profile',
+            'ref_id' => 'profile-same-stack',
+            'ref_slug' => 'profile-same-stack',
+            'ref_path' => '/parceiro/profile-same-stack',
+            'name' => 'Profile Same Stack',
+            'category' => 'partner',
+            'source_type' => 'performer',
             'location' => $location,
             'priority' => 120,
             'is_active' => true,
@@ -192,7 +212,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $response->assertJsonPath('message', 'POI not found.');
     }
 
-    public function test_map_pois_event_dominance_hides_same_point_static_poi_from_stack(): void
+    public function test_map_pois_event_dominance_hides_same_point_account_profile_poi_from_stack(): void
     {
         $location = $this->point(-40.0, -20.0);
         $exactKey = $this->exactKey($location);
@@ -220,13 +240,13 @@ class MapPoisControllerTest extends TestCaseTenant
         ]);
 
         MapPoi::create([
-            'ref_type' => 'static',
-            'ref_id' => 'static-1',
-            'ref_slug' => 'static-one',
-            'ref_path' => '/static/static-one',
-            'name' => 'Static One',
-            'category' => 'beach',
-            'source_type' => 'poi',
+            'ref_type' => 'account_profile',
+            'ref_id' => 'profile-1',
+            'ref_slug' => 'profile-one',
+            'ref_path' => '/parceiro/profile-one',
+            'name' => 'Profile One',
+            'category' => 'partner',
+            'source_type' => 'performer',
             'location' => $location,
             'priority' => 200,
             'is_active' => true,
@@ -254,7 +274,7 @@ class MapPoisControllerTest extends TestCaseTenant
         $this->assertArrayNotHasKey('taxonomy_terms', $stacks[0]['top_poi']);
     }
 
-    public function test_map_pois_stack_key_keeps_multiple_events_and_hides_same_point_static_poi(): void
+    public function test_map_pois_stack_key_keeps_multiple_events_and_hides_same_point_account_profile_poi(): void
     {
         $location = $this->point(-40.0, -20.0);
         $exactKey = $this->exactKey($location);
@@ -286,13 +306,13 @@ class MapPoisControllerTest extends TestCaseTenant
             'exact_key' => $exactKey,
         ]);
         MapPoi::create([
-            'ref_type' => 'static',
-            'ref_id' => 'static-ignored',
-            'ref_slug' => 'static-ignored',
-            'ref_path' => '/static/static-ignored',
-            'name' => 'Static Ignored',
-            'category' => 'beach',
-            'source_type' => 'poi',
+            'ref_type' => 'account_profile',
+            'ref_id' => 'profile-ignored',
+            'ref_slug' => 'profile-ignored',
+            'ref_path' => '/parceiro/profile-ignored',
+            'name' => 'Profile Ignored',
+            'category' => 'partner',
+            'source_type' => 'performer',
             'location' => $location,
             'priority' => 500,
             'is_active' => true,
@@ -614,7 +634,7 @@ class MapPoisControllerTest extends TestCaseTenant
         for ($index = 0; $index < 51; $index++) {
             $lng = -40.0 + ($index * 0.00001);
             MapPoi::create([
-                'ref_type' => 'static',
+                'ref_type' => 'account_profile',
                 'ref_id' => "sample-{$index}",
                 'name' => "Sample {$index}",
                 'category' => 'sample',
@@ -640,7 +660,7 @@ class MapPoisControllerTest extends TestCaseTenant
         for ($index = 0; $index < 50; $index++) {
             $lng = -40.0 + ($index * 0.00001);
             MapPoi::create([
-                'ref_type' => 'static',
+                'ref_type' => 'account_profile',
                 'ref_id' => "oversized-{$index}",
                 'name' => str_repeat((string) ($index % 10), 5000),
                 'category' => 'sample',
@@ -745,7 +765,7 @@ class MapPoisControllerTest extends TestCaseTenant
         ]);
         $settings?->save();
         MapPoi::create([
-            'ref_type' => 'static',
+            'ref_type' => 'account_profile',
             'ref_id' => 'outside-tenant-envelope',
             'name' => 'Outside tenant envelope',
             'category' => 'sample',
@@ -767,10 +787,10 @@ class MapPoisControllerTest extends TestCaseTenant
         $location = $this->point(-40.0, -20.0);
 
         MapPoi::create([
-            'ref_type' => 'static',
-            'ref_id' => 'static-thales',
+            'ref_type' => 'account_profile',
+            'ref_id' => 'profile-thales',
             'ref_slug' => 'thales-hub',
-            'ref_path' => '/static/thales-hub',
+            'ref_path' => '/parceiro/thales-hub',
             'name' => 'Thales Hub',
             'category' => 'poi',
             'source_type' => 'poi',
@@ -781,10 +801,10 @@ class MapPoisControllerTest extends TestCaseTenant
         ]);
 
         MapPoi::create([
-            'ref_type' => 'static',
-            'ref_id' => 'static-other',
+            'ref_type' => 'account_profile',
+            'ref_id' => 'profile-other',
             'ref_slug' => 'bruno-hub',
-            'ref_path' => '/static/bruno-hub',
+            'ref_path' => '/parceiro/bruno-hub',
             'name' => 'Bruno Hub',
             'category' => 'poi',
             'source_type' => 'poi',
@@ -1047,7 +1067,7 @@ class MapPoisControllerTest extends TestCaseTenant
         Taxonomy::create([
             'slug' => 'music_genre',
             'name' => 'Gênero musical',
-            'applies_to' => ['event', 'account_profile', 'static_asset'],
+            'applies_to' => ['event', 'account_profile'],
         ]);
         Taxonomy::create([
             'slug' => 'audience',
@@ -1080,24 +1100,17 @@ class MapPoisControllerTest extends TestCaseTenant
                 'is_publicly_discoverable' => true,
             ],
         ]);
-        StaticProfileType::create([
-            'type' => 'beach_spot_test',
-            'label' => 'Beach Spot Test',
-            'allowed_taxonomies' => ['music_genre'],
-        ]);
 
         /** @var DiscoveryFilterEntityRegistry $registry */
         $registry = app(DiscoveryFilterEntityRegistry::class);
 
         $this->assertContains('event', $registry->entities());
         $this->assertContains('account_profile', $registry->entities());
-        $this->assertContains('static_asset', $registry->entities());
 
-        $types = $registry->typesForEntities(['event', 'account_profile', 'static_asset']);
+        $types = $registry->typesForEntities(['event', 'account_profile']);
 
         $this->assertContains('catalog_show', collect($types['event'])->pluck('value')->all());
         $this->assertContains('performer_test', collect($types['account_profile'])->pluck('value')->all());
-        $this->assertContains('beach_spot_test', collect($types['static_asset'])->pluck('value')->all());
 
         $eventShowType = collect($types['event'])->firstWhere('value', 'catalog_show');
         $this->assertSame(['music_genre'], $eventShowType['allowed_taxonomies'] ?? []);
@@ -1737,20 +1750,6 @@ class MapPoisControllerTest extends TestCaseTenant
             'is_active' => true,
             'exact_key' => '-20.00010,-40.00010',
         ]);
-        MapPoi::create([
-            'ref_type' => 'static',
-            'ref_id' => 'static-poi',
-            'ref_slug' => 'static-poi',
-            'ref_path' => '/static/static-poi',
-            'name' => 'Static POI',
-            'category' => 'beach',
-            'source_type' => 'beach_spot',
-            'location' => $location,
-            'priority' => 40,
-            'is_active' => true,
-            'exact_key' => '-20.00020,-40.00020',
-        ]);
-
         $allEvents = $this->getJson("{$this->base_api_tenant}map/pois?source=event&ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
         $allEvents->assertStatus(200);
         $this->assertCount(2, $allEvents->json('stacks'));
@@ -1759,11 +1758,6 @@ class MapPoisControllerTest extends TestCaseTenant
         $showsOnly->assertStatus(200);
         $this->assertCount(1, $showsOnly->json('stacks'));
         $showsOnly->assertJsonPath('stacks.0.top_poi.ref_id', 'event-show');
-
-        $beachesOnly = $this->getJson("{$this->base_api_tenant}map/pois?source=static_asset&types[]=beach_spot&ne_lat=-19.0&ne_lng=-39.0&sw_lat=-21.0&sw_lng=-41.0");
-        $beachesOnly->assertStatus(200);
-        $this->assertCount(1, $beachesOnly->json('stacks'));
-        $beachesOnly->assertJsonPath('stacks.0.top_poi.ref_id', 'static-poi');
     }
 
     public function test_map_pois_box_includes_polygon_discovery_scope_intersections(): void
@@ -1806,59 +1800,6 @@ class MapPoisControllerTest extends TestCaseTenant
         }
 
         $this->assertContains('event-polygon', $flatRefIds);
-    }
-
-    public function test_static_asset_creation_projects_map_poi(): void
-    {
-        StaticProfileType::query()->delete();
-        Taxonomy::query()->delete();
-
-        StaticProfileType::create([
-            'type' => 'poi',
-            'label' => 'POI',
-            'map_category' => 'beach',
-            'allowed_taxonomies' => ['cuisine'],
-            'capabilities' => [
-                'is_poi_enabled' => true,
-                'has_taxonomies' => true,
-            ],
-        ]);
-
-        $taxonomy = Taxonomy::create([
-            'slug' => 'cuisine',
-            'name' => 'Cuisine',
-            'applies_to' => ['static_asset'],
-        ]);
-
-        TaxonomyTerm::create([
-            'taxonomy_id' => (string) $taxonomy->_id,
-            'slug' => 'italian',
-            'name' => 'Italian',
-        ]);
-
-        $service = $this->app->make(StaticAssetManagementService::class);
-        $asset = $service->create([
-            'profile_type' => 'poi',
-            'display_name' => 'Praia Azul',
-            'location' => ['lat' => -20.0, 'lng' => -40.0],
-            'taxonomy_terms' => [
-                ['type' => 'cuisine', 'value' => 'italian'],
-            ],
-        ]);
-
-        $this->assertTrue(
-            MapPoi::query()
-                ->where('ref_type', 'static')
-                ->where('ref_id', (string) $asset->_id)
-                ->exists()
-        );
-        $this->assertSame(
-            'beach',
-            MapPoi::query()
-                ->where('ref_type', 'static')
-                ->where('ref_id', (string) $asset->_id)
-                ->first()?->category
-        );
     }
 
     private function createAccountUser(array $permissions): AccountUser

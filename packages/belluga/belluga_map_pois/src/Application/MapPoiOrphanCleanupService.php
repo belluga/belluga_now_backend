@@ -13,7 +13,7 @@ class MapPoiOrphanCleanupService
     /**
      * @var array<int, string>
      */
-    private const SUPPORTED_REF_TYPES = ['event', 'account_profile', 'static'];
+    private const SUPPORTED_REF_TYPES = ['event', 'account_profile'];
 
     private const DELETE_BATCH_SIZE = 200;
 
@@ -71,7 +71,7 @@ class MapPoiOrphanCleanupService
             return;
         }
 
-        if (in_array($refType, ['account_profile', 'static'], true)) {
+        if ($refType === 'account_profile') {
             if ($deletedSince === null) {
                 $this->cleanupMissingRefType($refType);
 
@@ -114,7 +114,6 @@ class MapPoiOrphanCleanupService
     {
         return match ($refType) {
             'account_profile' => $this->sourceReader->allTrashedAccountProfileIds($deletedSince),
-            'static' => $this->sourceReader->allTrashedStaticAssetIds($deletedSince),
             default => [],
         };
     }
@@ -203,7 +202,6 @@ class MapPoiOrphanCleanupService
         return match ($refType) {
             'event' => $this->sourceReader->allEventIds(),
             'account_profile' => $this->sourceReader->allAccountProfileIds(),
-            'static' => $this->sourceReader->allStaticAssetIds(),
             default => [],
         };
     }

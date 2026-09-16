@@ -19,9 +19,7 @@ final class PublicTenantMediaCors
     private const MEDIA_PREFIXES = [
         'account-profiles/',
         'account-profile-types/',
-        'static-assets/',
         'event-types/',
-        'static-profile-types/',
         'events/',
         'map-filters/',
         'branding-public-web/',

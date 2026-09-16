@@ -13,7 +13,7 @@ use Illuminate\Console\Command;
 class RebuildMapPoisCommand extends Command
 {
     protected $signature = 'map-pois:rebuild
-        {source=all : all|events|account_profiles|static_assets}
+        {source=all : all|events|account_profiles}
         {--batch-size= : Override rebuild batch size}
         {--no-purge : Keep existing projections and only upsert}';
 
@@ -25,9 +25,9 @@ class RebuildMapPoisCommand extends Command
         MapPoiSettingsContract $settings,
     ): int {
         $source = strtolower((string) $this->argument('source'));
-        $allowedSources = ['all', 'events', 'account_profiles', 'static_assets'];
+        $allowedSources = ['all', 'events', 'account_profiles'];
         if (! in_array($source, $allowedSources, true)) {
-            $this->error('Invalid source. Use one of: all, events, account_profiles, static_assets.');
+            $this->error('Invalid source. Use one of: all, events, account_profiles.');
 
             return self::INVALID;
         }
@@ -72,16 +72,6 @@ class RebuildMapPoisCommand extends Command
             );
         }
 
-        if (in_array('static', $refTypes, true)) {
-            [$processed, $upserted] = $this->rebuildStaticAssets(
-                $processed,
-                $upserted,
-                $batchSize,
-                $sourceReader,
-                $projectionService,
-            );
-        }
-
         $this->info(sprintf('Map rebuild completed. processed=%d upserted=%d', $processed, $upserted));
 
         return self::SUCCESS;
@@ -112,8 +102,7 @@ class RebuildMapPoisCommand extends Command
         return match ($source) {
             'events' => ['event'],
             'account_profiles' => ['account_profile'],
-            'static_assets' => ['static'],
-            default => ['event', 'account_profile', 'static'],
+            default => ['event', 'account_profile'],
         };
     }
 
@@ -179,34 +168,4 @@ class RebuildMapPoisCommand extends Command
         return [$processed, $upserted];
     }
 
-    /**
-     * @return array{int, int}
-     */
-    private function rebuildStaticAssets(
-        int $processed,
-        int $upserted,
-        int $batchSize,
-        MapPoiSourceReaderContract $sourceReader,
-        MapPoiProjectionService $projectionService,
-    ): array {
-        $this->line('Rebuilding static assets...');
-
-        foreach ($sourceReader->allStaticAssetIds() as $assetId) {
-            $processed++;
-
-            $asset = $sourceReader->findStaticAssetById($assetId);
-            if (! $asset) {
-                continue;
-            }
-
-            $projectionService->upsertFromStaticAsset($asset);
-            $upserted++;
-
-            if ($processed % $batchSize === 0) {
-                $this->line(sprintf('Progress: processed=%d upserted=%d', $processed, $upserted));
-            }
-        }
-
-        return [$processed, $upserted];
-    }
 }

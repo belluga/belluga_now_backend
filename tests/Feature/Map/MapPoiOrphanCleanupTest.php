@@ -9,12 +9,7 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\StaticAsset;
 use Belluga\Events\Models\Tenants\Event;
-use Belluga\MapPois\Application\MapPoiProjectionService;
-use Belluga\MapPois\Contracts\MapPoiRegistryContract;
-use Belluga\MapPois\Contracts\MapPoiSettingsContract;
-use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
 use Belluga\MapPois\Jobs\CleanupOrphanedMapPoisJob;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Illuminate\Support\Carbon;
@@ -49,7 +44,6 @@ class MapPoiOrphanCleanupTest extends TestCaseTenant
 
         MapPoi::query()->delete();
         AccountProfile::withTrashed()->forceDelete();
-        StaticAsset::withTrashed()->forceDelete();
         Event::withTrashed()->forceDelete();
         Account::withTrashed()->forceDelete();
     }
@@ -88,155 +82,6 @@ class MapPoiOrphanCleanupTest extends TestCaseTenant
         $this->assertTrue(MapPoi::query()->where('_id', $livePoi->_id)->exists());
         $this->assertFalse(MapPoi::query()->where('_id', $deletedPoi->_id)->exists());
     }
-
-    public function test_cleanup_orphaned_map_pois_job_deletes_soft_deleted_static_asset_projections(): void
-    {
-        $liveAsset = StaticAsset::create([
-            'profile_type' => 'poi',
-            'display_name' => 'Live Asset',
-            'is_active' => true,
-        ]);
-        $deletedAsset = StaticAsset::create([
-            'profile_type' => 'poi',
-            'display_name' => 'Deleted Asset',
-            'is_active' => true,
-        ]);
-
-        $livePoi = $this->createMapPoi('static', (string) $liveAsset->_id, 'Live Asset');
-        $deletedPoi = $this->createMapPoi('static', (string) $deletedAsset->_id, 'Deleted Asset');
-
-        $deletedAsset->delete();
-
-        app()->call([new CleanupOrphanedMapPoisJob(['static']), 'handle']);
-
-        $this->assertTrue(MapPoi::query()->where('_id', $livePoi->_id)->exists());
-        $this->assertFalse(MapPoi::query()->where('_id', $deletedPoi->_id)->exists());
-    }
-
-    public function test_cleanup_orphaned_map_pois_job_batches_deleted_static_asset_projections_past_threshold(): void
-    {
-        $liveAsset = StaticAsset::create([
-            'profile_type' => 'poi',
-            'display_name' => 'Batch Live Asset',
-            'is_active' => true,
-        ]);
-        $livePoi = $this->createMapPoi('static', (string) $liveAsset->_id, 'Batch Live Asset');
-        $projectionSpy = new class($this->app->make(MapPoiRegistryContract::class), $this->app->make(MapPoiSourceReaderContract::class), $this->app->make(MapPoiSettingsContract::class)) extends MapPoiProjectionService
-        {
-            /**
-             * @var array<int, array{ref_type: string, ref_ids: array<int, string>}>
-             */
-            public array $deleteByRefsCalls = [];
-
-            public function __construct(
-                MapPoiRegistryContract $registry,
-                MapPoiSourceReaderContract $sourceReader,
-                MapPoiSettingsContract $settings,
-            ) {
-                parent::__construct($registry, $sourceReader, $settings);
-            }
-
-            /**
-             * @param  array<int, string>  $refIds
-             */
-            public function deleteByRefs(string $refType, array $refIds): void
-            {
-                $this->deleteByRefsCalls[] = [
-                    'ref_type' => $refType,
-                    'ref_ids' => array_values($refIds),
-                ];
-
-                parent::deleteByRefs($refType, $refIds);
-            }
-        };
-        $this->app->instance(MapPoiProjectionService::class, $projectionSpy);
-
-        foreach (range(1, 205) as $index) {
-            $deletedAsset = StaticAsset::create([
-                'profile_type' => 'poi',
-                'display_name' => sprintf('Batch Deleted Asset %03d', $index),
-                'is_active' => true,
-            ]);
-
-            $this->createMapPoi('static', (string) $deletedAsset->_id, sprintf('Batch Deleted Asset %03d', $index));
-            $deletedAsset->delete();
-        }
-
-        app()->call([new CleanupOrphanedMapPoisJob(['static']), 'handle']);
-
-        $this->assertSame(
-            [200, 5],
-            array_map(
-                static fn (array $call): int => count($call['ref_ids']),
-                $projectionSpy->deleteByRefsCalls
-            )
-        );
-        $this->assertSame(
-            ['static', 'static'],
-            array_column($projectionSpy->deleteByRefsCalls, 'ref_type')
-        );
-        $this->assertTrue(MapPoi::query()->where('_id', $livePoi->_id)->exists());
-        $this->assertSame(
-            1,
-            MapPoi::query()
-                ->where('ref_type', 'static')
-                ->count()
-        );
-    }
-
-    public function test_cleanup_orphaned_map_pois_job_deletes_force_deleted_static_asset_projections(): void
-    {
-        $liveAsset = StaticAsset::create([
-            'profile_type' => 'poi',
-            'display_name' => 'Force Live Asset',
-            'is_active' => true,
-        ]);
-        $deletedAsset = StaticAsset::create([
-            'profile_type' => 'poi',
-            'display_name' => 'Force Deleted Asset',
-            'is_active' => true,
-        ]);
-
-        $livePoi = $this->createMapPoi('static', (string) $liveAsset->_id, 'Force Live Asset');
-        $deletedPoi = $this->createMapPoi('static', (string) $deletedAsset->_id, 'Force Deleted Asset');
-
-        $deletedAsset->forceDelete();
-
-        app()->call([new CleanupOrphanedMapPoisJob(['static']), 'handle']);
-
-        $this->assertTrue(MapPoi::query()->where('_id', $livePoi->_id)->exists());
-        $this->assertFalse(MapPoi::query()->where('_id', $deletedPoi->_id)->exists());
-    }
-
-    public function test_cleanup_orphaned_map_pois_job_honors_deleted_since_cutoff(): void
-    {
-        $recentDeletedAsset = StaticAsset::create([
-            'profile_type' => 'poi',
-            'display_name' => 'Recent Deleted Asset',
-            'is_active' => true,
-        ]);
-        $oldDeletedAsset = StaticAsset::create([
-            'profile_type' => 'poi',
-            'display_name' => 'Old Deleted Asset',
-            'is_active' => true,
-        ]);
-
-        $recentDeletedPoi = $this->createMapPoi('static', (string) $recentDeletedAsset->_id, 'Recent Deleted Asset');
-        $oldDeletedPoi = $this->createMapPoi('static', (string) $oldDeletedAsset->_id, 'Old Deleted Asset');
-
-        $recentDeletedAsset->delete();
-        $oldDeletedAsset->delete();
-        $oldDeletedAsset->forceFill([
-            'deleted_at' => Carbon::now()->subHours(2),
-        ]);
-        $oldDeletedAsset->save();
-
-        app()->call([new CleanupOrphanedMapPoisJob(['static'], 60), 'handle']);
-
-        $this->assertFalse(MapPoi::query()->where('_id', $recentDeletedPoi->_id)->exists());
-        $this->assertTrue(MapPoi::query()->where('_id', $oldDeletedPoi->_id)->exists());
-    }
-
     public function test_cleanup_orphaned_map_pois_job_honors_deleted_since_cutoff_for_account_profiles(): void
     {
         $recentAccount = Account::create([

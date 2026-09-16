@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Application\Initialization\Actions;
 
 use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
-use App\Application\StaticAssets\StaticProfileTypeRegistrySeeder;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Organization;
 
@@ -13,7 +12,6 @@ class CreateTenantAction
 {
     public function __construct(
         private readonly AccountProfileRegistrySeeder $registrySeeder,
-        private readonly StaticProfileTypeRegistrySeeder $staticProfileSeeder,
     ) {}
 
     /**
@@ -46,7 +44,6 @@ class CreateTenantAction
 
         $tenant->makeCurrent();
         $this->registrySeeder->ensurePersonalDefault();
-        $this->staticProfileSeeder->ensureDefaults();
         $this->ensureTenantOrganization($tenant);
         $tenant->forgetCurrent();
 

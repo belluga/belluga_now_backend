@@ -19,13 +19,12 @@ upstream source aggregates or the discovery-filter catalog.
 - `ref_type` identifies the source aggregate family:
   - `event`
   - `account_profile`
-  - `static`
 - `ref_id` is the source aggregate identifier.
 - `projection_key` is the unique projection identity and defaults to `{ref_type}:{ref_id}`.
 - `exact_key` is the stacking key used to group co-located POIs.
 - `source_type` is the normalized source discriminator used in filters and catalog logic.
 - `taxonomy_terms` and `tags` are read-side filter dimensions, not write-side source ownership.
-- `map_pois` is a projection, not the system of record for events, profiles, or static assets.
+- `map_pois` is a projection, not the system of record for events or profiles.
 
 ## Invariants
 
@@ -34,7 +33,6 @@ upstream source aggregates or the discovery-filter catalog.
 - The collection is tenant-scoped.
 - Event POIs are deactivated when capability or geometry conditions no longer hold.
 - Account profile POIs are removed when profile type is not favoritable or location is missing.
-- Static asset POIs are removed when profile type is not enabled or location is missing.
 
 ## Data Model
 
@@ -163,8 +161,8 @@ The package reads the current tenant context and user timezone from the host-res
 
 The host app must provide adapters for:
 
-- source reading from events, account profiles, and static assets
-- registry decisions for favoritable/static POI types
+- source reading from events and account profiles
+- registry decisions for favoritable POI types
 - tenant context resolution
 - settings resolution for map UI and ingest behavior
 
@@ -186,7 +184,6 @@ Projection repair and backfill:
 - `php artisan map-pois:rebuild`
 - `php artisan map-pois:rebuild events`
 - `php artisan map-pois:rebuild account_profiles`
-- `php artisan map-pois:rebuild static_assets`
 
 Optional flags:
 

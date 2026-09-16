@@ -5,6 +5,7 @@ namespace Tests\Api\v1\Initialization;
 use App\Application\Initialization\Actions\CreateTenantAction;
 use App\Models\Tenants\TenantProfileType;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -93,6 +94,9 @@ class ApiV1InitializeTest extends TestCase
             ['personal'],
             TenantProfileType::query()->orderBy('type')->pluck('type')->all(),
         );
+        $collections = iterator_to_array(DB::connection('tenant')->getDatabase()->listCollectionNames());
+        $this->assertNotContains('static_assets', $collections);
+        $this->assertNotContains('static_profile_types', $collections);
     }
 
     // public function testInitiateAgain(): void {
