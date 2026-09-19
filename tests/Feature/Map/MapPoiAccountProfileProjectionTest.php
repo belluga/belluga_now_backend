@@ -109,6 +109,59 @@ final class MapPoiAccountProfileProjectionTest extends TestCase
         $this->assertSame(1, (int) $type->fresh()?->capability_revision);
     }
 
+    public function test_visual_refreshes_are_durable_distinct_and_survive_unrelated_capability_changes(): void
+    {
+        $type = $this->type(mapEnabled: true);
+        $profiles = [$this->profile('Visual venue one'), $this->profile('Visual venue two')];
+        $service = app(AccountProfileRegistryManagementService::class);
+        $dispatcher = app(AccountProfileOutboxDispatcher::class);
+        $outbox = DB::connection('tenant')->getDatabase()->selectCollection('account_profile_outbox');
+        $eventIds = [];
+
+        foreach (['#FF8800', '#00897B'] as $index => $color) {
+            Queue::fake();
+            $service->update(
+                Request::create('/admin/api/v1/account_profile_types/place', 'PATCH'),
+                'place',
+                ['visual' => ['mode' => 'icon', 'icon' => 'place', 'color' => $color, 'icon_color' => '#FFFFFF']],
+            );
+
+            Queue::assertPushed(DispatchAccountProfileOutboxEventJob::class, 1);
+            Queue::assertNotPushed(\Belluga\MapPois\Jobs\UpsertMapPoiFromAccountProfileJob::class);
+            Queue::assertNotPushed(\Belluga\MapPois\Jobs\DeleteMapPoiByRefJob::class);
+            $this->assertSame(0, (int) $type->fresh()->capability_revision);
+            $this->assertSame($index + 1, $outbox->countDocuments(['operation' => 'map_poi_type_reconcile']));
+            $item = $outbox->findOne(['operation' => 'map_poi_type_reconcile', 'delivery_state' => 'pending']);
+            $this->assertNotNull($item);
+            $eventId = (string) $item['_id'];
+            $this->assertNotContains($eventId, $eventIds);
+            $eventIds[] = $eventId;
+
+            if ($index === 1) {
+                $service->update(
+                    Request::create('/admin/api/v1/account_profile_types/place', 'PATCH'),
+                    'place',
+                    [
+                        'expected_capability_revision' => 0,
+                        'capabilities' => ['is_queryable' => ['value' => false, 'parameters' => []]],
+                    ],
+                );
+                $this->assertSame(1, (int) $type->fresh()->capability_revision);
+            }
+
+            $this->assertTrue($dispatcher->dispatchEvent($eventId));
+            $completed = $outbox->findOne(['_id' => $eventId]);
+            $this->assertSame('completed', (string) $completed['delivery_state']);
+            foreach ($profiles as $profile) {
+                $projection = MapPoi::query()->where('ref_type', 'account_profile')
+                    ->where('ref_id', (string) $profile->getKey())->first();
+                $this->assertNotNull($projection);
+                $this->assertSame($color, data_get($projection->visual, 'color'));
+                $this->assertSame('place', data_get($projection->visual, 'icon'));
+            }
+        }
+    }
+
     public function test_reconciliation_schedules_and_completes_the_next_keyset_page(): void
     {
         $type = $this->type(mapEnabled: true);

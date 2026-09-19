@@ -163,25 +163,17 @@ class AccountProfileRegistryManagementService
         if ($typeReconcileEventId !== null) {
             DispatchAccountProfileOutboxEventJob::dispatch($typeReconcileEventId);
         } elseif ($shouldRefreshMapProjection) {
-            $queryType = $nextType === $currentType ? $nextType : $currentType;
-            $profileIds = AccountProfile::query()
-                ->where('profile_type', $queryType)
-                ->get(['_id'])
-                ->map(static fn (AccountProfile $profile): string => (string) $profile->getKey())
-                ->all();
-
-            if ($profileIds !== []) {
-                if (! $nextPoiEnabled) {
-                    foreach ($profileIds as $profileId) {
-                        \Belluga\MapPois\Jobs\DeleteMapPoiByRefJob::dispatch('account_profile', $profileId);
-                    }
-                } else {
-                    $checkpoint = $forcedCheckpoint > 0 ? $forcedCheckpoint : null;
-                    foreach ($profileIds as $profileId) {
-                        \Belluga\MapPois\Jobs\UpsertMapPoiFromAccountProfileJob::dispatch($profileId, $checkpoint);
-                    }
-                }
-            }
+            $visualRefreshId = (string) Str::uuid();
+            $eventId = $this->transactionRunner->run(
+                fn (AccountProfileTransactionContext $context): string => $this->outboxPublisher->recordMapPoiTypeReconcile(
+                    $context,
+                    $nextType,
+                    null,
+                    $forcedCheckpoint,
+                    $visualRefreshId,
+                ),
+            );
+            DispatchAccountProfileOutboxEventJob::dispatch($eventId);
         }
 
         return $this->toPayload($model, $request->getSchemeAndHttpHost());

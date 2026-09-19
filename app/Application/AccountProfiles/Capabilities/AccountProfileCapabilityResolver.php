@@ -96,6 +96,7 @@ final class AccountProfileCapabilityResolver implements AccountProfileCapability
             ? $configuration['value']
             : $definition['fail_closed_value'];
         $parameters = $this->resolveBaselineParameters($definition, $configuration);
+        $configured = ['value' => $value, 'parameters' => $parameters];
 
         $contribution = $this->overrides->contributionForProfileType($profileType, $key);
         if ($contribution !== null) {
@@ -105,8 +106,7 @@ final class AccountProfileCapabilityResolver implements AccountProfileCapability
             }
         }
 
-        $configured = ['value' => $value, 'parameters' => $parameters];
-        $effective = $configured;
+        $effective = ['value' => $value, 'parameters' => $parameters];
         foreach ($definition['dependencies'] ?? [] as $dependency) {
             $dependencyResult = $this->resolve($profileType, $dependency['capability_key'], $memo, $stack);
             if (! in_array($dependencyResult['effective']['value'], $dependency['accepted_values'], true)) {

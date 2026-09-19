@@ -248,6 +248,10 @@ return new class extends Migration
             ['profile_type' => 1, 'location.type' => 1],
             ['name' => 'idx_account_profiles_profile_type_location_type_v1'],
         );
+        $database->selectCollection('account_profiles')->createIndex(
+            ['profile_type' => 1, 'deleted_at' => 1, '_id' => 1],
+            ['name' => 'idx_account_profiles_type_live_keyset_v1'],
+        );
         $database->selectCollection('events')->createIndex(
             ['place_ref.type' => 1, 'place_ref.id' => 1],
             ['name' => 'idx_events_place_ref_type_id_v1'],
@@ -273,6 +277,7 @@ return new class extends Migration
             ],
             'account_profiles' => [
                 'idx_account_profiles_profile_type_location_type_v1' => ['profile_type' => 1, 'location.type' => 1],
+                'idx_account_profiles_type_live_keyset_v1' => ['profile_type' => 1, 'deleted_at' => 1, '_id' => 1],
             ],
             'events' => [
                 'idx_events_place_ref_type_id_v1' => ['place_ref.type' => 1, 'place_ref.id' => 1],

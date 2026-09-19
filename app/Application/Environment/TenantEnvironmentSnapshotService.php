@@ -59,26 +59,6 @@ class TenantEnvironmentSnapshotService
 
                 return $this->hydrateSnapshot($tenant, $snapshot, $requestRoot, $requestHost);
             } catch (\Throwable $exception) {
-                if ($this->hasUsableSnapshotDocument($snapshotDocument)) {
-                    Log::warning('tenant_environment_snapshot_repair_failed_serving_last_valid', [
-                        'tenant_id' => (string) $tenant->getKey(),
-                        'tenant_slug' => (string) $tenant->slug,
-                        'reason' => $reason,
-                        'error' => $exception->getMessage(),
-                        'snapshot_version' => (string) ($snapshotDocument['snapshot_version'] ?? ''),
-                        'built_at' => $this->snapshotBuiltAtIso($snapshotDocument),
-                    ]);
-
-                    return $this->hydrateSnapshotPayload(
-                        tenant: $tenant,
-                        snapshotPayload: $this->sanitizeStaleSnapshotPayload(
-                            $this->snapshotPayload($snapshotDocument)
-                        ),
-                        requestRoot: $requestRoot,
-                        requestHost: $requestHost,
-                    );
-                }
-
                 Log::error('tenant_environment_snapshot_repair_failed_falling_back_live', [
                     'tenant_id' => (string) $tenant->getKey(),
                     'tenant_slug' => (string) $tenant->slug,
@@ -377,41 +357,6 @@ class TenantEnvironmentSnapshotService
     private function snapshotPayload(?array $snapshotDocument): mixed
     {
         return $snapshotDocument['snapshot'] ?? [];
-    }
-
-    private function sanitizeStaleSnapshotPayload(mixed $snapshotPayload): array
-    {
-        $payload = $this->normalizeMongoValue($snapshotPayload);
-        if (! is_array($payload)) {
-            return [
-                'settings' => [
-                    'map_ui' => ['filters' => []],
-                ],
-            ];
-        }
-
-        $settings = is_array($payload['settings'] ?? null) ? $payload['settings'] : [];
-        $mapUi = is_array($settings['map_ui'] ?? null) ? $settings['map_ui'] : [];
-        $mapUi['filters'] = [];
-        $settings['map_ui'] = $mapUi;
-        $payload['settings'] = $settings;
-
-        return $payload;
-    }
-
-    private function snapshotBuiltAtIso(?array $snapshotDocument): ?string
-    {
-        $builtAt = $snapshotDocument['built_at'] ?? null;
-
-        if ($builtAt instanceof \MongoDB\BSON\UTCDateTime) {
-            return Carbon::instance($builtAt->toDateTime())->toIso8601String();
-        }
-
-        if ($builtAt instanceof \DateTimeInterface) {
-            return Carbon::instance(\DateTimeImmutable::createFromInterface($builtAt))->toIso8601String();
-        }
-
-        return null;
     }
 
     private function normalizeMongoValue(mixed $value): mixed

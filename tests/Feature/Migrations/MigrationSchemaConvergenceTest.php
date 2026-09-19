@@ -143,6 +143,39 @@ final class MigrationSchemaConvergenceTest extends TestCase
         } finally {
             \MongoDB\Driver\Monitoring\removeSubscriber($trace);
         }
+        $reconcileIndex = 'idx_account_profiles_type_live_keyset_v1';
+        foreach ([$freshTenant, $productionTenant] as $database) {
+            $indexes = [];
+            foreach ($database->selectCollection('account_profiles')->listIndexes() as $index) {
+                $indexes[$index->getName()] = $index->getKey();
+            }
+            self::assertArrayHasKey($reconcileIndex, $indexes);
+            self::assertSame(['profile_type' => 1, 'deleted_at' => 1, '_id' => 1], $indexes[$reconcileIndex]);
+        }
+        $firstProfile = $productionTenant->selectCollection('account_profiles')->findOne(['profile_type' => 'upgrade-001']);
+        self::assertNotNull($firstProfile);
+        foreach ([null, $firstProfile['_id']] as $cursor) {
+            $filter = ['profile_type' => 'upgrade-001', 'deleted_at' => null];
+            if ($cursor !== null) {
+                $filter['_id'] = ['$gt' => $cursor];
+            }
+            $explain = $productionTenant->command([
+                'explain' => [
+                    'find' => 'account_profiles',
+                    'filter' => $filter,
+                    'sort' => ['_id' => 1],
+                    'limit' => 101,
+                    'hint' => $reconcileIndex,
+                ],
+                'verbosity' => 'executionStats',
+            ])->toArray()[0];
+            $plan = json_encode($explain['queryPlanner']['winningPlan'], JSON_THROW_ON_ERROR);
+            self::assertStringContainsString($reconcileIndex, $plan);
+            self::assertStringContainsString('"IXSCAN"', $plan);
+            self::assertStringNotContainsString('"COLLSCAN"', $plan);
+            self::assertStringNotContainsString('"SORT"', $plan);
+            self::assertLessThanOrEqual(1, $explain['executionStats']['totalDocsExamined']);
+        }
         foreach ($legacyTypes as $index => $legacy) {
             $converted = $types->findOne(['_id' => $legacy['_id']]);
             self::assertNotNull($converted);
@@ -210,10 +243,21 @@ final class MigrationSchemaConvergenceTest extends TestCase
         $fresh = [$this->normalizedSchema($freshLandlord, 'landlord', false), $this->normalizedSchema($freshTenant, 'tenant', false)];
         $production = [$this->normalizedSchema($productionLandlord, 'landlord', true), $this->normalizedSchema($productionTenant, 'tenant', true)];
         self::assertSame($fresh, $production, 'Fresh and production-ledger histories must converge.');
+        $beforeReconcileIndex = $fresh[1];
+        foreach ($beforeReconcileIndex as &$collection) {
+            if ($collection['name'] === 'account_profiles') {
+                $collection['indexes'] = array_values(array_filter(
+                    $collection['indexes'],
+                    static fn (array $index): bool => $index['name'] !== $reconcileIndex,
+                ));
+            }
+        }
+        unset($collection);
+        self::assertSame('d4aa62f8b9112a686ff64c0ef3c0ffdadf6f5a4fab65737d2a7eb4da079d6721', $this->fingerprint($beforeReconcileIndex), 'The keyset index must be the only tenant schema delta.');
         $evidence = [
             'frozen' => [
                 'landlord' => ['counts' => [18, 70, 1], 'fingerprint' => '1888c52bc3fb0920e2d600eb6b3ce44b80bc12be731b441fbd5d6db90566b956'],
-                'tenant' => ['counts' => [46, 287, 1], 'fingerprint' => 'd4aa62f8b9112a686ff64c0ef3c0ffdadf6f5a4fab65737d2a7eb4da079d6721'],
+                'tenant' => ['counts' => [46, 288, 1], 'fingerprint' => '9d9a8cb9195ac3ac54c2982035a4ad3d514f622105b694d3a2d0f50fdb7bdd18'],
             ],
             'actual' => [
                 'fresh' => [
@@ -226,7 +270,7 @@ final class MigrationSchemaConvergenceTest extends TestCase
                 ],
             ],
             'nominal_delta' => [
-                'tenant_indexes' => 'frozen 287 - actual 287 = 0',
+                'tenant_indexes' => 'frozen 288 - actual 288 = 0; previous lane 287 + type live keyset index = 288',
                 'production_initial_has_content_index' => true,
                 'after_current_tail_has_content_index' => in_array('idx_account_profile_types_capability_has_content_v1', $this->indexNames($productionTenant, 'account_profile_types'), true),
                 'production_command_receipts_indexes' => $this->indexNames($productionTenant, 'account_profile_command_receipts'),

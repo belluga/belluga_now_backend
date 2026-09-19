@@ -96,8 +96,13 @@ final class AccountProfileMapPoiOutboxConsumer implements AccountProfileOutboxCo
         $eventId = trim((string) ($event['_id'] ?? ''));
         $claimToken = trim((string) ($event['claim_token'] ?? ''));
         $profileType = trim((string) ($event['profile_type'] ?? ''));
-        $expectedRevision = (int) ($event['capability_revision'] ?? -1);
-        if ($eventId === '' || $claimToken === '' || $profileType === '' || $expectedRevision < 0) {
+        $expectedRevision = array_key_exists('capability_revision', $event) ? $event['capability_revision'] : -1;
+        $visualRefreshId = $event['visual_refresh_id'] ?? null;
+        $isVisualRefresh = $expectedRevision === null
+            && is_string($visualRefreshId)
+            && trim($visualRefreshId) !== '';
+        if ($eventId === '' || $claimToken === '' || $profileType === ''
+            || (! $isVisualRefresh && (! is_int($expectedRevision) || $expectedRevision < 0))) {
             throw new RuntimeException('Map POI type reconciliation item is malformed.');
         }
 
@@ -109,6 +114,12 @@ final class AccountProfileMapPoiOutboxConsumer implements AccountProfileOutboxCo
             throw new RuntimeException('Map POI type reconciliation cannot resolve its profile type.');
         }
         $currentRevision = (int) ($type['capability_revision'] ?? -1);
+        if ($isVisualRefresh) {
+            if ($currentRevision < 0) {
+                throw new RuntimeException('Map POI visual reconciliation requires a current capability revision.');
+            }
+            $expectedRevision = $currentRevision;
+        }
         if ($currentRevision < $expectedRevision) {
             throw new RuntimeException('Map POI type reconciliation generation is ahead of the profile type.');
         }

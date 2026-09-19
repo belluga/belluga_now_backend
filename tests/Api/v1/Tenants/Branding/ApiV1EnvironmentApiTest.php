@@ -161,7 +161,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $this->assertNotNull($snapshot->built_at);
     }
 
-    public function test_environment_api_serves_last_valid_snapshot_when_repair_fails(): void
+    public function test_environment_api_rejects_incompatible_snapshot_when_repair_and_live_build_fail(): void
     {
         $tenant = $this->currentTenant();
         $tenant->makeCurrent();
@@ -169,8 +169,7 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
         $url = "{$this->base_api_tenant}environment";
         $service = app(TenantEnvironmentSnapshotService::class);
-        $service->repair($tenant, 'test_seed', ['case' => 'last_valid_fallback']);
-        $baselinePayload = $this->expectedEnvironmentContract($tenant, $url);
+        $service->repair($tenant, 'test_seed', ['case' => 'incompatible_snapshot']);
 
         Queue::fake();
 
@@ -181,6 +180,13 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
         $snapshot = TenantEnvironmentSnapshot::current();
         $this->assertNotNull($snapshot);
         $snapshot->schema_version = 0;
+        $legacyPayload = $snapshot->snapshot;
+        $legacyPayload['profile_types'] = [[
+            'type' => 'legacy-flat-capability-profile',
+            'label' => 'Legacy profile',
+            'capabilities' => ['has_gallery' => true, 'is_poi_enabled' => true],
+        ]];
+        $snapshot->snapshot = $legacyPayload;
         $snapshot->save();
 
         app()->instance(
@@ -197,8 +203,9 @@ class ApiV1EnvironmentApiTest extends TestCaseTenant
 
         $response = $this->get($url);
 
-        $response->assertStatus(200);
-        $this->assertSame($baselinePayload, $response->json());
+        $response->assertStatus(500);
+        $response->assertJsonMissingPath('profile_types');
+        $this->assertStringNotContainsString('legacy-flat-capability-profile', $response->getContent());
 
         $tenant->makeCurrent();
         $failedSnapshot = TenantEnvironmentSnapshot::current();

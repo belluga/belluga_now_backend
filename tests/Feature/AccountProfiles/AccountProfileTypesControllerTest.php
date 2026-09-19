@@ -1364,6 +1364,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         TenantProfileType::create([
             'type' => 'unreferenced-type',
             'label' => 'Unreferenced Type',
+            'capability_revision' => 0,
             'allowed_taxonomies' => [],
             'capabilities' => [
                 'location_policy' => ['value' => 'disabled', 'parameters' => []],
@@ -1523,6 +1524,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         TenantProfileType::create([
             'type' => 'venue',
             'label' => 'Venue',
+            'capability_revision' => 0,
             'allowed_taxonomies' => [],
             'poi_visual' => [
                 'mode' => 'icon',
@@ -1613,6 +1615,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         TenantProfileType::create([
             'type' => 'venue',
             'label' => 'Venue',
+            'capability_revision' => 0,
             'allowed_taxonomies' => [],
             'poi_visual' => [
                 'mode' => 'icon',

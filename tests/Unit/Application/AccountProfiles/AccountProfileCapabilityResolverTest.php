@@ -76,11 +76,16 @@ final class AccountProfileCapabilityResolverTest extends TestCase
                 return ['value' => true, 'parameters' => ['max_groups' => 8]];
             }
         });
+        $activated = $activating->resolveForProfileType($type, 'has_gallery');
+        $this->assertSame([
+            'value' => false,
+            'parameters' => ['max_groups' => 6, 'max_items_per_group' => 12],
+        ], $activated['configured']);
         $this->assertSame([
             'max_groups' => 8,
             'max_items_per_group' => 12,
-        ], $activating->resolveForProfileType($type, 'has_gallery')['effective']['parameters']);
-        $this->assertTrue($activating->resolveForProfileType($type, 'has_gallery')['effective']['value']);
+        ], $activated['effective']['parameters']);
+        $this->assertTrue($activated['effective']['value']);
 
         $invalid = $this->resolver($registry, new class implements AccountProfileCapabilityOverrideProviderContract
         {
