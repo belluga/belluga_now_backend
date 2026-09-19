@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Feature\AccountProfiles;
 
 use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
-use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
@@ -38,32 +37,30 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
     public function test_it_builds_one_catalog_snapshot_with_derived_public_sets_and_php_ordered_filter_options(): void
     {
         $this->createType('venue', 'Zoo Venue', [
-            'is_queryable' => true,
-            'is_publicly_navigable' => true,
-            'is_publicly_discoverable' => true,
-            'is_favoritable' => true,
-            'is_poi_enabled' => true,
-            'has_nested_profile_groups' => true,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'is_favoritable' => ['value' => true, 'parameters' => []],
+            'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+            'has_nested_profile_groups' => ['value' => true, 'parameters' => []],
         ]);
         $this->createType('artist', 'Alpha Artist', [
-            'is_queryable' => true,
-            'is_publicly_discoverable' => true,
-            'is_favoritable' => true,
-            'is_poi_enabled' => false,
-            'has_nested_profile_groups' => false,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'is_favoritable' => ['value' => true, 'parameters' => []],
+            'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+            'has_nested_profile_groups' => ['value' => false, 'parameters' => []],
         ]);
         $this->createType('hidden', 'Hidden Type', [
-            'is_queryable' => true,
-            'is_publicly_navigable' => true,
-            'is_publicly_discoverable' => true,
-            'is_favoritable' => false,
-            'is_poi_enabled' => true,
-            'has_nested_profile_groups' => true,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'is_favoritable' => ['value' => false, 'parameters' => []],
+            'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+            'has_nested_profile_groups' => ['value' => true, 'parameters' => []],
         ]);
 
-        $reader = new AccountProfilePublicCatalogSnapshotReader(
-            new AccountProfileTypeCapabilityCatalog,
-        );
+        $reader = app(AccountProfilePublicCatalogSnapshotReader::class);
 
         $snapshot = $reader->catalogSnapshot();
 
@@ -94,21 +91,19 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
     public function test_it_uses_a_separate_direct_public_poi_key_read_for_near_only_requests(): void
     {
         $this->createType('venue', 'Venue', [
-            'is_queryable' => true,
-            'is_publicly_discoverable' => true,
-            'is_favoritable' => true,
-            'is_poi_enabled' => true,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'is_favoritable' => ['value' => true, 'parameters' => []],
+            'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
         ]);
         $this->createType('artist', 'Artist', [
-            'is_queryable' => true,
-            'is_publicly_discoverable' => true,
-            'is_favoritable' => true,
-            'is_poi_enabled' => false,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'is_favoritable' => ['value' => true, 'parameters' => []],
+            'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
         ]);
 
-        $reader = new AccountProfilePublicCatalogSnapshotReader(
-            new AccountProfileTypeCapabilityCatalog,
-        );
+        $reader = app(AccountProfilePublicCatalogSnapshotReader::class);
 
         $this->assertSame(['venue'], $reader->publicPoiTypeKeys());
         $this->assertSame(['venue'], $reader->publicPoiTypeKeys());
@@ -118,19 +113,17 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
     public function test_it_decouples_direct_public_detail_keys_from_catalog_membership(): void
     {
         $this->createType('catalog', 'Catalog Type', [
-            'is_queryable' => true,
-            'is_publicly_navigable' => true,
-            'is_publicly_discoverable' => true,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
         ]);
         $this->createType('direct-only', 'Direct Only Type', [
-            'is_queryable' => false,
-            'is_publicly_navigable' => true,
-            'is_publicly_discoverable' => false,
+            'is_queryable' => ['value' => false, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
         ]);
 
-        $reader = new AccountProfilePublicCatalogSnapshotReader(
-            new AccountProfileTypeCapabilityCatalog,
-        );
+        $reader = app(AccountProfilePublicCatalogSnapshotReader::class);
 
         $snapshot = $reader->catalogSnapshot();
 
@@ -149,16 +142,14 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
     public function test_it_refreshes_cached_catalog_and_public_poi_policies_after_profile_type_update_without_recreating_reader(): void
     {
         $this->createType('venue', 'Venue', [
-            'is_queryable' => true,
-            'is_publicly_navigable' => true,
-            'is_publicly_discoverable' => true,
-            'is_favoritable' => true,
-            'is_poi_enabled' => true,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'is_favoritable' => ['value' => true, 'parameters' => []],
+            'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
         ]);
 
-        $reader = new AccountProfilePublicCatalogSnapshotReader(
-            new AccountProfileTypeCapabilityCatalog,
-        );
+        $reader = app(AccountProfilePublicCatalogSnapshotReader::class);
         $profile = new \App\Models\Tenants\AccountProfile([
             'profile_type' => 'venue',
             'is_active' => true,
@@ -171,11 +162,11 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
 
         $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $venueType->capabilities = [
-            'is_queryable' => true,
-            'is_publicly_navigable' => false,
-            'is_publicly_discoverable' => true,
-            'is_favoritable' => true,
-            'is_poi_enabled' => true,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'is_favoritable' => ['value' => true, 'parameters' => []],
+            'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
         ];
         $venueType->save();
 

@@ -254,7 +254,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
         }
     }
 
-    public function test_entity_reference_resolves_disabled_when_source_type_loses_poi_prerequisite(): void
+    public function test_entity_reference_resolves_disabled_when_source_type_disables_location(): void
     {
         $user = $this->createRegisteredUser();
         $this->actingAsTenantUser($user);
@@ -265,9 +265,11 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
                 'label' => 'Hotel',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => true,
-                    'is_reference_location_enabled' => true,
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []],
+                    'is_map_poi_enabled' => ['value' => true, 'parameters' => []],
+                    'is_physical_host_enabled' => ['value' => true, 'parameters' => []],
+                    'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ],
         );
@@ -322,9 +324,11 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             ->firstOrFail()
             ->update([
                 'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => false,
-                    'is_reference_location_enabled' => false,
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []],
+                    'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                    'is_physical_host_enabled' => ['value' => false, 'parameters' => []],
+                    'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ]);
 
@@ -367,7 +371,7 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
         );
         $getResponse->assertJsonPath(
             'data.location_preference.fixed_reference.blocked_capability_key',
-            'is_poi_enabled',
+            'is_reference_location_enabled',
         );
     }
 
@@ -382,9 +386,11 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
                 'label' => 'Hotel',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => true,
-                    'is_reference_location_enabled' => true,
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []],
+                    'is_map_poi_enabled' => ['value' => true, 'parameters' => []],
+                    'is_physical_host_enabled' => ['value' => true, 'parameters' => []],
+                    'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ],
         );
@@ -439,9 +445,11 @@ class ProfileProximityPreferencesControllerTest extends TestCaseTenant
             ->firstOrFail()
             ->update([
                 'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => true,
-                    'is_reference_location_enabled' => false,
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []],
+                    'is_map_poi_enabled' => ['value' => true, 'parameters' => []],
+                    'is_physical_host_enabled' => ['value' => true, 'parameters' => []],
+                    'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ]);
 

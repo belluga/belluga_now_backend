@@ -34,6 +34,9 @@ class AccountProfileManagementService
         private readonly AccountProfileOutboxDispatcher $outboxDispatcher,
         private readonly AccountProfileLifecycleService $lifecycleService,
         private readonly AccountProfileRelationAdmissionService $relationAdmissionService,
+        private readonly AccountProfileLocationPolicy $locationPolicy,
+        private readonly AccountProfileAdmissionFenceService $admissionFences,
+        private readonly AccountProfileTypeChangeImpactService $changeImpact,
     ) {}
 
     /**
@@ -176,14 +179,13 @@ class AccountProfileManagementService
             ]);
         }
 
-        if ($this->registryService->isPoiEnabled($profileType)) {
-            $location = $payload['location'] ?? null;
-            if (! is_array($location) || ! isset($location['lat'], $location['lng'])) {
-                throw ValidationException::withMessages([
-                    'location' => ['Location is required for POI-enabled profiles.'],
-                ]);
-            }
-        }
+        $typeDocuments = $this->admissionFences->touchProfileTypes(
+            $context->database(),
+            $context->session(),
+            [$profileType],
+        );
+        $type = $this->hydrateProfileType($typeDocuments[$profileType]);
+        $this->locationPolicy->assertCreateAllowedForType($type, $payload['location'] ?? null);
 
         $taxonomyTerms = $payload['taxonomy_terms'] ?? [];
         if (is_array($taxonomyTerms) && $taxonomyTerms !== []) {
@@ -263,15 +265,13 @@ class AccountProfileManagementService
             ]);
         }
 
-        if ($profileType && $this->registryService->isPoiEnabled($profileType)) {
-            if (array_key_exists('location', $attributes)) {
-                $location = $attributes['location'] ?? null;
-                if (! is_array($location) || ! isset($location['lat'], $location['lng'])) {
-                    throw ValidationException::withMessages([
-                        'location' => ['Location is required for POI-enabled profiles.'],
-                    ]);
-                }
-            }
+        if ($profileType) {
+            $this->locationPolicy->assertUpdateAllowed(
+                $profile,
+                (string) $profileType,
+                array_key_exists('location', $attributes),
+                $attributes['location'] ?? null,
+            );
         }
 
         if (array_key_exists('taxonomy_terms', $attributes)) {
@@ -347,6 +347,39 @@ class AccountProfileManagementService
 
                     $persistedProfile = AccountProfile::query()->findOrFail($profileId);
                     $this->lifecycleService->assertProfileMutationAllowed($persistedProfile, $context);
+                    $oldProfileType = trim((string) $persistedProfile->profile_type);
+                    $nextProfileType = trim((string) ($attributes['profile_type'] ?? $oldProfileType));
+                    $profileTypeChanged = $nextProfileType !== $oldProfileType;
+                    $locationChanged = array_key_exists('location', $attributes)
+                        && $attributes['location'] !== ($persistedProfile->location ?? null);
+                    if ($profileTypeChanged || $locationChanged) {
+                        $typeDocuments = $this->admissionFences->touchProfileTypes(
+                            $context->database(),
+                            $context->session(),
+                            [$oldProfileType, $nextProfileType],
+                        );
+                        $nextType = $this->hydrateProfileType($typeDocuments[$nextProfileType]);
+                        $this->locationPolicy->assertUpdateAllowedForType(
+                            $persistedProfile,
+                            $nextType,
+                            array_key_exists('location', $attributes),
+                            $attributes['location'] ?? null,
+                        );
+                        $effectiveLocation = array_key_exists('location', $attributes)
+                            ? $attributes['location']
+                            : ($persistedProfile->location ?? null);
+                        $this->changeImpact->assertProfileMutationAllowed(
+                            $persistedProfile,
+                            $nextType,
+                            $effectiveLocation,
+                            $context,
+                        );
+                        $this->admissionFences->touchProfiles(
+                            $context->database(),
+                            $context->session(),
+                            [$profileId],
+                        );
+                    }
                     $this->nestedGroupMemberStore->assertCanonicalGroupHeadsAvailableWithinContext(
                         $context,
                         $persistedProfile,
@@ -527,6 +560,16 @@ class AccountProfileManagementService
         $commandId = trim((string) $commandId);
 
         return $commandId === '' ? (string) Str::uuid() : $commandId;
+    }
+
+    /** @param array<string, mixed> $document */
+    private function hydrateProfileType(array $document): \App\Models\Tenants\TenantProfileType
+    {
+        $model = new \App\Models\Tenants\TenantProfileType;
+        $model->setRawAttributes($document, true);
+        $model->exists = true;
+
+        return $model;
     }
 
     public function delete(AccountProfile $profile, ?string $commandId = null): void

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\TenantProfileType;
 use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
@@ -26,6 +25,7 @@ final class AccountProfileCandidateDiscoveryService
     public function __construct(
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly HomeFavoritesPinnedProfileService $homeFavoritesPinnedProfileService,
+        private readonly AccountProfileTypeSetProvider $profileTypeSets,
     ) {}
 
     /**
@@ -130,8 +130,7 @@ final class AccountProfileCandidateDiscoveryService
         if ($scope === self::SCOPE_HOME_FAVORITES_PINNED_PROFILE) {
             return collect($profileIds)
                 ->reject(static fn (string $profileId): bool => $profileId === $excludedProfileId)
-                ->map(fn (string $profileId): ?AccountProfile =>
-                    $this->homeFavoritesPinnedProfileService->findEligibleProfile($profileId))
+                ->map(fn (string $profileId): ?AccountProfile => $this->homeFavoritesPinnedProfileService->findEligibleProfile($profileId))
                 ->filter(static fn (?AccountProfile $profile): bool => $profile instanceof AccountProfile)
                 ->values();
         }
@@ -241,20 +240,11 @@ final class AccountProfileCandidateDiscoveryService
      */
     private function eligibleTypes(string $scope): array
     {
-        $query = TenantProfileType::query();
-        match ($scope) {
-            self::SCOPE_QUERYABLE => $query->queryable(),
-            self::SCOPE_CONTACT_CAPABLE => $query->contactChannelsEnabled(),
+        return match ($scope) {
+            self::SCOPE_QUERYABLE => $this->profileTypeSets->queryableTypes(),
+            self::SCOPE_CONTACT_CAPABLE => $this->profileTypeSets->contactChannelsEnabledTypes(),
             default => throw new InvalidArgumentException("Unsupported account profile candidate scope [{$scope}]."),
         };
-
-        return $query
-            ->pluck('type')
-            ->map(static fn (mixed $type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all();
     }
 
     /**

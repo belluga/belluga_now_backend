@@ -83,12 +83,20 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     private AccountRoleTemplate $accountRoleTemplate;
 
+    /**
+     * The authenticated base harness initializes a tenant during its setUp.
+     * This class needs the landlord and tenant migration structures before
+     * that initialization can create the tenant on a clean Mongo database.
+     */
+    protected function prepareAuthenticatedHarnessState(): void
+    {
+        $this->refreshLandlordAndTenantDatabases();
+        $this->initializeSystem();
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
-
-        $this->refreshLandlordAndTenantDatabases();
-        $this->initializeSystem();
 
         $tenant = Tenant::query()->firstOrFail();
         $tenant->makeCurrent();
@@ -120,12 +128,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Personal',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => false,
-                'is_publicly_navigable' => false,
-                'is_favoritable' => false,
-                'is_publicly_discoverable' => false,
-                'is_poi_enabled' => false,
-                'has_events' => false,
+                'is_queryable' => ['value' => false, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+                'is_favoritable' => ['value' => false, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_events' => ['value' => false, 'parameters' => []],
             ],
         ]);
         TenantProfileType::query()->updateOrCreate([
@@ -135,14 +143,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Venue',
             'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => true,
-                'has_events' => true,
-                'has_gallery' => true,
-                'has_nested_profile_groups' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'optional', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+                'has_events' => ['value' => true, 'parameters' => []],
+                'has_gallery' => ['value' => true, 'parameters' => ['max_groups' => 6, 'max_items_per_group' => 12]],
+                'has_nested_profile_groups' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -191,6 +199,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'profile_type' => 'venue',
             'display_name' => 'Outbox Source Venue',
             'is_active' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
         ])->fresh();
         $commandId = 'u07a-profile-update-'.uniqid('', true);
 
@@ -225,6 +237,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'profile_type' => 'venue',
             'display_name' => 'Idempotent Outbox Venue',
             'is_active' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0, -20.0],
+            ],
         ])->fresh();
         $commandId = 'u07a-profile-replay-'.uniqid('', true);
         $url = "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}";
@@ -1277,10 +1293,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Internal Partner',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_favoritable' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -1327,9 +1343,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
         TenantProfileType::query()
             ->where('type', 'personal')
             ->update([
-                'capabilities.is_favoritable' => true,
-                'capabilities.is_inviteable' => true,
-                'capabilities.is_publicly_discoverable' => false,
+                'capabilities.is_favoritable.value' => true,
+                'capabilities.is_inviteable.value' => true,
+                'capabilities.is_publicly_discoverable.value' => false,
             ]);
 
         $personal = AccountProfile::create([
@@ -1346,10 +1362,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Public Catalog Guard',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -1412,10 +1428,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Navigable Non Favoritable',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_favoritable' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -1442,10 +1458,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Draft Hidden Profile',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_favoritable' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -1485,10 +1501,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Aggregate Guard Profile',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_favoritable' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -1605,11 +1621,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Near Guard Profile',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -1688,10 +1704,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Internal Partner',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_favoritable' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -1727,9 +1743,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Public Catalog Fixture',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -1970,12 +1986,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Artist Public',
             'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => false,
-                'has_events' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_events' => ['value' => false, 'parameters' => []],
             ],
         ]);
         TaxonomyTerm::create([
@@ -2056,12 +2072,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Visible Runtime Type',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => false,
-                'has_events' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_events' => ['value' => false, 'parameters' => []],
             ],
         ]);
         TenantProfileType::create([
@@ -2069,12 +2085,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Empty Runtime Type',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => false,
-                'has_events' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_events' => ['value' => false, 'parameters' => []],
             ],
         ]);
         TenantProfileType::create([
@@ -2082,12 +2098,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Hidden Runtime Type',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => false,
-                'is_poi_enabled' => false,
-                'has_events' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_events' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -2142,12 +2158,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Artist Public',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => false,
-                'has_events' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_events' => ['value' => false, 'parameters' => []],
             ],
         ]);
         TenantProfileType::create([
@@ -2155,12 +2171,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Stale Hidden',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => false,
-                'has_events' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_events' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -2200,12 +2216,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Artist Public',
             'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => false,
-                'has_events' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_events' => ['value' => false, 'parameters' => []],
             ],
         ]);
         TaxonomyTerm::create([
@@ -2892,7 +2908,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $profileType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $profileType->capabilities = array_merge(
             is_array($profileType->capabilities ?? null) ? $profileType->capabilities : [],
-            ['has_contact_channels' => false],
+            ['has_contact_channels' => ['value' => false, 'parameters' => []]],
         );
         $profileType->save();
 
@@ -2916,13 +2932,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $venueType->capabilities = [
-            'is_queryable' => false,
-            'is_publicly_discoverable' => true,
-            'is_publicly_navigable' => true,
-            'is_favoritable' => true,
-            'is_poi_enabled' => true,
-            'has_events' => true,
-            'has_nested_profile_groups' => true,
+            'is_queryable' => ['value' => false, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+            'is_favoritable' => ['value' => true, 'parameters' => []],
+            'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+            'has_events' => ['value' => true, 'parameters' => []],
+            'has_nested_profile_groups' => ['value' => true, 'parameters' => []],
         ];
         $venueType->save();
 
@@ -2947,13 +2963,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $venueType->capabilities = [
-            'is_queryable' => true,
-            'is_publicly_discoverable' => true,
-            'is_publicly_navigable' => false,
-            'is_favoritable' => true,
-            'is_poi_enabled' => true,
-            'has_events' => true,
-            'has_nested_profile_groups' => true,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+            'is_favoritable' => ['value' => true, 'parameters' => []],
+            'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+            'has_events' => ['value' => true, 'parameters' => []],
+            'has_nested_profile_groups' => ['value' => true, 'parameters' => []],
         ];
         $venueType->save();
 
@@ -3159,12 +3175,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Artist',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => false,
-                'has_events' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_events' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -3213,12 +3229,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Community Hub',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => true,
-                'has_events' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+                'has_events' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -3267,12 +3283,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'POI Without Events',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => true,
-                'has_events' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+                'has_events' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -3502,11 +3518,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Artist',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
             ],
         ]);
         TenantProfileType::create([
@@ -3514,11 +3530,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Blocked Poi',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => false,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => false, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -3664,11 +3680,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Restaurant',
             'allowed_taxonomies' => ['cuisine'],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -4468,14 +4484,29 @@ class AccountProfilesControllerTest extends TestCaseTenant
             static fn (array $entry): bool => $entry['name'] === 'find'
                 && ($entry['command']['find'] ?? null) === 'account_profile_types',
         ));
-        $this->assertCount(3, $profileTypeFinds);
+        $this->assertCount(
+            5,
+            $profileTypeFinds,
+            json_encode($profileTypeFinds, JSON_INVALID_UTF8_SUBSTITUTE),
+        );
         $contactCapabilityFinds = array_values(array_filter(
             $profileTypeFinds,
-            static fn (array $entry): bool => ($entry['command']['filter'] ?? null) === [
-                'capabilities.has_contact_channels' => true,
+            static fn (array $entry): bool => ($entry['command']['filter']['capabilities.has_contact_channels.value'] ?? null) === [
+                '$eq' => true,
+                '$type' => 'bool',
+                '$not' => ['$type' => 'array'],
             ],
         ));
         $this->assertCount(1, $contactCapabilityFinds);
+        $locationPolicyFinds = array_values(array_filter(
+            $profileTypeFinds,
+            static fn (array $entry): bool => ($entry['command']['filter']['capabilities.location_policy.value'] ?? null) === [
+                '$in' => ['optional', 'required'],
+                '$type' => 'string',
+                '$not' => ['$type' => 'array'],
+            ],
+        ));
+        $this->assertCount(1, $locationPolicyFinds);
 
         $profileFinds = array_values(array_filter(
             $trace->commands(),
@@ -4571,8 +4602,15 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(403);
     }
 
-    public function test_account_profile_create_requires_location_when_poi_enabled(): void
+    public function test_account_profile_create_requires_location_when_location_policy_is_required(): void
     {
+        $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $venueType->capabilities = array_merge(
+            is_array($venueType->capabilities ?? null) ? $venueType->capabilities : [],
+            ['location_policy' => ['value' => 'required', 'parameters' => []]],
+        );
+        $venueType->save();
+
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}account_onboardings",
             [
@@ -4766,12 +4804,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ['label' => 'Personal',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => false,
-                    'is_favoritable' => true,
-                    'is_publicly_discoverable' => false,
-                    'is_poi_enabled' => false,
-                    'has_events' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                    'has_events' => ['value' => false, 'parameters' => []],
                 ],
             ],
         );
@@ -4783,12 +4821,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ['label' => 'Personal',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_favoritable' => true,
-                    'is_publicly_discoverable' => false,
-                    'is_poi_enabled' => false,
-                    'has_events' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                    'has_events' => ['value' => false, 'parameters' => []],
                 ],
             ],
         );
@@ -5465,11 +5503,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Plain',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_favoritable' => true,
-                'has_contact_channels' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'has_contact_channels' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -6641,7 +6679,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $personalType = TenantProfileType::query()->where('type', 'personal')->firstOrFail();
         $personalType->capabilities = [
             ...(is_array($personalType->capabilities) ? $personalType->capabilities : []),
-            'has_nested_profile_groups' => true,
+            'has_nested_profile_groups' => ['value' => true, 'parameters' => []],
         ];
         $personalType->save();
         $personal = AccountProfile::create([
@@ -7355,13 +7393,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Queryable only',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => false,
-                'is_favoritable' => false,
-                'is_publicly_discoverable' => false,
-                'is_poi_enabled' => false,
-                'has_events' => false,
-                'has_contact_channels' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+                'is_favoritable' => ['value' => false, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_events' => ['value' => false, 'parameters' => []],
+                'has_contact_channels' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -7592,9 +7630,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'hidden_guest'],
             ['capabilities' => [
-                'is_queryable' => false,
-                'is_publicly_navigable' => false,
-                'is_publicly_discoverable' => false,
+                'is_queryable' => ['value' => false, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
             ]]
         );
 
@@ -7808,9 +7846,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'label' => 'Plain',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_favoritable' => false,
-                'is_poi_enabled' => false,
-                'has_nested_profile_groups' => false,
+                'is_favoritable' => ['value' => false, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_nested_profile_groups' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -8530,17 +8568,17 @@ class AccountProfilesControllerTest extends TestCaseTenant
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'guest_public'],
             ['capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => false,
-                'is_publicly_discoverable' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
             ]]
         );
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'hidden_guest'],
             ['capabilities' => [
-                'is_queryable' => false,
-                'is_publicly_navigable' => false,
-                'is_publicly_discoverable' => false,
+                'is_queryable' => ['value' => false, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
             ]]
         );
 
@@ -9177,13 +9215,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ->where('type', 'venue')
             ->firstOrFail();
         $venueType->capabilities = [
-            'is_queryable' => true,
-            'is_publicly_navigable' => true,
-            'is_favoritable' => true,
-            'is_publicly_discoverable' => true,
-            'is_poi_enabled' => true,
-            'has_events' => true,
-            'has_nested_profile_groups' => false,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+            'is_favoritable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+            'has_events' => ['value' => true, 'parameters' => []],
+            'has_nested_profile_groups' => ['value' => false, 'parameters' => []],
         ];
         $venueType->save();
         $partner = $this->createNestedProfileFixture('Hidden Public Partner', 'hidden-public-partner');
@@ -9265,9 +9303,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
         TenantProfileType::query()->updateOrCreate(
             ['type' => 'hidden_guest'],
             ['capabilities' => [
-                'is_queryable' => false,
-                'is_publicly_navigable' => false,
-                'is_publicly_discoverable' => false,
+                'is_queryable' => ['value' => false, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
             ]]
         );
 
@@ -9439,7 +9477,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $profileType = TenantProfileType::query()->where('type', $type)->firstOrFail();
         $profileType->capabilities = array_merge(
             is_array($profileType->capabilities ?? null) ? $profileType->capabilities : [],
-            ['has_contact_channels' => true],
+            ['has_contact_channels' => ['value' => true, 'parameters' => []]],
         );
         $profileType->save();
     }

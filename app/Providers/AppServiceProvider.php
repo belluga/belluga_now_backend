@@ -6,6 +6,29 @@ namespace App\Providers;
 
 use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityOverrideProviderContract;
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityRegistry;
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolver;
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
+use App\Application\AccountProfiles\Capabilities\HasAvatarCapability;
+use App\Application\AccountProfiles\Capabilities\HasBioCapability;
+use App\Application\AccountProfiles\Capabilities\HasContactChannelsCapability;
+use App\Application\AccountProfiles\Capabilities\HasCoverCapability;
+use App\Application\AccountProfiles\Capabilities\HasEventsCapability;
+use App\Application\AccountProfiles\Capabilities\HasExternalLinksCapability;
+use App\Application\AccountProfiles\Capabilities\HasGalleryCapability;
+use App\Application\AccountProfiles\Capabilities\HasNestedProfileGroupsCapability;
+use App\Application\AccountProfiles\Capabilities\HasTaxonomiesCapability;
+use App\Application\AccountProfiles\Capabilities\IsFavoritableCapability;
+use App\Application\AccountProfiles\Capabilities\IsInviteableCapability;
+use App\Application\AccountProfiles\Capabilities\IsPubliclyDiscoverableCapability;
+use App\Application\AccountProfiles\Capabilities\IsPubliclyNavigableCapability;
+use App\Application\AccountProfiles\Capabilities\IsQueryableCapability;
+use App\Application\AccountProfiles\Capabilities\LocationPolicyCapability;
+use App\Application\AccountProfiles\Capabilities\MapPoiCapability;
+use App\Application\AccountProfiles\Capabilities\NullAccountProfileCapabilityOverrideProvider;
+use App\Application\AccountProfiles\Capabilities\PhysicalHostCapability;
+use App\Application\AccountProfiles\Capabilities\ReferenceLocationCapability;
 use App\Application\Media\ExternalImageDnsResolverContract;
 use App\Application\Media\SystemExternalImageDnsResolver;
 use App\Application\Telemetry\Contracts\TelemetryEmitterContract;
@@ -40,6 +63,34 @@ class AppServiceProvider extends ServiceProvider
         $this->app->scoped(AccountProfilePublicCatalogSnapshotReader::class);
         $this->app->scoped(RichTextReadCanonicalizer::class);
         $this->app->bind(AccountProfileTypeSetProvider::class);
+        $this->app->singleton(AccountProfileCapabilityRegistry::class, static fn (): AccountProfileCapabilityRegistry => new AccountProfileCapabilityRegistry([
+            new IsQueryableCapability,
+            new IsPubliclyNavigableCapability,
+            new IsPubliclyDiscoverableCapability,
+            new IsFavoritableCapability,
+            new IsInviteableCapability,
+            new HasBioCapability,
+            new HasTaxonomiesCapability,
+            new HasAvatarCapability,
+            new HasCoverCapability,
+            new HasEventsCapability,
+            new HasGalleryCapability,
+            new HasNestedProfileGroupsCapability,
+            new HasContactChannelsCapability,
+            new HasExternalLinksCapability,
+            new LocationPolicyCapability,
+            new MapPoiCapability,
+            new PhysicalHostCapability,
+            new ReferenceLocationCapability,
+        ]));
+        $this->app->singleton(
+            AccountProfileCapabilityOverrideProviderContract::class,
+            NullAccountProfileCapabilityOverrideProvider::class,
+        );
+        $this->app->bind(
+            AccountProfileCapabilityResolverContract::class,
+            AccountProfileCapabilityResolver::class,
+        );
 
         $this->app->bind(
             ResetPasswordRequestContract::class,

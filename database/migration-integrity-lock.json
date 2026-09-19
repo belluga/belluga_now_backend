@@ -1000,6 +1000,61 @@
             "provenance_commit": "4cf03a037c3b60aa612470044f927abae7a1fd6e",
             "executed_or_equivalent_sha256": "1537c176a5127e30ad93e8b0427102a26af9b9f2499eb0828057006136ee9ec6",
             "target_sha256": "1537c176a5127e30ad93e8b0427102a26af9b9f2499eb0828057006136ee9ec6"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_15_000100_hard_cut_account_profile_capabilities",
+            "path": "database/migrations/tenants/2026_09_15_000100_hard_cut_account_profile_capabilities.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "110af2a6cc90a58e8b9f69bb9c5a1db75c031261",
+            "executed_or_equivalent_sha256": "d23322a5cc87bb1696baecc285c22c8b81853d444f0f14f7f883c6deb5e4b7c2",
+            "target_sha256": "d23322a5cc87bb1696baecc285c22c8b81853d444f0f14f7f883c6deb5e4b7c2",
+            "preflight_id": "tenant.account_profile_capabilities_v1"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_15_000200_hard_cut_account_profile_location_policy",
+            "path": "database/migrations/tenants/2026_09_15_000200_hard_cut_account_profile_location_policy.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "110af2a6cc90a58e8b9f69bb9c5a1db75c031261",
+            "executed_or_equivalent_sha256": "ce07e4bd099a8bbb9ad52911b439cb9ff480ca594f4c996c1f9a5ba33f1a8ae8",
+            "target_sha256": "ce07e4bd099a8bbb9ad52911b439cb9ff480ca594f4c996c1f9a5ba33f1a8ae8",
+            "preflight_id": "tenant.account_profile_location_policy_v1"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_17_000100_add_native_event_place_reference_indexes",
+            "path": "database/migrations/tenants/2026_09_17_000100_add_native_event_place_reference_indexes.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "110af2a6cc90a58e8b9f69bb9c5a1db75c031261",
+            "executed_or_equivalent_sha256": "30399fb5eaac86dc11bc5f77e27d33e3f0d08256586b9fea09c5b73d3500ab3e",
+            "target_sha256": "30399fb5eaac86dc11bc5f77e27d33e3f0d08256586b9fea09c5b73d3500ab3e",
+            "preflight_id": "tenant.event_place_references.native_indexes_v1"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_17_000200_add_account_profile_capability_composite_indexes",
+            "path": "database/migrations/tenants/2026_09_17_000200_add_account_profile_capability_composite_indexes.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "110af2a6cc90a58e8b9f69bb9c5a1db75c031261",
+            "executed_or_equivalent_sha256": "efba8b5c5569e7942f5650c79b31411ba46d6a6300a82d73742de59244b2b297",
+            "target_sha256": "efba8b5c5569e7942f5650c79b31411ba46d6a6300a82d73742de59244b2b297",
+            "preflight_id": "tenant.account_profile_capability.composite_indexes_v1"
+        },
+        {
+            "scope": "tenant",
+            "basename": "2026_09_18_000100_add_account_profile_capability_flag_indexes",
+            "path": "database/migrations/tenants/2026_09_18_000100_add_account_profile_capability_flag_indexes.php",
+            "status": "active",
+            "classification": "active",
+            "provenance_commit": "110af2a6cc90a58e8b9f69bb9c5a1db75c031261",
+            "executed_or_equivalent_sha256": "9bd379673f425a59a6406f2c94b991fd2df81353d276db642890ded40aa214eb",
+            "target_sha256": "9bd379673f425a59a6406f2c94b991fd2df81353d276db642890ded40aa214eb",
+            "preflight_id": "tenant.account_profile_capability.flag_indexes_v1"
         }
     ]
 }

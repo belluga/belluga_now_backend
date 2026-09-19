@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
 use App\Models\Tenants\TenantProfileType;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
@@ -23,10 +24,13 @@ final class AccountProfilePublicCatalogSnapshotReader
 
     private ?AccountProfilePublicCatalogEligibilityPolicy $publicPoiEligibilityPolicy = null;
 
+    private ?AccountProfilePublicCatalogEligibilityPolicy $publicPhysicalHostEligibilityPolicy = null;
+
     private int $cacheRevision = -1;
 
     public function __construct(
-        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
+        private readonly AccountProfileCapabilityResolverContract $capabilityResolver,
+        private readonly AccountProfileTypeSetProvider $profileTypeSets,
     ) {}
 
     public function catalogSnapshot(): AccountProfilePublicCatalogSnapshot
@@ -38,18 +42,22 @@ final class AccountProfilePublicCatalogSnapshotReader
         }
 
         $records = [];
-        foreach (TenantProfileType::query()
-            ->publicCatalog()
-            ->get([
-                '_id',
-                'type',
-                'label',
-                'visual',
-                'poi_visual',
-                'allowed_taxonomies',
-                'type_asset_url',
-                'capabilities',
-            ]) as $profileType) {
+        $catalogTypeKeys = $this->profileTypeSets->publicCatalogTypes();
+        $profileTypes = $catalogTypeKeys === []
+            ? collect()
+            : TenantProfileType::query()
+                ->whereIn('type', $catalogTypeKeys)
+                ->get([
+                    '_id',
+                    'type',
+                    'label',
+                    'visual',
+                    'poi_visual',
+                    'allowed_taxonomies',
+                    'type_asset_url',
+                    'capabilities',
+                ]);
+        foreach ($profileTypes as $profileType) {
             $record = $this->recordFromProfileType($profileType);
             if ($record !== null) {
                 $records[] = $record;
@@ -97,14 +105,7 @@ final class AccountProfilePublicCatalogSnapshotReader
             return $this->publicPoiTypeKeys;
         }
 
-        $keys = [];
-        foreach (TenantProfileType::query()->publicPoiCatalog()->get(['type']) as $profileType) {
-            $type = trim((string) $profileType->getAttribute('type'));
-            if ($type !== '') {
-                $keys[$type] = $type;
-            }
-        }
-        $this->publicPoiTypeKeys = array_values($keys);
+        $this->publicPoiTypeKeys = $this->profileTypeSets->publicPoiCatalogTypes();
         sort($this->publicPoiTypeKeys, SORT_STRING);
 
         return $this->publicPoiTypeKeys;
@@ -131,6 +132,28 @@ final class AccountProfilePublicCatalogSnapshotReader
         );
     }
 
+    public function publicPhysicalHostEligibilityPolicy(): AccountProfilePublicCatalogEligibilityPolicy
+    {
+        $this->refreshIfStale();
+
+        if ($this->publicPhysicalHostEligibilityPolicy instanceof AccountProfilePublicCatalogEligibilityPolicy) {
+            return $this->publicPhysicalHostEligibilityPolicy;
+        }
+
+        $publicPhysicalHostTypeKeys = $this->profileTypeSets->publicPhysicalHostTypes();
+        sort($publicPhysicalHostTypeKeys, SORT_STRING);
+        $publicDetailTypeKeys = array_values(array_intersect(
+            $publicPhysicalHostTypeKeys,
+            $this->publicDetailTypeKeys(),
+        ));
+
+        return $this->publicPhysicalHostEligibilityPolicy = new AccountProfilePublicCatalogEligibilityPolicy(
+            $publicPhysicalHostTypeKeys,
+            $publicDetailTypeKeys,
+            [],
+        );
+    }
+
     private function refreshIfStale(): void
     {
         $currentRevision = AccountProfileTypeSetProvider::currentRevision();
@@ -142,6 +165,7 @@ final class AccountProfilePublicCatalogSnapshotReader
         $this->publicPoiTypeKeys = null;
         $this->publicDetailTypeKeys = null;
         $this->publicPoiEligibilityPolicy = null;
+        $this->publicPhysicalHostEligibilityPolicy = null;
         $this->cacheRevision = $currentRevision;
     }
 
@@ -154,22 +178,14 @@ final class AccountProfilePublicCatalogSnapshotReader
             return $this->publicDetailTypeKeys;
         }
 
-        $keys = [];
-        foreach (TenantProfileType::query()->publiclyNavigable()->get(['type']) as $profileType) {
-            $type = trim((string) $profileType->getAttribute('type'));
-            if ($type !== '') {
-                $keys[$type] = $type;
-            }
-        }
-
-        $this->publicDetailTypeKeys = array_values($keys);
+        $this->publicDetailTypeKeys = $this->profileTypeSets->publiclyNavigableTypes();
         sort($this->publicDetailTypeKeys, SORT_STRING);
 
         return $this->publicDetailTypeKeys;
     }
 
     /**
-     * @return array{type:string,label:string,visual:array<string, mixed>|null,poi_visual:array<string, mixed>|null,allowed_taxonomies:array<int, string>,type_asset_url:?string,is_poi_enabled:bool,has_nested_profile_groups:bool}|null
+     * @return array{type:string,label:string,visual:array<string, mixed>|null,poi_visual:array<string, mixed>|null,allowed_taxonomies:array<int, string>,type_asset_url:?string,has_nested_profile_groups:bool}|null
      */
     private function recordFromProfileType(TenantProfileType $profileType): ?array
     {
@@ -178,7 +194,6 @@ final class AccountProfilePublicCatalogSnapshotReader
             return null;
         }
 
-        $capabilities = $this->arrayFrom($profileType->getAttribute('capabilities'));
         $label = trim((string) ($profileType->getAttribute('label') ?? $type));
 
         return [
@@ -189,14 +204,8 @@ final class AccountProfilePublicCatalogSnapshotReader
             'poi_visual' => $this->nullableArray($profileType->getAttribute('poi_visual')),
             'allowed_taxonomies' => $this->normalizeStringList($profileType->getAttribute('allowed_taxonomies')),
             'type_asset_url' => $this->nullableString($profileType->getAttribute('type_asset_url')),
-            'is_poi_enabled' => $this->capabilityCatalog->isExplicitlyEnabled(
-                AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
-                $capabilities,
-            ),
-            'has_nested_profile_groups' => $this->capabilityCatalog->isExplicitlyEnabled(
-                AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS,
-                $capabilities,
-            ),
+            'has_nested_profile_groups' => $this->capabilityResolver
+                ->resolveForProfileType($profileType, 'has_nested_profile_groups')['effective']['value'] === true,
         ];
     }
 

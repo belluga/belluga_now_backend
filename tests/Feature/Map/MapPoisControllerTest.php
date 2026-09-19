@@ -449,7 +449,7 @@ class MapPoisControllerTest extends TestCaseTenant
                 'icon_color' => '#ffffff',
             ]),
             'capabilities' => [
-                'is_poi_enabled' => true,
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -496,11 +496,11 @@ class MapPoisControllerTest extends TestCaseTenant
                 'icon_color' => '#ffffff',
             ]),
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -1095,9 +1095,9 @@ class MapPoisControllerTest extends TestCaseTenant
             'label' => 'Performer Test',
             'allowed_taxonomies' => ['music_genre'],
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_queryable' => true,
-                'is_publicly_discoverable' => true,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -1547,9 +1547,9 @@ class MapPoisControllerTest extends TestCaseTenant
                 'icon_color' => '#FFFFFF',
             ],
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_queryable' => true,
-                'is_publicly_discoverable' => true,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
             ],
         ]);
         TenantProfileType::query()
@@ -1562,9 +1562,9 @@ class MapPoisControllerTest extends TestCaseTenant
                     'color' => '#333333',
                     'icon_color' => '#FFFFFF',
                 ],
-                'capabilities.is_favoritable' => true,
-                'capabilities.is_inviteable' => true,
-                'capabilities.is_publicly_discoverable' => false,
+                'capabilities.is_favoritable.value' => true,
+                'capabilities.is_inviteable.value' => true,
+                'capabilities.is_publicly_discoverable.value' => false,
             ]);
         TenantProfileType::create([
             'type' => 'internal_partner',
@@ -1577,7 +1577,7 @@ class MapPoisControllerTest extends TestCaseTenant
                 'icon_color' => '#FFFFFF',
             ],
             'capabilities' => [
-                'is_favoritable' => false,
+                'is_favoritable' => ['value' => false, 'parameters' => []],
             ],
         ]);
         $galleryType = TenantProfileType::create([
@@ -1590,9 +1590,9 @@ class MapPoisControllerTest extends TestCaseTenant
                 'color' => '#5E35B1',
             ],
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_queryable' => true,
-                'is_publicly_discoverable' => true,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
             ],
         ]);
         $galleryType->forceFill([
@@ -1665,9 +1665,9 @@ class MapPoisControllerTest extends TestCaseTenant
                 'label' => sprintf('Bounded Profile Type %03d', $index),
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_queryable' => true,
-                    'is_publicly_discoverable' => true,
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
                 ],
             ]);
         }
@@ -1700,10 +1700,10 @@ class MapPoisControllerTest extends TestCaseTenant
                 'icon_color' => '#FFFFFF',
             ],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_favoritable' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => false, 'parameters' => []],
             ],
         ]);
 

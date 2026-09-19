@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Contracts;
 
+use Belluga\Events\Application\Transactions\EventTransactionContext;
 use Illuminate\Pagination\LengthAwarePaginator;
 
 interface EventProfileResolverContract
 {
+    /** @param array<int, string> $profileIds */
+    public function admitPhysicalHosts(EventTransactionContext $context, array $profileIds): void;
+
     /**
      * @return array{
      *   venue: array<string, mixed>,

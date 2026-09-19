@@ -17,11 +17,11 @@ use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Favorites\Models\Tenants\FavoriteEdge;
-use Belluga\Settings\Models\Tenants\TenantSettings;
 use Belluga\PushHandler\Contracts\PushTopicTransportContract;
 use Belluga\PushHandler\Models\Tenants\PushCredential;
 use Belluga\PushHandler\Models\Tenants\PushDevice;
 use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
+use Belluga\Settings\Models\Tenants\TenantSettings;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -76,11 +76,11 @@ class FavoritesControllerTest extends TestCaseTenant
                 'label' => 'Artist',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_favoritable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ],
         );

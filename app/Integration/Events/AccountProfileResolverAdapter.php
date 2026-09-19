@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integration\Events;
 
+use App\Application\AccountProfiles\AccountProfileAdmissionFenceService;
 use App\Application\AccountProfiles\AccountProfileGalleryService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfilePublicCatalogEligibilityPolicy;
@@ -12,16 +13,19 @@ use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\AccountProfiles\AccountProfileSearchV1;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
+use App\Application\AccountProfiles\PhysicalHostEligibilityPolicy;
 use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
 use App\Support\RichText\RichTextReadCanonicalizer;
+use Belluga\Events\Application\Transactions\EventTransactionContext;
 use Belluga\Events\Contracts\EventProfileResolverContract;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use MongoDB\BSON\ObjectId;
 
 class AccountProfileResolverAdapter implements EventProfileResolverContract
 {
@@ -34,7 +38,80 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly AccountProfileQueryService $accountProfileQueryService,
         private readonly RichTextReadCanonicalizer $richTextReadCanonicalizer,
+        private readonly PhysicalHostEligibilityPolicy $physicalHostEligibility,
+        private readonly AccountProfileAdmissionFenceService $admissionFences,
     ) {}
+
+    public function admitPhysicalHosts(EventTransactionContext $context, array $profileIds): void
+    {
+        $ids = $this->normalizeProfileIds($profileIds);
+        sort($ids, SORT_STRING);
+        if ($ids === []) {
+            return;
+        }
+
+        $objectIds = [];
+        foreach ($ids as $profileId) {
+            try {
+                $objectIds[] = new ObjectId($profileId);
+            } catch (\Throwable) {
+                throw ValidationException::withMessages([
+                    'place_ref.id' => ['Physical host account profile not found.'],
+                ]);
+            }
+        }
+
+        $profiles = [];
+        foreach ($context->collection('account_profiles')->find([
+            '_id' => ['$in' => $objectIds],
+            'deleted_at' => null,
+        ], $context->rawOptions()) as $document) {
+            $profile = new AccountProfile;
+            $profile->setRawAttributes($this->nativeDocument($document), true);
+            $profile->exists = true;
+            $profiles[(string) $profile->getKey()] = $profile;
+        }
+        if (count($profiles) !== count($ids)) {
+            throw ValidationException::withMessages([
+                'place_ref.id' => ['Physical host account profile not found.'],
+            ]);
+        }
+
+        $profileTypes = array_values(array_unique(array_map(
+            static fn (AccountProfile $profile): string => trim((string) $profile->profile_type),
+            $profiles,
+        )));
+        $typeDocuments = $this->admissionFences->touchProfileTypes(
+            $context->database(),
+            $context->session(),
+            $profileTypes,
+        );
+
+        foreach ($ids as $profileId) {
+            $profile = $profiles[$profileId];
+            $profileType = trim((string) $profile->profile_type);
+            $typeDocument = $typeDocuments[$profileType] ?? null;
+            if (! is_array($typeDocument)) {
+                throw ValidationException::withMessages([
+                    'place_ref.id' => ['Account profile is not eligible as a physical host.'],
+                ]);
+            }
+            $type = new TenantProfileType;
+            $type->setRawAttributes($typeDocument, true);
+            $type->exists = true;
+            if (! $this->physicalHostEligibility->isEligibleForTypeAndLocation($type, $profile->location ?? null)) {
+                throw ValidationException::withMessages([
+                    'place_ref.id' => ['Account profile is not eligible as a physical host.'],
+                ]);
+            }
+        }
+
+        $this->admissionFences->touchProfiles(
+            $context->database(),
+            $context->session(),
+            $ids,
+        );
+    }
 
     public function resolvePhysicalHostByProfileId(string $profileId): array
     {
@@ -60,7 +137,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             return [];
         }
 
-        $eligibleTypes = $this->typeSetProvider->queryablePoiEnabledTypes();
+        $eligibleTypes = $this->typeSetProvider->physicalHostEnabledTypes();
         $profiles = AccountProfile::query()
             ->whereIn('_id', $ids)
             ->whereIn('profile_type', $eligibleTypes)
@@ -76,7 +153,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         foreach ($ids as $profileId) {
             /** @var AccountProfile $profile */
             $profile = $profiles[$profileId];
-            $resolved[$profileId] = $this->formatPhysicalHostProfile($profile);
+            $resolved[$profileId] = $this->formatPhysicalHostProfile($profile, $eligibleTypes);
         }
 
         return $resolved;
@@ -100,10 +177,10 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
      */
     private function formatPhysicalHostProfile(
         AccountProfile $profile,
+        array $eligiblePhysicalHostTypes,
         ?AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy = null,
-        bool $skipTypeEligibilityValidation = false,
     ): array {
-        $location = $this->validatedPhysicalHostLocation($profile, $skipTypeEligibilityValidation);
+        $location = $this->validatedPhysicalHostLocation($profile, $eligiblePhysicalHostTypes);
         $slug = $this->normalizeSlug($profile->slug ?? null);
         $canOpenPublicDetail = $this->canOpenPublicDetail($profile, $publicCatalogPolicy);
         $baseUrl = request()->getSchemeAndHttpHost();
@@ -399,15 +476,14 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         ?string $normalizedSearch,
         ?string $accountId
     ): Builder {
-        $profileTypes = $this->typeSetProvider->queryablePubliclyNavigablePoiEnabledTypes();
+        $profileTypes = $this->typeSetProvider->physicalHostEnabledTypes();
         if ($profileTypes === []) {
             return AccountProfile::query()->whereRaw(['_id' => ['$exists' => false]]);
         }
 
-        $query = AccountProfile::query()
-            ->whereIn('profile_type', $profileTypes)
-            ->whereNotNull('location.coordinates.0')
-            ->whereNotNull('location.coordinates.1');
+        $query = $this->physicalHostEligibility->applyEligibleLocationConstraint(
+            AccountProfile::query()->whereIn('profile_type', $profileTypes),
+        );
 
         if ($accountId !== null) {
             $query->where('account_id', $accountId);
@@ -562,18 +638,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
                 ]);
             }
 
-            $profileType = trim((string) ($profile->profile_type ?? ''));
-            if (! $this->isProfileTypeQueryable($profileType)) {
-                throw ValidationException::withMessages([
-                    'place_ref.id' => ['Physical host account profile type is not queryable.'],
-                ]);
-            }
-
-            if (! $this->profileRegistryService->isPoiEnabled($profileType)) {
-                throw ValidationException::withMessages([
-                    'place_ref.id' => ['Physical host account profile must have POI capability enabled.'],
-                ]);
-            }
+            $this->physicalHostEligibility->assertEligible($profile);
         }
 
         throw ValidationException::withMessages([
@@ -777,10 +842,12 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
 
         $publicCatalogPolicy = null;
         if ($publicOnly) {
-            $publicCatalogPolicy = $this->publicCatalogSnapshotReader->publicPoiEligibilityPolicy();
+            $publicCatalogPolicy = $this->publicCatalogSnapshotReader->publicPhysicalHostEligibilityPolicy();
+            $eligiblePhysicalHostTypes = $publicCatalogPolicy->catalogTypeKeys();
             $query->whereRaw($publicCatalogPolicy->catalogMatchExpression());
         } else {
-            $query->whereIn('profile_type', $this->typeSetProvider->queryablePoiEnabledTypes());
+            $eligiblePhysicalHostTypes = $this->typeSetProvider->physicalHostEnabledTypes();
+            $query->whereIn('profile_type', $eligiblePhysicalHostTypes);
         }
 
         $resolved = [];
@@ -792,8 +859,8 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             try {
                 $resolved[(string) $profile->_id] = $this->formatPhysicalHostProfile(
                     $profile,
+                    $eligiblePhysicalHostTypes,
                     $publicCatalogPolicy,
-                    $publicOnly,
                 );
             } catch (ValidationException) {
                 continue;
@@ -808,35 +875,31 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
      */
     private function validatedPhysicalHostLocation(
         AccountProfile $profile,
-        bool $skipTypeEligibilityValidation = false,
+        array $eligiblePhysicalHostTypes,
     ): array {
-        if (! $skipTypeEligibilityValidation) {
-            $profileType = trim((string) ($profile->profile_type ?? ''));
-            if (! $this->isProfileTypeQueryable($profileType)) {
-                throw ValidationException::withMessages([
-                    'place_ref.id' => ['Physical host account profile type is not queryable.'],
-                ]);
-            }
-            if (! $this->profileRegistryService->isPoiEnabled($profileType)) {
-                throw ValidationException::withMessages([
-                    'place_ref.id' => ['Physical host account profile must have POI capability enabled.'],
-                ]);
+        return $this->physicalHostEligibility->assertEligibleFromTypeSet(
+            $profile,
+            $eligiblePhysicalHostTypes,
+        );
+    }
+
+    /** @return array<string, mixed> */
+    private function nativeDocument(mixed $value): array
+    {
+        if ($value instanceof \MongoDB\Model\BSONDocument || $value instanceof \MongoDB\Model\BSONArray) {
+            $value = $value->getArrayCopy();
+        } elseif ($value instanceof \Traversable) {
+            $value = iterator_to_array($value);
+        } elseif (! is_array($value)) {
+            return [];
+        }
+        foreach ($value as $key => $item) {
+            if (is_array($item) || $item instanceof \Traversable) {
+                $value[$key] = $this->nativeDocument($item);
             }
         }
 
-        $location = $profile->location ?? null;
-        if (! is_array($location) || ! isset($location['type'], $location['coordinates'])) {
-            throw ValidationException::withMessages([
-                'place_ref.id' => ['Physical host account profile must include a location.'],
-            ]);
-        }
-        if (! is_array($location['coordinates']) || count($location['coordinates']) < 2) {
-            throw ValidationException::withMessages([
-                'place_ref.id' => ['Physical host account profile must include valid coordinates.'],
-            ]);
-        }
-
-        return $location;
+        return $value;
     }
 
     private function canOpenPublicDetail(

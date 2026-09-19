@@ -36,7 +36,7 @@ class AccountProfileRegistryServiceTest extends TestCase
         $this->service = $this->app->make(AccountProfileRegistryService::class);
     }
 
-    public function test_is_reference_location_enabled_returns_effective_false_when_poi_is_disabled(): void
+    public function test_location_dependents_return_effective_false_when_location_is_disabled(): void
     {
         TenantProfileType::query()->delete();
         TenantProfileType::create([
@@ -44,8 +44,10 @@ class AccountProfileRegistryServiceTest extends TestCase
             'label' => 'Hotel',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_poi_enabled' => false,
-                'is_reference_location_enabled' => true,
+                'location_policy' => ['value' => 'disabled', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => true, 'parameters' => []],
+                'is_physical_host_enabled' => ['value' => true, 'parameters' => []],
+                'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
         TenantProfileType::create([
@@ -53,20 +55,33 @@ class AccountProfileRegistryServiceTest extends TestCase
             'label' => 'Venue',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_poi_enabled' => true,
-                'is_reference_location_enabled' => true,
+                'location_policy' => ['value' => 'required', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => true, 'parameters' => []],
+                'is_physical_host_enabled' => ['value' => true, 'parameters' => []],
+                'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
+        $this->assertFalse($this->service->isMapPoiEnabled('hotel'));
+        $this->assertFalse($this->service->isPhysicalHostEnabled('hotel'));
         $this->assertFalse($this->service->isReferenceLocationEnabled('hotel'));
+        $this->assertTrue($this->service->isMapPoiEnabled('venue'));
+        $this->assertTrue($this->service->isPhysicalHostEnabled('venue'));
         $this->assertTrue($this->service->isReferenceLocationEnabled('venue'));
 
         $registry = collect($this->service->registry());
         $hotel = $registry->firstWhere('type', 'hotel');
         $venue = $registry->firstWhere('type', 'venue');
 
-        $this->assertFalse((bool) data_get($hotel, 'capabilities.is_reference_location_enabled'));
-        $this->assertTrue((bool) data_get($venue, 'capabilities.is_reference_location_enabled'));
+        $this->assertTrue((bool) data_get($hotel, 'capabilities.is_map_poi_enabled.configured.value'));
+        $this->assertTrue((bool) data_get($hotel, 'capabilities.is_physical_host_enabled.configured.value'));
+        $this->assertTrue((bool) data_get($hotel, 'capabilities.is_reference_location_enabled.configured.value'));
+        $this->assertFalse((bool) data_get($hotel, 'capabilities.is_map_poi_enabled.effective.value'));
+        $this->assertFalse((bool) data_get($hotel, 'capabilities.is_physical_host_enabled.effective.value'));
+        $this->assertFalse((bool) data_get($hotel, 'capabilities.is_reference_location_enabled.effective.value'));
+        $this->assertTrue((bool) data_get($venue, 'capabilities.is_map_poi_enabled.effective.value'));
+        $this->assertTrue((bool) data_get($venue, 'capabilities.is_physical_host_enabled.effective.value'));
+        $this->assertTrue((bool) data_get($venue, 'capabilities.is_reference_location_enabled.effective.value'));
     }
 
     public function test_ensure_defaults_repairs_gallery_capability_for_canonical_public_types(): void
@@ -77,12 +92,15 @@ class AccountProfileRegistryServiceTest extends TestCase
             'label' => 'Artist',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_inviteable' => false,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_inviteable' => ['value' => false, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                'is_physical_host_enabled' => ['value' => false, 'parameters' => []],
+                'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
             ],
         ]);
         TenantProfileType::create([
@@ -90,12 +108,15 @@ class AccountProfileRegistryServiceTest extends TestCase
             'label' => 'Venue',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_inviteable' => false,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_inviteable' => ['value' => false, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => true, 'parameters' => []],
+                'is_physical_host_enabled' => ['value' => true, 'parameters' => []],
+                'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -108,8 +129,8 @@ class AccountProfileRegistryServiceTest extends TestCase
         $artist = TenantProfileType::query()->where('type', 'artist')->firstOrFail();
         $venue = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
 
-        $this->assertTrue((bool) data_get($artist->capabilities, 'has_gallery', false));
-        $this->assertTrue((bool) data_get($venue->capabilities, 'has_gallery', false));
+        $this->assertTrue((bool) data_get($artist->capabilities, 'has_gallery.value', false));
+        $this->assertTrue((bool) data_get($venue->capabilities, 'has_gallery.value', false));
     }
 
     public function test_type_definition_is_memoized_across_capability_helpers_within_one_request(): void
@@ -120,14 +141,17 @@ class AccountProfileRegistryServiceTest extends TestCase
             'label' => 'Artist',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_inviteable' => false,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => false,
-                'has_events' => true,
-                'has_gallery' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_inviteable' => ['value' => false, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                'is_physical_host_enabled' => ['value' => false, 'parameters' => []],
+                'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_events' => ['value' => true, 'parameters' => []],
+                'has_gallery' => ['value' => true, 'parameters' => ['max_groups' => 6, 'max_items_per_group' => 12]],
             ],
         ]);
 
@@ -137,7 +161,7 @@ class AccountProfileRegistryServiceTest extends TestCase
 
         $this->assertTrue($this->service->hasGallery('artist'));
         $this->assertTrue($this->service->hasEvents('artist'));
-        $this->assertFalse($this->service->isPoiEnabled('artist'));
+        $this->assertFalse($this->service->isMapPoiEnabled('artist'));
 
         $queryLog = $connection->getQueryLog();
         $connection->disableQueryLog();

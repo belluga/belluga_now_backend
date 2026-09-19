@@ -150,9 +150,9 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             'label' => 'Artist',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
             ],
         ]);
         $profile = $this->createAccountProfileFixture('artist', 'Page Counterpart Artist', 611);
@@ -269,10 +269,10 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             ],
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_discoverable' => true,
-                'is_publicly_navigable' => true,
-                'is_poi_enabled' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -345,6 +345,8 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             $profileTypeQueries,
             "Public physical host resolution must reuse a bounded pair of account_profile_types lookups. Queries: {$queryLogJson}"
         );
+        $this->assertStringContainsString('capabilities.is_physical_host_enabled.value', $queryLogJson);
+        $this->assertStringNotContainsString('capabilities.is_map_poi_enabled.value', $queryLogJson);
         $this->assertCount(
             1,
             $accountProfileQueries,
@@ -453,10 +455,10 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_poi_enabled' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -715,12 +717,12 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
                 'allowed_taxonomies' => [],
                 'visual' => ['mode' => 'icon', 'icon' => 'store'],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_favoritable' => true,
-                    'is_inviteable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'is_inviteable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ]);
         }

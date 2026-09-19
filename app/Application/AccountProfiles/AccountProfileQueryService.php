@@ -982,7 +982,7 @@ class AccountProfileQueryService extends AbstractQueryService
             )
             : false;
 
-        return [
+        $payload = [
             'id' => (string) $profile->_id,
             'account_id' => (string) $profile->account_id,
             'account_slug' => $resolvedAccount?->slug,
@@ -1013,7 +1013,6 @@ class AccountProfileQueryService extends AbstractQueryService
             'taxonomy_terms' => $this->taxonomyTermSummaryResolver->ensureSnapshots(
                 is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
             ),
-            'location' => $this->formatLocation($profile->location),
             'ownership_state' => $resolvedAccount
                 ? $this->ownershipStateService->deriveOwnershipState(
                     $resolvedAccount,
@@ -1026,6 +1025,12 @@ class AccountProfileQueryService extends AbstractQueryService
             'updated_at' => $profile->updated_at?->toJSON(),
             'deleted_at' => $profile->deleted_at?->toJSON(),
         ];
+
+        if ($this->typeSetProvider->isLocationEnabled((string) $profile->profile_type)) {
+            $payload['location'] = $this->formatLocation($profile->location);
+        }
+
+        return $payload;
     }
 
     private function isParentAccountPublished(AccountProfile $profile, ?Account $account = null): bool

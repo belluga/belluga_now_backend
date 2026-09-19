@@ -26,6 +26,7 @@ class AccountProfileFormatterService
         private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
         private readonly RichTextReadCanonicalizer $richTextReadCanonicalizer,
         private readonly AccountProfileExternalLinkService $externalLinks,
+        private readonly AccountProfileTypeSetProvider $typeSetProvider,
     ) {}
 
     /**
@@ -88,7 +89,6 @@ class AccountProfileFormatterService
                 ? $this->galleryService->formatForPublicDetail($profile, $baseUrl)
                 : $this->galleryService->formatForRead($profile, $baseUrl),
             'nested_profile_groups' => $nestedProfileGroups,
-            'location' => $this->formatLocation($profile->location),
             'ownership_state' => $account
                 ? $this->ownershipStateService->deriveOwnershipState($account)
                 : null,
@@ -96,6 +96,10 @@ class AccountProfileFormatterService
             'updated_at' => $profile->updated_at?->toJSON(),
             'deleted_at' => $profile->deleted_at?->toJSON(),
         ];
+
+        if (! $publicContactProjection || $this->typeSetProvider->isLocationEnabled((string) $profile->profile_type)) {
+            $payload['location'] = $this->formatLocation($profile->location);
+        }
 
         if ($includeExternalLinks && $this->externalLinks->isAllowedForRead($profile)) {
             $formattedExternalLinks = $this->externalLinks->formatForRead($profile);

@@ -6,6 +6,8 @@ namespace Tests\Feature\AccountProfiles;
 
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
+use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
+use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Environment\TenantEnvironmentSnapshotService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
@@ -24,6 +26,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use MongoDB\BSON\ObjectId;
+use Symfony\Component\Process\Process;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -33,6 +36,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 {
     use RefreshLandlordAndTenantDatabases;
     use SeedsTenantAccounts;
+
+    private const BARRIER_TIMEOUT_SECONDS = 30;
+
+    private const PROCESS_TIMEOUT_SECONDS = 60;
 
     protected TenantLabels $tenant {
         get {
@@ -76,8 +83,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'label' => 'Artist',
             'allowed_taxonomies' => ['music_genre'],
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => false,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -102,8 +109,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             ],
             'allowed_taxonomies' => ['music_genre'],
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => false,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -138,11 +145,13 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                     'icon_color' => '#101010',
                 ],
                 'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => true,
-                    'is_reference_location_enabled' => true,
-                    'has_nested_profile_groups' => true,
-                    'has_external_links' => true,
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []],
+                    'is_map_poi_enabled' => ['value' => true, 'parameters' => []],
+                    'is_physical_host_enabled' => ['value' => true, 'parameters' => []],
+                    'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+                    'has_nested_profile_groups' => ['value' => true, 'parameters' => []],
+                    'has_external_links' => ['value' => true, 'parameters' => ['max_links' => 3]],
                 ],
             ],
             $this->getHeaders()
@@ -153,10 +162,12 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.label', 'Venue');
         $response->assertJsonPath('data.labels.singular', 'Venue');
         $response->assertJsonPath('data.labels.plural', 'Venues');
-        $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
-        $response->assertJsonPath('data.capabilities.is_reference_location_enabled', true);
-        $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
-        $response->assertJsonPath('data.capabilities.has_external_links', true);
+        $response->assertJsonPath('data.capabilities.is_map_poi_enabled.effective.value', true);
+        $response->assertJsonPath('data.capabilities.is_reference_location_enabled.effective.value', true);
+        $response->assertJsonPath('data.capabilities.has_nested_profile_groups.effective.value', true);
+        $response->assertJsonPath('data.capabilities.has_external_links.effective.value', true);
+        $response->assertJsonPath('capability_creation_configuration.is_queryable.value', true);
+        $response->assertJsonPath('capability_creation_configuration.has_gallery.parameters.max_groups', 6);
         $response->assertJsonPath('data.poi_visual.mode', 'icon');
         $response->assertJsonPath('data.poi_visual.icon', 'place');
         $response->assertJsonPath('data.poi_visual.color', '#FF8800');
@@ -174,8 +185,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                     'type' => $type,
                     'label' => $label,
                     'capabilities' => [
-                        'is_favoritable' => true,
-                        'is_poi_enabled' => false,
+                        'is_favoritable' => ['value' => true, 'parameters' => []],
+                        'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                     ],
                 ],
                 $this->getHeaders(),
@@ -225,9 +236,9 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                     'plural' => 'Venue Sync Creates',
                 ],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_publicly_navigable' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
                 ],
             ],
             $this->getHeaders()
@@ -237,11 +248,11 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         $this->assertIsArray($environmentType);
         $this->assertSame('Venue Sync Create', $environmentType['label'] ?? null);
-        $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_queryable', false));
-        $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_publicly_discoverable', false));
+        $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_queryable.effective.value', false));
+        $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_publicly_discoverable.effective.value', false));
     }
 
-    public function test_profile_type_create_disables_reference_location_when_poi_is_disabled(): void
+    public function test_profile_type_create_keeps_reference_location_independent_from_map_poi(): void
     {
         $response = $this->postJson(
             "{$this->base_tenant_api_admin}account_profile_types",
@@ -254,20 +265,22 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => ['hospitality'],
                 'capabilities' => [
-                    'is_poi_enabled' => false,
-                    'is_reference_location_enabled' => true,
+                    'location_policy' => ['value' => 'optional', 'parameters' => []],
+                    'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                    'is_physical_host_enabled' => ['value' => false, 'parameters' => []],
+                    'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ],
             $this->getHeaders()
         );
 
         $response->assertStatus(201);
-        $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
-        $response->assertJsonPath('data.capabilities.is_reference_location_enabled', false);
+        $response->assertJsonPath('data.capabilities.is_map_poi_enabled.effective.value', false);
+        $response->assertJsonPath('data.capabilities.is_reference_location_enabled.effective.value', true);
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'hotel')->firstOrFail();
-        $this->assertFalse((bool) ($model->capabilities['is_reference_location_enabled'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_reference_location_enabled']['value'] ?? false));
     }
 
     public function test_profile_type_create_keeps_nested_groups_capability_independent(): void
@@ -278,22 +291,22 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 'type' => 'expo',
                 'label' => 'Expo',
                 'capabilities' => [
-                    'is_poi_enabled' => false,
-                    'has_events' => false,
-                    'has_nested_profile_groups' => true,
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                    'has_events' => ['value' => false, 'parameters' => []],
+                    'has_nested_profile_groups' => ['value' => true, 'parameters' => []],
                 ],
             ],
             $this->getHeaders()
         );
 
         $response->assertStatus(201);
-        $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
-        $response->assertJsonPath('data.capabilities.has_events', false);
-        $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
+        $response->assertJsonPath('data.capabilities.is_map_poi_enabled.effective.value', false);
+        $response->assertJsonPath('data.capabilities.has_events.effective.value', false);
+        $response->assertJsonPath('data.capabilities.has_nested_profile_groups.effective.value', true);
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'expo')->firstOrFail();
-        $this->assertTrue((bool) ($model->capabilities['has_nested_profile_groups'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['has_nested_profile_groups']['value'] ?? false));
     }
 
     public function test_profile_type_create_persists_independent_queryability_discovery_and_public_navigation_flags(): void
@@ -304,30 +317,30 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 'type' => 'delegate',
                 'label' => 'Delegate',
                 'capabilities' => [
-                    'is_queryable' => false,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_favoritable' => true,
+                    'is_queryable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
                 ],
             ],
             $this->getHeaders()
         );
 
         $response->assertStatus(201);
-        $response->assertJsonPath('data.capabilities.is_queryable', false);
-        $response->assertJsonPath('data.capabilities.is_publicly_navigable', true);
-        $response->assertJsonPath('data.capabilities.is_publicly_discoverable', true);
-        $response->assertJsonPath('data.capabilities.is_favoritable', true);
+        $response->assertJsonPath('data.capabilities.is_queryable.effective.value', false);
+        $response->assertJsonPath('data.capabilities.is_publicly_navigable.effective.value', true);
+        $response->assertJsonPath('data.capabilities.is_publicly_discoverable.effective.value', true);
+        $response->assertJsonPath('data.capabilities.is_favoritable.effective.value', true);
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'delegate')->firstOrFail();
-        $this->assertFalse((bool) ($model->capabilities['is_queryable'] ?? true));
-        $this->assertTrue((bool) ($model->capabilities['is_publicly_navigable'] ?? false));
-        $this->assertTrue((bool) ($model->capabilities['is_publicly_discoverable'] ?? false));
-        $this->assertTrue((bool) ($model->capabilities['is_favoritable'] ?? false));
+        $this->assertFalse((bool) ($model->capabilities['is_queryable']['value'] ?? true));
+        $this->assertTrue((bool) ($model->capabilities['is_publicly_navigable']['value'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_publicly_discoverable']['value'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_favoritable']['value'] ?? false));
     }
 
-    public function test_publicly_navigable_scope_is_fail_closed_when_flag_is_omitted(): void
+    public function test_canonical_type_set_is_fail_closed_when_publicly_navigable_flag_is_omitted(): void
     {
         TenantProfileType::query()->delete();
 
@@ -335,8 +348,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'type' => 'direct-only',
             'label' => 'Direct Only',
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_discoverable' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -344,24 +357,20 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'type' => 'closed-detail',
             'label' => 'Closed Detail',
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_discoverable' => true,
-                'is_publicly_navigable' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
-        $publiclyNavigableTypes = TenantProfileType::query()
-            ->publiclyNavigable()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->values()
-            ->all();
+        $publiclyNavigableTypes = app(AccountProfileTypeSetProvider::class)
+            ->publiclyNavigableTypes();
 
         $this->assertNotContains('direct-only', $publiclyNavigableTypes);
         $this->assertNotContains('closed-detail', $publiclyNavigableTypes);
     }
 
-    public function test_public_catalog_and_public_poi_scopes_respect_public_discoverability_independently_from_favoritable(): void
+    public function test_canonical_type_sets_respect_public_discoverability_independently_from_favoritable(): void
     {
         TenantProfileType::query()->delete();
 
@@ -369,59 +378,50 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'type' => 'public-poi',
             'label' => 'Public Poi',
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
         TenantProfileType::create([
             'type' => 'public-non-poi',
             'label' => 'Public Non Poi',
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_favoritable' => true,
-                'is_poi_enabled' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
             ],
         ]);
         TenantProfileType::create([
             'type' => 'non-favoritable-poi',
             'label' => 'Non Favoritable Poi',
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_favoritable' => false,
-                'is_poi_enabled' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => false, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
         TenantProfileType::create([
             'type' => 'hidden-poi',
             'label' => 'Hidden Poi',
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => false,
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
-        $publicCatalogTypes = TenantProfileType::query()
-            ->publicCatalog()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->values()
-            ->all();
-        $publicPoiCatalogTypes = TenantProfileType::query()
-            ->publicPoiCatalog()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->values()
-            ->all();
+        $typeSets = app(AccountProfileTypeSetProvider::class);
+        $publicCatalogTypes = $typeSets->publicCatalogTypes();
+        $publicPoiCatalogTypes = $typeSets->publicPoiCatalogTypes();
 
         $this->assertEqualsCanonicalizing(
             ['non-favoritable-poi', 'public-non-poi', 'public-poi'],
@@ -433,52 +433,43 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         );
     }
 
-    public function test_queryability_and_public_navigation_backfill_repairs_missing_flags_without_overwriting_explicit_values(): void
+    public function test_creation_defaults_preserve_explicit_visibility_flags_and_personal_type_semantics(): void
     {
         TenantProfileType::query()->delete();
+        app(AccountProfileRegistrySeeder::class)->ensurePersonalDefault();
+        $keys = ['is_queryable', 'is_publicly_discoverable', 'is_publicly_navigable'];
 
-        TenantProfileType::create([
-            'type' => 'personal',
-            'label' => 'Personal',
-            'capabilities' => [
-                'is_favoritable' => true,
-            ],
-        ]);
-        TenantProfileType::create([
-            'type' => 'venue',
-            'label' => 'Venue',
-            'capabilities' => [
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-            ],
-        ]);
-        TenantProfileType::create([
-            'type' => 'explicit-hidden',
-            'label' => 'Explicit Hidden',
-            'capabilities' => [
-                'is_queryable' => false,
-                'is_publicly_navigable' => false,
-            ],
-        ]);
-
-        $migration = require base_path(
-            'database/migrations/tenants/2026_06_06_000100_backfill_profile_type_queryability_and_public_navigation.php'
-        );
-        $migration->up();
+        foreach (['creation-defaults' => true, 'explicit-hidden' => false] as $type => $expected) {
+            $payload = ['type' => $type, 'label' => $type];
+            if (! $expected) {
+                foreach ($keys as $key) {
+                    $payload['capabilities'][$key] = ['value' => false, 'parameters' => []];
+                }
+            }
+            $response = $this->postJson(
+                "{$this->base_tenant_api_admin}account_profile_types",
+                $payload,
+                $this->getHeaders(),
+            );
+            $response->assertCreated();
+            $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+            $persisted = TenantProfileType::query()->where('type', $type)->firstOrFail();
+            foreach ($keys as $key) {
+                $response->assertJsonPath("data.capabilities.{$key}.effective.value", $expected);
+                $this->assertSame($expected, data_get($persisted->capabilities, "{$key}.value"));
+            }
+        }
 
         $personal = TenantProfileType::query()->where('type', 'personal')->firstOrFail();
-        $venue = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
-        $explicitHidden = TenantProfileType::query()->where('type', 'explicit-hidden')->firstOrFail();
-
-        $this->assertFalse((bool) data_get($personal->capabilities, 'is_queryable', true));
-        $this->assertFalse((bool) data_get($personal->capabilities, 'is_publicly_discoverable', true));
-        $this->assertFalse((bool) data_get($personal->capabilities, 'is_publicly_navigable', true));
-        $this->assertTrue((bool) data_get($venue->capabilities, 'is_queryable', false));
-        $this->assertTrue((bool) data_get($venue->capabilities, 'is_publicly_discoverable', false));
-        $this->assertTrue((bool) data_get($venue->capabilities, 'is_publicly_navigable', false));
-        $this->assertFalse((bool) data_get($explicitHidden->capabilities, 'is_queryable', true));
-        $this->assertFalse((bool) data_get($explicitHidden->capabilities, 'is_publicly_discoverable', true));
-        $this->assertFalse((bool) data_get($explicitHidden->capabilities, 'is_publicly_navigable', true));
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profile_types/personal",
+            $this->getHeaders(),
+        );
+        $response->assertOk();
+        foreach ($keys as $key) {
+            $this->assertSame(false, data_get($personal->capabilities, "{$key}.value"));
+            $response->assertJsonPath("data.capabilities.{$key}.effective.value", false);
+        }
     }
 
     public function test_profile_type_create_validation(): void
@@ -531,8 +522,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 ],
                 'type_asset' => UploadedFile::fake()->image('gallery.png', 320, 320),
                 'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => true,
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ],
         );
@@ -582,8 +573,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'label' => 'Venue',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -597,6 +588,50 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(422);
+    }
+
+    public function test_profile_type_create_rejects_unknown_capability_and_parameter_keys(): void
+    {
+        TenantProfileType::query()->delete();
+
+        $unknownCapability = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            [
+                'type' => 'unknown-capability',
+                'label' => 'Unknown Capability',
+                'capabilities' => [
+                    'future_key' => ['value' => true, 'parameters' => []],
+                ],
+            ],
+            $this->getHeaders(),
+        );
+
+        $unknownCapability->assertStatus(422);
+        $unknownCapability->assertJsonValidationErrors(['capabilities']);
+
+        $unknownParameter = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            [
+                'type' => 'unknown-parameter',
+                'label' => 'Unknown Parameter',
+                'capabilities' => [
+                    'has_external_links' => [
+                        'value' => true,
+                        'parameters' => [
+                            'max_links' => 3,
+                            'mongo_operator' => ['$gt' => 0],
+                        ],
+                    ],
+                ],
+            ],
+            $this->getHeaders(),
+        );
+
+        $unknownParameter->assertStatus(422);
+        $unknownParameter->assertJsonValidationErrors([
+            'capabilities.has_external_links.parameters',
+        ]);
+        $this->assertSame(0, TenantProfileType::query()->count());
     }
 
     public function test_profile_type_create_validates_allowed_taxonomies_length(): void
@@ -623,9 +658,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'type' => 'personal',
             'label' => 'Personal',
             'allowed_taxonomies' => [],
+            'capability_revision' => 0,
             'capabilities' => [
-                'is_favoritable' => false,
-                'is_poi_enabled' => false,
+                'is_favoritable' => ['value' => false, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -633,8 +669,9 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             "{$this->base_tenant_api_admin}account_profile_types/personal",
             [
                 'label' => 'Pessoa',
+                'expected_capability_revision' => 0,
                 'capabilities' => [
-                    'is_favoritable' => true,
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
                 ],
             ],
             $this->getHeaders()
@@ -642,7 +679,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         $response->assertStatus(200);
         $response->assertJsonPath('data.label', 'Pessoa');
-        $response->assertJsonPath('data.capabilities.is_favoritable', true);
+        $response->assertJsonPath('data.capabilities.is_favoritable.effective.value', true);
     }
 
     public function test_profile_type_update_uses_route_param(): void
@@ -653,8 +690,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'label' => 'Restaurante',
             'allowed_taxonomies' => ['cuisine', 'genre'],
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => false,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -671,6 +708,178 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.label', 'Restaurante Atualizado');
     }
 
+    public function test_non_capability_update_does_not_materialize_defaults_or_advance_revision(): void
+    {
+        TenantProfileType::query()->delete();
+        $type = TenantProfileType::create([
+            'type' => 'legacy-incomplete',
+            'label' => 'Legacy Incomplete',
+            'capability_revision' => 7,
+            'host_admission_fence_revision' => 3,
+            'capabilities' => [
+                'location_policy' => ['value' => 'disabled', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                'is_physical_host_enabled' => ['value' => false, 'parameters' => []],
+                'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+            ],
+        ]);
+        $before = $type->capabilities;
+
+        $response = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/legacy-incomplete",
+            ['label' => 'Legacy Renamed'],
+            $this->getHeaders(),
+        );
+
+        $response->assertOk();
+        $response->assertJsonPath('data.capability_revision', 7);
+        $response->assertJsonPath('data.capabilities.is_queryable.effective.value', false);
+        $response->assertJsonPath('data.capabilities.is_publicly_discoverable.effective.value', false);
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $persisted = TenantProfileType::query()->where('type', 'legacy-incomplete')->firstOrFail();
+        $this->assertSame($before, $persisted->capabilities);
+        $this->assertSame(7, (int) $persisted->capability_revision);
+        $this->assertSame(3, (int) $persisted->host_admission_fence_revision);
+    }
+
+    public function test_profile_type_capability_patch_requires_and_enforces_revision_cas(): void
+    {
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'cas-type',
+            'label' => 'CAS Type',
+            'capability_revision' => 0,
+            'host_admission_fence_revision' => 0,
+            'capabilities' => [
+                'location_policy' => ['value' => 'disabled', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                'is_physical_host_enabled' => ['value' => false, 'parameters' => []],
+                'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+            ],
+        ]);
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/cas-type",
+            ['capabilities' => ['is_favoritable' => ['value' => true, 'parameters' => []]]],
+            $this->getHeaders(),
+        )->assertStatus(422)->assertJsonValidationErrors(['expected_capability_revision']);
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/cas-type",
+            [
+                'expected_capability_revision' => 0,
+                'capabilities' => ['is_favoritable' => ['value' => true, 'parameters' => []]],
+            ],
+            $this->getHeaders(),
+        )->assertOk()->assertJsonPath('data.capability_revision', 1);
+
+        $stale = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/cas-type",
+            [
+                'expected_capability_revision' => 0,
+                'capabilities' => ['has_events' => ['value' => true, 'parameters' => []]],
+            ],
+            $this->getHeaders(),
+        );
+        $stale->assertStatus(409);
+        $stale->assertJsonPath('code', 'account_profile_type_revision_conflict');
+        $stale->assertJsonPath('current_capability_revision', 1);
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $afterConflict = TenantProfileType::query()->where('type', 'cas-type')->firstOrFail();
+        $this->assertTrue((bool) ($afterConflict->capabilities['is_favoritable']['value'] ?? false));
+        $this->assertFalse((bool) ($afterConflict->capabilities['has_events']['value'] ?? false));
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/cas-type",
+            [
+                'expected_capability_revision' => 1,
+                'capabilities' => ['has_events' => ['value' => true, 'parameters' => []]],
+            ],
+            $this->getHeaders(),
+        )->assertOk()->assertJsonPath('data.capability_revision', 2);
+
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/cas-type",
+            ['label' => 'CAS Type Renamed'],
+            $this->getHeaders(),
+        )->assertOk()->assertJsonPath('data.capability_revision', 2);
+    }
+
+    public function test_concurrent_capability_patches_with_the_same_revision_admit_exactly_one_writer(): void
+    {
+        $tenantSlug = (string) Tenant::current()?->slug;
+        TenantProfileType::query()->delete();
+        TenantProfileType::create([
+            'type' => 'cas-race',
+            'label' => 'CAS Race',
+            'capability_revision' => 0,
+            'host_admission_fence_revision' => 0,
+            'capabilities' => [
+                'location_policy' => ['value' => 'disabled', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                'is_physical_host_enabled' => ['value' => false, 'parameters' => []],
+                'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+            ],
+        ]);
+
+        $barrier = sys_get_temp_dir().'/account-profile-capability-cas-'.bin2hex(random_bytes(8));
+        $processes = [
+            $this->capabilityCasRaceProcess($tenantSlug, $barrier, 'favoritable', 'is_favoritable', 2),
+            $this->capabilityCasRaceProcess($tenantSlug, $barrier, 'events', 'has_events', 2),
+        ];
+
+        try {
+            foreach ($processes as $process) {
+                $process->start();
+            }
+
+            $results = [];
+            foreach ($processes as $process) {
+                $process->wait();
+                $this->assertTrue(
+                    $process->isSuccessful(),
+                    $process->getOutput()."\n".$process->getErrorOutput(),
+                );
+                $results[] = $this->capabilityCasRaceResult($process);
+            }
+
+            $successes = array_values(array_filter(
+                $results,
+                static fn (array $result): bool => ($result['status'] ?? null) === 'ok',
+            ));
+            $conflicts = array_values(array_filter(
+                $results,
+                static fn (array $result): bool => ($result['status'] ?? null) === 'conflict',
+            ));
+            $this->assertCount(1, $successes, json_encode($results, JSON_THROW_ON_ERROR));
+            $this->assertCount(1, $conflicts, json_encode($results, JSON_THROW_ON_ERROR));
+            $this->assertSame(409, $conflicts[0]['http_status'] ?? null);
+            $this->assertSame('account_profile_type_revision_conflict', $conflicts[0]['code'] ?? null);
+            $this->assertSame(1, $conflicts[0]['current_capability_revision'] ?? null);
+
+            Tenant::query()->where('slug', $tenantSlug)->firstOrFail()->makeCurrent();
+            $persisted = TenantProfileType::query()->where('type', 'cas-race')->firstOrFail();
+            $this->assertSame(1, (int) $persisted->capability_revision);
+            $favoritable = (bool) data_get($persisted->capabilities, 'is_favoritable.value', false);
+            $hasEvents = (bool) data_get($persisted->capabilities, 'has_events.value', false);
+            $this->assertTrue(
+                $favoritable !== $hasEvents,
+                'The persisted capability document must contain exactly one complete winning patch.',
+            );
+        } finally {
+            foreach ($processes as $process) {
+                if ($process->isRunning()) {
+                    $process->stop(1);
+                }
+            }
+            foreach (glob($barrier.'.ready.*') ?: [] as $path) {
+                @unlink($path);
+            }
+        }
+    }
+
     public function test_profile_type_update_preserves_existing_capabilities_when_toggling_nested_groups(): void
     {
         TenantProfileType::query()->delete();
@@ -678,43 +887,45 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'type' => 'venue',
             'label' => 'Venue',
             'allowed_taxonomies' => ['cuisine'],
+            'capability_revision' => 0,
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => true,
-                'has_events' => true,
-                'has_nested_profile_groups' => false,
-                'has_external_links' => false,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+                'has_events' => ['value' => true, 'parameters' => []],
+                'has_nested_profile_groups' => ['value' => false, 'parameters' => []],
+                'has_external_links' => ['value' => false, 'parameters' => ['max_links' => 3]],
             ],
         ]);
 
         $response = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profile_types/venue",
             [
+                'expected_capability_revision' => 0,
                 'capabilities' => [
-                    'has_nested_profile_groups' => true,
-                    'has_external_links' => true,
+                    'has_nested_profile_groups' => ['value' => true, 'parameters' => []],
+                    'has_external_links' => ['value' => true, 'parameters' => ['max_links' => 3]],
                 ],
             ],
             $this->getHeaders()
         );
 
         $response->assertStatus(200);
-        $response->assertJsonPath('data.capabilities.is_favoritable', true);
-        $response->assertJsonPath('data.capabilities.is_publicly_discoverable', true);
-        $response->assertJsonPath('data.capabilities.is_poi_enabled', true);
-        $response->assertJsonPath('data.capabilities.has_events', true);
-        $response->assertJsonPath('data.capabilities.has_nested_profile_groups', true);
-        $response->assertJsonPath('data.capabilities.has_external_links', true);
+        $response->assertJsonPath('data.capabilities.is_favoritable.effective.value', true);
+        $response->assertJsonPath('data.capabilities.is_publicly_discoverable.effective.value', true);
+        $response->assertJsonPath('data.capabilities.is_map_poi_enabled.effective.value', true);
+        $response->assertJsonPath('data.capabilities.has_events.effective.value', true);
+        $response->assertJsonPath('data.capabilities.has_nested_profile_groups.effective.value', true);
+        $response->assertJsonPath('data.capabilities.has_external_links.effective.value', true);
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
-        $this->assertTrue((bool) ($model->capabilities['is_favoritable'] ?? false));
-        $this->assertTrue((bool) ($model->capabilities['is_publicly_discoverable'] ?? false));
-        $this->assertTrue((bool) ($model->capabilities['is_poi_enabled'] ?? false));
-        $this->assertTrue((bool) ($model->capabilities['has_events'] ?? false));
-        $this->assertTrue((bool) ($model->capabilities['has_nested_profile_groups'] ?? false));
-        $this->assertTrue((bool) ($model->capabilities['has_external_links'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_favoritable']['value'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_publicly_discoverable']['value'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['is_map_poi_enabled']['value'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['has_events']['value'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['has_nested_profile_groups']['value'] ?? false));
+        $this->assertTrue((bool) ($model->capabilities['has_external_links']['value'] ?? false));
     }
 
     public function test_profile_type_map_poi_projection_impact_returns_projection_count(): void
@@ -727,9 +938,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'type' => 'venue',
             'label' => 'Venue',
             'allowed_taxonomies' => [],
+            'capability_revision' => 0,
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -737,12 +949,14 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'account_id' => 'account-1',
             'profile_type' => 'venue',
             'display_name' => 'Venue One',
+            'location' => ['type' => 'Point', 'coordinates' => [-43.2, -22.9]],
             'is_active' => true,
         ]);
         $second = AccountProfile::create([
             'account_id' => 'account-2',
             'profile_type' => 'venue',
             'display_name' => 'Venue Two',
+            'location' => ['type' => 'Point', 'coordinates' => [-43.1, -22.8]],
             'is_active' => true,
         ]);
         $other = AccountProfile::create([
@@ -774,14 +988,19 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'is_active' => true,
         ]);
 
-        $response = $this->getJson(
-            "{$this->base_tenant_api_admin}account_profile_types/venue/map_poi_projection_impact",
+        $response = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profile_types/venue/change_impact",
+            [
+                'capabilities' => [
+                    'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                ],
+            ],
             $this->getHeaders()
         );
 
         $response->assertStatus(200);
         $response->assertJsonPath('data.profile_type', 'venue');
-        $response->assertJsonPath('data.projection_count', 2);
+        $response->assertJsonPath('data.map_projection_count', 2);
     }
 
     public function test_profile_type_update_rejects_type_rename_when_profiles_reference_current_type(): void
@@ -794,9 +1013,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'type' => 'personal',
             'label' => 'Personal',
             'allowed_taxonomies' => [],
+            'capability_revision' => 0,
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -949,7 +1169,12 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'type' => 'metadata-reference',
             'label' => 'Metadata Reference',
             'allowed_taxonomies' => [],
-            'capabilities' => [],
+            'capabilities' => [
+                'location_policy' => ['value' => 'disabled', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                'is_physical_host_enabled' => ['value' => false, 'parameters' => []],
+                'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+            ],
         ]);
 
         $profile = AccountProfile::create([
@@ -991,6 +1216,7 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 'labels' => ['singular' => 'Refreshed Category', 'plural' => 'Refreshed Categories'],
                 'allowed_taxonomies' => [],
                 'capabilities' => [],
+                'capability_revision' => 0,
             ],
         );
         $first = AccountProfile::create([
@@ -1139,7 +1365,12 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'type' => 'unreferenced-type',
             'label' => 'Unreferenced Type',
             'allowed_taxonomies' => [],
-            'capabilities' => [],
+            'capabilities' => [
+                'location_policy' => ['value' => 'disabled', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                'is_physical_host_enabled' => ['value' => false, 'parameters' => []],
+                'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+            ],
         ]);
 
         $renameResponse = $this->patchJson(
@@ -1177,9 +1408,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'type' => 'venue',
             'label' => 'Venue',
             'allowed_taxonomies' => [],
+            'capability_revision' => 0,
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -1210,15 +1442,16 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profile_types/venue",
             [
+                'expected_capability_revision' => 0,
                 'capabilities' => [
-                    'is_poi_enabled' => false,
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ],
             $this->getHeaders()
         );
 
         $response->assertStatus(200);
-        $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
+        $response->assertJsonPath('data.capabilities.is_map_poi_enabled.effective.value', false);
         $profileId = (string) $profile->_id;
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
@@ -1244,10 +1477,11 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 'plural' => 'Venue Sync Olds',
             ],
             'allowed_taxonomies' => [],
+            'capability_revision' => 0,
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_discoverable' => false,
-                'is_publicly_navigable' => false,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -1261,10 +1495,11 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                     'singular' => 'Venue Sync Updated',
                     'plural' => 'Venue Sync Updateds',
                 ],
+                'expected_capability_revision' => 0,
                 'capabilities' => [
-                    'is_publicly_discoverable' => true,
-                    'is_publicly_navigable' => true,
-                    'has_contact_channels' => true,
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'has_contact_channels' => ['value' => true, 'parameters' => []],
                 ],
             ],
             $this->getHeaders()
@@ -1274,9 +1509,9 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
 
         $this->assertIsArray($environmentType);
         $this->assertSame('Venue Sync Updated', $environmentType['label'] ?? null);
-        $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_publicly_discoverable', false));
-        $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_publicly_navigable', false));
-        $this->assertTrue((bool) data_get($environmentType, 'capabilities.has_contact_channels', false));
+        $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_publicly_discoverable.effective.value', false));
+        $this->assertTrue((bool) data_get($environmentType, 'capabilities.is_publicly_navigable.effective.value', false));
+        $this->assertTrue((bool) data_get($environmentType, 'capabilities.has_contact_channels.effective.value', false));
     }
 
     public function test_profile_type_update_poi_visual_change_rematerializes_projection_visual(): void
@@ -1296,8 +1531,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 'icon_color' => '#FFFFFF',
             ],
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -1386,8 +1621,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
                 'icon_color' => '#FFFFFF',
             ],
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -1498,37 +1733,41 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['type']);
     }
 
-    public function test_profile_type_update_disables_reference_location_when_poi_is_turned_off(): void
+    public function test_profile_type_update_disables_reference_location_when_location_is_disabled(): void
     {
         TenantProfileType::query()->delete();
         TenantProfileType::create([
             'type' => 'venue',
             'label' => 'Venue',
             'allowed_taxonomies' => [],
+            'capability_revision' => 0,
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
-                'is_reference_location_enabled' => true,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => true, 'parameters' => []],
+                'is_physical_host_enabled' => ['value' => true, 'parameters' => []],
+                'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
         $response = $this->patchJson(
             "{$this->base_tenant_api_admin}account_profile_types/venue",
             [
+                'expected_capability_revision' => 0,
                 'capabilities' => [
-                    'is_poi_enabled' => false,
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ],
             $this->getHeaders()
         );
 
         $response->assertStatus(200);
-        $response->assertJsonPath('data.capabilities.is_poi_enabled', false);
-        $response->assertJsonPath('data.capabilities.is_reference_location_enabled', false);
+        $response->assertJsonPath('data.capabilities.is_map_poi_enabled.effective.value', false);
+        $response->assertJsonPath('data.capabilities.is_reference_location_enabled.effective.value', false);
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $model = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
-        $this->assertFalse((bool) ($model->capabilities['is_reference_location_enabled'] ?? false));
+        $this->assertFalse((bool) ($model->capabilities['is_reference_location_enabled']['value'] ?? false));
     }
 
     public function test_profile_type_index_exposes_effective_reference_location_capability(): void
@@ -1539,8 +1778,10 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'label' => 'Hotel',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_poi_enabled' => false,
-                'is_reference_location_enabled' => true,
+                'location_policy' => ['value' => 'disabled', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                'is_physical_host_enabled' => ['value' => false, 'parameters' => []],
+                'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -1550,8 +1791,9 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(200);
-        $response->assertJsonPath('data.0.capabilities.is_poi_enabled', false);
-        $response->assertJsonPath('data.0.capabilities.is_reference_location_enabled', false);
+        $response->assertJsonPath('data.0.capabilities.is_map_poi_enabled.effective.value', false);
+        $response->assertJsonPath('data.0.capabilities.is_reference_location_enabled.configured.value', true);
+        $response->assertJsonPath('data.0.capabilities.is_reference_location_enabled.effective.value', false);
     }
 
     public function test_profile_type_delete(): void
@@ -1562,8 +1804,8 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             'label' => 'Deletable',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => false,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
             ],
         ]);
 
@@ -1594,9 +1836,9 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             ],
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_discoverable' => true,
-                'is_publicly_navigable' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -1673,6 +1915,95 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
             ...$this->getHeaders(),
             'Content-Type' => 'multipart/form-data',
         ];
+    }
+
+    private function capabilityCasRaceProcess(
+        string $tenantSlug,
+        string $barrier,
+        string $worker,
+        string $capability,
+        int $workerCount,
+    ): Process {
+        $tenantSlugValue = var_export($tenantSlug, true);
+        $barrierValue = var_export($barrier, true);
+        $workerValue = var_export($worker, true);
+        $capabilityValue = var_export($capability, true);
+        $workerCountValue = var_export($workerCount, true);
+        $barrierTimeoutValue = var_export(self::BARRIER_TIMEOUT_SECONDS, true);
+        $code = <<<PHP
+try {
+    \$tenant = \App\Models\Landlord\Tenant::query()->where('slug', {$tenantSlugValue})->firstOrFail();
+    \$tenant->makeCurrent();
+    \$barrier = {$barrierValue};
+    file_put_contents(\$barrier.'.ready.'.{$workerValue}, 'ready');
+    \$deadline = microtime(true) + {$barrierTimeoutValue};
+    while (count(glob(\$barrier.'.ready.*')) < {$workerCountValue}) {
+        if (microtime(true) >= \$deadline) {
+            throw new \RuntimeException('capability CAS race barrier timed out');
+        }
+        usleep(10_000);
+    }
+
+    \$capability = {$capabilityValue};
+    \$payload = [
+        'expected_capability_revision' => 0,
+        'capabilities' => [
+            \$capability => ['value' => true, 'parameters' => []],
+        ],
+    ];
+    \$request = \Illuminate\Http\Request::create(
+        'http://tenant-zeta.test/account_profile_types/cas-race',
+        'PATCH',
+        \$payload,
+    );
+    \$result = app(\App\Application\AccountProfiles\AccountProfileRegistryManagementService::class)
+        ->update(\$request, 'cas-race', \$payload);
+    echo 'CAPABILITY_CAS_RESULT='.json_encode([
+        'status' => 'ok',
+        'worker' => {$workerValue},
+        'capability_revision' => \$result['capability_revision'] ?? null,
+    ], JSON_THROW_ON_ERROR);
+} catch (\Illuminate\Http\Exceptions\HttpResponseException \$exception) {
+    \$response = \$exception->getResponse();
+    \$body = json_decode((string) \$response->getContent(), true);
+    echo 'CAPABILITY_CAS_RESULT='.json_encode([
+        'status' => 'conflict',
+        'worker' => {$workerValue},
+        'http_status' => \$response->getStatusCode(),
+        'code' => \$body['code'] ?? null,
+        'current_capability_revision' => \$body['current_capability_revision'] ?? null,
+    ], JSON_THROW_ON_ERROR);
+} catch (\Throwable \$exception) {
+    echo 'CAPABILITY_CAS_RESULT='.json_encode([
+        'status' => 'error',
+        'worker' => {$workerValue},
+        'exception' => \$exception::class,
+        'message' => \$exception->getMessage(),
+    ], JSON_THROW_ON_ERROR);
+    exit(1);
+}
+PHP;
+
+        return new Process(
+            [PHP_BINARY, 'artisan', 'tinker', '--execute', $code],
+            base_path(),
+            null,
+            null,
+            self::PROCESS_TIMEOUT_SECONDS,
+        );
+    }
+
+    /** @return array<string, mixed> */
+    private function capabilityCasRaceResult(Process $process): array
+    {
+        $matched = preg_match(
+            '/CAPABILITY_CAS_RESULT=(\{[^\r\n]+\})/',
+            $process->getOutput(),
+            $matches,
+        );
+        $this->assertSame(1, $matched, $process->getOutput());
+
+        return json_decode($matches[1], true, flags: JSON_THROW_ON_ERROR);
     }
 
     private function readPrivateProperty(object $object, string $property): mixed

@@ -75,15 +75,22 @@ class MapPoiProjectionService
         object $profile,
         ?int $forcedCheckpoint = null,
         ?bool $parentAccountPublished = null,
-    ): void
-    {
+        ?bool $resolvedMapPoiEnabled = null,
+    ): void {
         if (! $profile->profile_type) {
             $this->deleteByRef('account_profile', (string) $profile->_id);
 
             return;
         }
 
-        if (! $this->registry->isAccountProfilePoiEnabled((string) $profile->profile_type)) {
+        if (! ($resolvedMapPoiEnabled
+            ?? $this->registry->isAccountProfileMapPoiEnabled((string) $profile->profile_type))) {
+            $this->deleteByRef('account_profile', (string) $profile->_id);
+
+            return;
+        }
+
+        if (! $this->registry->isValidAccountProfilePoint($profile->location ?? null)) {
             $this->deleteByRef('account_profile', (string) $profile->_id);
 
             return;

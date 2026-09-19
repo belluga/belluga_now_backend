@@ -8,7 +8,7 @@ upstream source aggregates or the discovery-filter catalog.
 
 ## Scope
 
-- Map POI projection runtime for `event`, `account_profile`, and `static` sources.
+- Map POI projection runtime for `event` and `account_profile` sources.
 - Read endpoints for map stacks, typed POI lookup, and nearby items.
 - Tenant-scoped `map_pois` collection migrations and indexes.
 - Rebuild command for projection repair and backfill.
@@ -32,7 +32,10 @@ upstream source aggregates or the discovery-filter catalog.
 - `projection_key` must remain unique.
 - The collection is tenant-scoped.
 - Event POIs are deactivated when capability or geometry conditions no longer hold.
-- Account profile POIs are removed when profile type is not favoritable or location is missing.
+- Account Profile POIs exist only when the host's canonical capability resolver
+  reports `location_policy=optional|required` and `is_map_poi_enabled=true`, and
+  the source Profile has a valid Point. They are removed when any condition stops
+  holding. Favoritability is unrelated to Map eligibility.
 
 ## Data Model
 
@@ -102,7 +105,8 @@ Returns a deterministic single POI payload by canonical typed reference.
 
 Query inputs:
 
-- `ref_type` (required): `event|account_profile|static` (aliases accepted by request validation)
+- `ref_type` (required): `event|account_profile` (`account` is accepted as the
+  Account Profile alias)
 - `ref_id` (required)
 
 Response shape:
@@ -162,7 +166,7 @@ The package reads the current tenant context and user timezone from the host-res
 The host app must provide adapters for:
 
 - source reading from events and account profiles
-- registry decisions for favoritable POI types
+- canonical Account Profile Map-eligibility decisions supplied by the host
 - tenant context resolution
 - settings resolution for map UI and ingest behavior
 
@@ -184,6 +188,11 @@ Projection repair and backfill:
 - `php artisan map-pois:rebuild`
 - `php artisan map-pois:rebuild events`
 - `php artisan map-pois:rebuild account_profiles`
+
+Account Profile type transitions use the host's durable Account Profile outbox
+and type revision/fence. The package remains projection-only: it applies one
+bounded reconciliation page at a time and never becomes the capability or
+source-location authority.
 
 Optional flags:
 

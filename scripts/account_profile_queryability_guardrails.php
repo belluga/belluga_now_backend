@@ -466,15 +466,6 @@ function defaultAccountProfileQueryabilityAllowlist(): array
             'rationale' => 'Tenant-admin profile-type mutation needs impacted account-profile ids to refresh or delete map projections after capability changes.',
         ],
         [
-            'key' => 'app/Application/AccountProfiles/AccountProfileRegistryManagementService.php::previewDisableProjectionCount::query',
-            'path' => 'app/Application/AccountProfiles/AccountProfileRegistryManagementService.php',
-            'method' => 'previewDisableProjectionCount',
-            'source_kind' => 'query',
-            'category' => 'admin_readback',
-            'owner' => $owner,
-            'rationale' => 'Tenant-admin projection impact preview counts affected account profiles before disabling a profile type visual/POI path.',
-        ],
-        [
             'key' => 'app/Integration/Events/AccountProfileResolverAdapter.php::queryPhysicalHostCandidates::query',
             'path' => 'app/Integration/Events/AccountProfileResolverAdapter.php',
             'method' => 'queryPhysicalHostCandidates',

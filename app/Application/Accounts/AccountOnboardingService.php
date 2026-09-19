@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Accounts;
 
+use App\Application\AccountProfiles\AccountProfileLocationPolicy;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
@@ -29,6 +30,7 @@ class AccountOnboardingService
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileRegistrySeeder $registrySeeder,
         private readonly AccountProfileRegistryService $registryService,
+        private readonly AccountProfileLocationPolicy $locationPolicy,
         private readonly AccountProfileTransactionRunner $transactionRunner,
         private readonly AccountProfileOutboxDispatcher $outboxDispatcher,
     ) {}
@@ -79,7 +81,10 @@ class AccountOnboardingService
                 $account = $accountResult['account'];
                 $role = $accountResult['role'];
 
-                $this->assertLocationKeysForPoiProfile($payload);
+                $this->locationPolicy->assertCreateAllowed(
+                    (string) ($payload['profile_type'] ?? ''),
+                    $payload['location'] ?? null,
+                );
 
                 $profilePayload = [
                     'account_id' => (string) $account->_id,
@@ -152,37 +157,6 @@ class AccountOnboardingService
     /**
      * @param  array<string, mixed>  $payload
      */
-    private function assertLocationKeysForPoiProfile(array $payload): void
-    {
-        $profileType = (string) ($payload['profile_type'] ?? '');
-        if ($profileType === '' || ! $this->registryService->isPoiEnabled($profileType)) {
-            return;
-        }
-
-        $location = $payload['location'] ?? null;
-        $messages = [];
-        if (! is_array($location)) {
-            $messages[] = 'Location is required for POI-enabled profiles.';
-        } else {
-            if (! array_key_exists('lat', $location) || $location['lat'] === null || $location['lat'] === '') {
-                $messages[] = 'Latitude is required for POI-enabled profiles.';
-            }
-            if (! array_key_exists('lng', $location) || $location['lng'] === null || $location['lng'] === '') {
-                $messages[] = 'Longitude is required for POI-enabled profiles.';
-            }
-        }
-
-        if ($messages === []) {
-            return;
-        }
-
-        throw ValidationException::withMessages([
-            'location' => $messages,
-            'location.lat' => $messages,
-            'location.lng' => $messages,
-        ]);
-    }
-
     private function normalizeValidationException(
         ValidationException $exception,
     ): ValidationException {

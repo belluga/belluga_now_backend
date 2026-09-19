@@ -4,16 +4,17 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
-use App\Application\Shared\MapPois\MapPoiProjectionRefService;
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
 use App\Application\Shared\MapPois\PoiVisualNormalizer;
+use App\Jobs\AccountProfiles\DispatchAccountProfileOutboxEventJob;
 use App\Jobs\AccountProfiles\RefreshAccountProfileSearchForTypeJob;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
-use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
-use Belluga\MapPois\Jobs\UpsertMapPoiFromAccountProfileJob;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -24,9 +25,12 @@ class AccountProfileRegistryManagementService
 {
     public function __construct(
         private readonly PoiVisualNormalizer $poiVisualNormalizer,
-        private readonly MapPoiProjectionRefService $mapPoiProjectionRefs,
         private readonly AccountProfileTypeMediaService $mediaService,
-        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
+        private readonly AccountProfileCapabilityResolverContract $capabilityResolver,
+        private readonly AccountProfileLocationPolicy $locationPolicy,
+        private readonly AccountProfileTypeChangeImpactService $changeImpact,
+        private readonly AccountProfileTransactionRunner $transactionRunner,
+        private readonly AccountProfileOutboxPublisher $outboxPublisher,
     ) {}
 
     /**
@@ -50,6 +54,11 @@ class AccountProfileRegistryManagementService
             false,
         );
 
+        $entry['capability_revision'] = 0;
+        $entry['host_admission_fence_revision'] = 0;
+        $entry['capabilities'] = $this->capabilityResolver->configurationForPersistence(
+            $entry['capabilities'],
+        );
         $model = TenantProfileType::create($entry);
         $this->mediaService->applyUploads($request, $model);
         $model = $model->fresh() ?? $model;
@@ -87,21 +96,12 @@ class AccountProfileRegistryManagementService
 
         $entry = $this->mergeEntry($model, $payload, $nextType);
         $currentCapabilities = $this->arrayFrom($model->capabilities ?? []);
-        $currentPoiEnabled = $this->capabilityCatalog->isEnabled(
-            AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
-            $currentCapabilities,
-            $currentCapabilities,
-            $currentType,
-        );
-        $nextCapabilities = is_array($entry['capabilities'] ?? null)
-            ? $entry['capabilities']
-            : [];
-        $nextPoiEnabled = $this->capabilityCatalog->isEnabled(
-            AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
-            $nextCapabilities,
-            $nextCapabilities,
-            $nextType,
-        );
+        $currentPoiEnabled = $this->isEffectiveMapPoiEnabled($model);
+        $nextCapabilities = array_key_exists('capabilities', $entry)
+            && is_array($entry['capabilities'])
+                ? $entry['capabilities']
+                : $currentCapabilities;
+        $nextPoiEnabled = $this->effectiveValueForConfiguration($model, $nextCapabilities, 'is_map_poi_enabled') === true;
         $currentPoiVisual = $this->poiVisualNormalizer->normalize($model->visual ?? $model->poi_visual ?? null);
         $nextPoiVisual = $this->poiVisualNormalizer->normalize($entry['visual'] ?? $entry['poi_visual'] ?? null);
         $poiVisualChanged = $currentPoiVisual !== $nextPoiVisual;
@@ -114,9 +114,24 @@ class AccountProfileRegistryManagementService
             $request->boolean('remove_type_asset'),
         );
 
+        $typeReconcileEventId = null;
         try {
-            $model->fill($entry);
-            $model->save();
+            if (array_key_exists('capabilities', $payload)) {
+                $capabilityPatch = is_array($payload['capabilities']) ? $payload['capabilities'] : [];
+                [$model, $typeReconcileEventId] = $this->persistCapabilityPatchWithRevision(
+                    $model,
+                    $entry,
+                    $currentCapabilities,
+                    $nextCapabilities,
+                    $payload['expected_capability_revision'] ?? null,
+                    $currentType,
+                    $capabilityPatch,
+                );
+                Event::dispatch('eloquent.saved: '.TenantProfileType::class, $model);
+            } else {
+                $model->fill($entry);
+                $model->save();
+            }
         } catch (BulkWriteException $exception) {
             if (str_contains($exception->getMessage(), 'E11000')) {
                 throw ValidationException::withMessages([
@@ -145,7 +160,9 @@ class AccountProfileRegistryManagementService
             || $poiVisualChanged
             || $typeAssetChanged;
 
-        if ($shouldRefreshMapProjection) {
+        if ($typeReconcileEventId !== null) {
+            DispatchAccountProfileOutboxEventJob::dispatch($typeReconcileEventId);
+        } elseif ($shouldRefreshMapProjection) {
             $queryType = $nextType === $currentType ? $nextType : $currentType;
             $profileIds = AccountProfile::query()
                 ->where('profile_type', $queryType)
@@ -155,20 +172,14 @@ class AccountProfileRegistryManagementService
 
             if ($profileIds !== []) {
                 if (! $nextPoiEnabled) {
-                    $this->mapPoiProjectionRefs->dispatchForEachRefId(
-                        $profileIds,
-                        static function (string $profileId): void {
-                            DeleteMapPoiByRefJob::dispatch('account_profile', $profileId);
-                        },
-                    );
+                    foreach ($profileIds as $profileId) {
+                        \Belluga\MapPois\Jobs\DeleteMapPoiByRefJob::dispatch('account_profile', $profileId);
+                    }
                 } else {
                     $checkpoint = $forcedCheckpoint > 0 ? $forcedCheckpoint : null;
-                    $this->mapPoiProjectionRefs->dispatchForEachRefId(
-                        $profileIds,
-                        static function (string $profileId) use ($checkpoint): void {
-                            UpsertMapPoiFromAccountProfileJob::dispatch($profileId, $checkpoint);
-                        },
-                    );
+                    foreach ($profileIds as $profileId) {
+                        \Belluga\MapPois\Jobs\UpsertMapPoiFromAccountProfileJob::dispatch($profileId, $checkpoint);
+                    }
                 }
             }
         }
@@ -176,20 +187,13 @@ class AccountProfileRegistryManagementService
         return $this->toPayload($model, $request->getSchemeAndHttpHost());
     }
 
-    public function previewDisableProjectionCount(string $type): int
+    /**
+     * @param  array<string, mixed>  $capabilityPatch
+     * @return array{profile_type:string,capability_revision:int,missing_location_count:int,map_projection_count:int,event_reference_count:int,sample_profile_ids:array<int, string>}
+     */
+    public function previewChangeImpact(string $type, array $capabilityPatch): array
     {
-        $normalizedType = trim($type);
-        if ($normalizedType === '') {
-            return 0;
-        }
-
-        $profileIds = AccountProfile::query()
-            ->where('profile_type', $normalizedType)
-            ->get(['_id'])
-            ->map(static fn (AccountProfile $profile): string => (string) $profile->getKey())
-            ->all();
-
-        return $this->mapPoiProjectionRefs->countByRefType('account_profile', $profileIds);
+        return $this->changeImpact->preview($type, $capabilityPatch);
     }
 
     public function delete(string $type): void
@@ -233,7 +237,10 @@ class AccountProfileRegistryManagementService
             'allowed_taxonomies' => $this->normalizeTaxonomies($payload['allowed_taxonomies'] ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => $this->normalizeCapabilities($type, is_array($capabilities) ? $capabilities : []),
+            'capabilities' => $this->capabilityResolver->materializeConfigurationForCreation(
+                is_array($capabilities) ? $capabilities : [],
+            ),
+            'capability_revision' => 0,
         ];
     }
 
@@ -248,7 +255,7 @@ class AccountProfileRegistryManagementService
         $visual = $this->resolveIncomingVisual($payload, $existing->visual ?? $existing->poi_visual ?? null);
         $labels = $this->normalizeLabels($payload, $existing);
 
-        return [
+        $entry = [
             'type' => $resolvedType,
             'label' => $labels['singular'],
             'labels' => $labels,
@@ -257,28 +264,22 @@ class AccountProfileRegistryManagementService
                 : $this->normalizeTaxonomies($existing->allowed_taxonomies ?? []),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => $this->normalizeCapabilities(
-                $resolvedType,
+        ];
+        if (array_key_exists('capabilities', $payload)) {
+            $entry['capabilities'] = $this->capabilityResolver->mergeConfigurationForUpdate(
                 is_array($capabilities) ? $capabilities : [],
                 $currentCapabilities,
-            ),
-        ];
+            );
+        }
+
+        return $entry;
     }
 
     /**
      * @param  array<string, mixed>  $capabilities
      * @param  array<string, mixed>  $currentCapabilities
-     * @return array<string, bool>
+     * @return array<string, array{value:mixed,parameters:array<string,int>}>
      */
-    private function normalizeCapabilities(string $type, array $capabilities, array $currentCapabilities = []): array
-    {
-        return $this->capabilityCatalog->completeForPersistence(
-            trim($type),
-            $capabilities,
-            $currentCapabilities,
-        );
-    }
-
     /**
      * @return array<int, string>
      */
@@ -321,7 +322,6 @@ class AccountProfileRegistryManagementService
     {
         $visual = $this->resolvePayloadVisual($model, $baseUrl);
         $labels = $this->normalizeLabels([], $model);
-        $capabilities = $this->arrayFrom($model->capabilities ?? []);
         $type = trim((string) ($model->type ?? ''));
 
         return [
@@ -336,8 +336,118 @@ class AccountProfileRegistryManagementService
             )),
             'visual' => $visual,
             'poi_visual' => $visual,
-            'capabilities' => $this->normalizeCapabilities($type, $capabilities, $capabilities),
+            'capabilities' => $this->capabilityResolver->resolveAllForProfileType($model),
+            'capability_revision' => max(0, (int) ($model->capability_revision ?? 0)),
         ];
+    }
+
+    private function isEffectiveMapPoiEnabled(TenantProfileType $type): bool
+    {
+        return $this->capabilityResolver->resolveForProfileType($type, 'is_map_poi_enabled')['effective']['value'] === true;
+    }
+
+    /** @param array<string, mixed> $configuration */
+    private function effectiveValueForConfiguration(TenantProfileType $type, array $configuration, string $key): mixed
+    {
+        $candidate = $type->replicate();
+        $candidate->capabilities = $configuration;
+
+        return $this->capabilityResolver->resolveForProfileType($candidate, $key)['effective']['value'];
+    }
+
+    /**
+     * @param  array<string, mixed>  $entry
+     * @param  array<string, mixed>  $currentCapabilities
+     * @param  array<string, mixed>  $nextCapabilities
+     */
+    private function persistCapabilityPatchWithRevision(
+        TenantProfileType $model,
+        array $entry,
+        array $currentCapabilities,
+        array $nextCapabilities,
+        mixed $expectedRevision,
+        string $profileType,
+        array $capabilityPatch,
+    ): array {
+        if (! is_int($expectedRevision)) {
+            throw ValidationException::withMessages([
+                'expected_capability_revision' => ['The expected capability revision is required when capabilities are changed.'],
+            ]);
+        }
+
+        $currentRevision = max(0, (int) ($model->capability_revision ?? 0));
+        if ($expectedRevision !== $currentRevision) {
+            $this->throwCapabilityRevisionConflict($currentRevision);
+        }
+
+        unset($entry['capability_revision']);
+        $entry['capabilities'] = $this->capabilityResolver->configurationForPersistence(
+            $nextCapabilities,
+        );
+        $semanticChange = $nextCapabilities !== $this->capabilityResolver->mergeConfigurationForUpdate(
+            $currentCapabilities,
+            $currentCapabilities,
+        );
+        $update = ['$set' => $entry];
+        if ($semanticChange) {
+            $update['$inc'] = [
+                'capability_revision' => 1,
+                'host_admission_fence_revision' => 1,
+            ];
+        }
+
+        $currentMapEnabled = $this->effectiveValueForConfiguration($model, $currentCapabilities, 'is_map_poi_enabled') === true;
+        $nextMapEnabled = $this->effectiveValueForConfiguration($model, $nextCapabilities, 'is_map_poi_enabled') === true;
+        $requiresMapReconcile = $semanticChange && $currentMapEnabled !== $nextMapEnabled;
+
+        $eventId = $this->transactionRunner->run(function (AccountProfileTransactionContext $context) use (
+
+            $expectedRevision,
+            $update,
+            $semanticChange,
+            $requiresMapReconcile,
+            $profileType,
+            $capabilityPatch,
+        ): ?string {
+            $this->changeImpact->assertMutationAllowed($profileType, $capabilityPatch, $context);
+            $result = $context->collection('account_profile_types')->updateOne(
+                ['type' => $profileType, 'capability_revision' => $expectedRevision],
+                $update,
+                $context->rawOptions(),
+            );
+            if ($result->getMatchedCount() !== 1) {
+                $fresh = $context->collection('account_profile_types')->findOne(
+                    ['type' => $profileType],
+                    $context->rawOptions(),
+                );
+                $this->throwCapabilityRevisionConflict((int) ($fresh['capability_revision'] ?? 0));
+            }
+
+            if (! $requiresMapReconcile) {
+                return null;
+            }
+
+            return $this->outboxPublisher->recordMapPoiTypeReconcile(
+                $context,
+                $profileType,
+                $semanticChange ? $expectedRevision + 1 : $expectedRevision,
+                (int) now()->getTimestampMs(),
+            );
+        });
+
+        return [
+            TenantProfileType::query()->whereKey($model->getKey())->firstOrFail(),
+            $eventId,
+        ];
+    }
+
+    private function throwCapabilityRevisionConflict(int $currentRevision): never
+    {
+        throw new HttpResponseException(response()->json([
+            'message' => 'The account profile type capabilities changed since they were loaded.',
+            'code' => 'account_profile_type_revision_conflict',
+            'current_capability_revision' => max(0, $currentRevision),
+        ], 409));
     }
 
     /**

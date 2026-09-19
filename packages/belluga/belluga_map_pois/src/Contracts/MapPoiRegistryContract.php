@@ -6,11 +6,12 @@ namespace Belluga\MapPois\Contracts;
 
 interface MapPoiRegistryContract
 {
-    public function isAccountProfilePoiEnabled(string $profileType): bool;
+    public function isAccountProfileMapPoiEnabled(string $profileType): bool;
+
+    public function isValidAccountProfilePoint(mixed $location): bool;
 
     /**
      * @return array<string, string>|null
      */
     public function resolveAccountProfilePoiVisual(string $profileType): ?array;
-
 }

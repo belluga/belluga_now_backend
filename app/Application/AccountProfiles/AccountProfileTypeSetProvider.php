@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
 use App\Models\Landlord\Tenant;
-use App\Models\Tenants\TenantProfileType;
 
 final class AccountProfileTypeSetProvider
 {
@@ -15,6 +15,10 @@ final class AccountProfileTypeSetProvider
     private array $cache = [];
 
     private int $cacheRevision = -1;
+
+    public function __construct(
+        private readonly AccountProfileCapabilityResolverContract $capabilities,
+    ) {}
 
     public static function bumpRevision(): void
     {
@@ -31,14 +35,8 @@ final class AccountProfileTypeSetProvider
      */
     public function queryableTypes(): array
     {
-        return $this->remember('queryable', static fn (): array => TenantProfileType::query()
-            ->queryable()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all());
+        return $this->remember('queryable', fn (): array => $this->capabilities
+            ->typeIdsWhereAllEffectiveValues(['is_queryable' => true]));
     }
 
     /**
@@ -46,14 +44,11 @@ final class AccountProfileTypeSetProvider
      */
     public function publiclyDiscoverableTypes(): array
     {
-        return $this->remember('publicly_discoverable', static fn (): array => TenantProfileType::query()
-            ->publiclyDiscoverable()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all());
+        return $this->remember('publicly_discoverable', fn (): array => $this->capabilities
+            ->typeIdsWhereAllEffectiveValues([
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
+            ]));
     }
 
     /**
@@ -61,14 +56,7 @@ final class AccountProfileTypeSetProvider
      */
     public function publicCatalogTypes(): array
     {
-        return $this->remember('public_catalog', static fn (): array => TenantProfileType::query()
-            ->publicCatalog()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all());
+        return $this->remember('public_catalog', fn (): array => $this->publiclyDiscoverableTypes());
     }
 
     /**
@@ -76,14 +64,8 @@ final class AccountProfileTypeSetProvider
      */
     public function publiclyNavigableTypes(): array
     {
-        return $this->remember('publicly_navigable', static fn (): array => TenantProfileType::query()
-            ->publiclyNavigable()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all());
+        return $this->remember('publicly_navigable', fn (): array => $this->capabilities
+            ->typeIdsWhereAllEffectiveValues(['is_publicly_navigable' => true]));
     }
 
     /**
@@ -91,14 +73,25 @@ final class AccountProfileTypeSetProvider
      */
     public function publicPoiCatalogTypes(): array
     {
-        return $this->remember('public_poi_catalog', static fn (): array => TenantProfileType::query()
-            ->publicPoiCatalog()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all());
+        return $this->remember('public_poi_catalog', fn (): array => $this->capabilities
+            ->typeIdsWhereAllEffectiveValues([
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
+                'is_map_poi_enabled' => true,
+            ]));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function publicPhysicalHostTypes(): array
+    {
+        return $this->remember('public_physical_host', fn (): array => $this->capabilities
+            ->typeIdsWhereAllEffectiveValues([
+                'is_queryable' => true,
+                'is_publicly_discoverable' => true,
+                'is_physical_host_enabled' => true,
+            ]));
     }
 
     /**
@@ -106,14 +99,8 @@ final class AccountProfileTypeSetProvider
      */
     public function galleryEnabledTypes(): array
     {
-        return $this->remember('gallery_enabled', static fn (): array => TenantProfileType::query()
-            ->galleryEnabled()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all());
+        return $this->remember('gallery_enabled', fn (): array => $this->capabilities
+            ->typeIdsWhereAllEffectiveValues(['has_gallery' => true]));
     }
 
     /**
@@ -121,47 +108,42 @@ final class AccountProfileTypeSetProvider
      */
     public function contactChannelsEnabledTypes(): array
     {
-        return $this->remember('contact_channels_enabled', static fn (): array => TenantProfileType::query()
-            ->contactChannelsEnabled()
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all());
+        return $this->remember('contact_channels_enabled', fn (): array => $this->capabilities
+            ->typeIdsWhereAllEffectiveValues(['has_contact_channels' => true]));
     }
 
     /**
      * @return array<int, string>
      */
-    public function queryablePoiEnabledTypes(): array
+    public function physicalHostEnabledTypes(): array
     {
-        return $this->remember('queryable_poi_enabled', static fn (): array => TenantProfileType::query()
-            ->queryable()
-            ->where('capabilities.is_poi_enabled', true)
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all());
+        return $this->remember('physical_host_enabled', fn (): array => $this->capabilities
+            ->typeIdsWhereAllEffectiveValues([
+                'is_physical_host_enabled' => true,
+            ]));
     }
 
     /**
      * @return array<int, string>
      */
-    public function queryablePubliclyNavigablePoiEnabledTypes(): array
+    public function locationEnabledTypes(): array
     {
-        return $this->remember('queryable_publicly_navigable_poi_enabled', static fn (): array => TenantProfileType::query()
-            ->queryable()
-            ->publiclyNavigable()
-            ->where('capabilities.is_poi_enabled', true)
-            ->pluck('type')
-            ->map(static fn ($type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all());
+        return $this->remember('location_enabled', fn (): array => $this->capabilities
+            ->typeIdsWhereAllEffectiveValues([
+                'location_policy' => ['optional', 'required'],
+            ]));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function publiclyNavigablePhysicalHostEnabledTypes(): array
+    {
+        return $this->remember('publicly_navigable_physical_host_enabled', fn (): array => $this->capabilities
+            ->typeIdsWhereAllEffectiveValues([
+                'is_publicly_navigable' => true,
+                'is_physical_host_enabled' => true,
+            ]));
     }
 
     public function isQueryable(string $profileType): bool
@@ -212,6 +194,16 @@ final class AccountProfileTypeSetProvider
         }
 
         return in_array($normalized, $this->contactChannelsEnabledTypes(), true);
+    }
+
+    public function isLocationEnabled(string $profileType): bool
+    {
+        $normalized = trim($profileType);
+        if ($normalized === '') {
+            return false;
+        }
+
+        return in_array($normalized, $this->locationEnabledTypes(), true);
     }
 
     /**

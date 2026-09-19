@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 
 class TenantEnvironmentSnapshotService
 {
-    public const SCHEMA_VERSION = 4;
+    public const SCHEMA_VERSION = 5;
 
     /**
      * @var array<string, bool>

@@ -229,6 +229,19 @@ Location mode rules:
 - `online`: requires `location.online`; `place_ref` is optional.
 - `hybrid`: requires both `place_ref` and `location.online`.
 
+Account Profile physical-host admission is supplied by the host through
+`EventProfileResolverContract`. The Events write transaction revalidates every
+changed root, occurrence, and programming-item reference against the current
+Profile and Profile-Type state. Eligibility requires a live Profile with a
+valid Point, effective `location_policy=optional|required`, and effective
+`is_physical_host_enabled=true`; neither Profile-Type names nor Map/favorite
+capabilities grant host eligibility. The same transaction participates in the
+host Profile/Profile-Type revision fences. Transient labeled body conflicts
+retry the complete admission plus mutation at most twice after the first
+attempt; exhaustion returns the host's stable `409 event_revision_conflict`,
+while exhausted unknown-commit confirmation returns
+`503 event_commit_outcome_unknown` without replaying the mutation body.
+
 #### Update (`PATCH /events/{event_id}`)
 
 Partial update by field presence.

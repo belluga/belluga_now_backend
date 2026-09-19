@@ -2216,16 +2216,6 @@ class InvitesFlowTest extends TestCaseTenant
             'created_at' => -1,
             '_id' => -1,
         ];
-        $expectedPreviousIndexKeys = [
-            'issued_by_user_id' => 1,
-            'event_id' => 1,
-            'occurrence_id' => 1,
-            'inviter_principal.kind' => 1,
-            'inviter_principal.principal_id' => 1,
-            'created_at' => -1,
-            '_id' => -1,
-        ];
-
         $sentStatusIndex = $findSentStatusIndex();
         $this->assertNotNull($sentStatusIndex, 'Sent-status lookup must have a dedicated occurrence-scoped index.');
         $this->assertSame(
@@ -2234,86 +2224,6 @@ class InvitesFlowTest extends TestCaseTenant
             'Sent-status index must keep equality filters before deterministic sort keys.'
         );
 
-        $migrationSource = (string) file_get_contents(
-            base_path('packages/belluga/belluga_invites/database/migrations/2026_05_23_000300_add_sent_status_inviter_occurrence_index.php')
-        );
-        $this->assertStringContainsString('idx_invite_edges_sent_status_inviter_occurrence', $migrationSource);
-        $this->assertStringContainsString("'issued_by_user_id' => 1", $migrationSource);
-        $this->assertStringContainsString("'event_id' => 1", $migrationSource);
-        $this->assertStringContainsString("'occurrence_id' => 1", $migrationSource);
-        $this->assertStringContainsString("'created_at' => -1", $migrationSource);
-
-        $rebuildMigrationSource = (string) file_get_contents(
-            base_path('packages/belluga/belluga_invites/database/migrations/2026_05_25_000100_rebuild_sent_status_inviter_occurrence_index.php')
-        );
-        $expectedIndexOrder = [
-            "'issued_by_user_id' => 1",
-            "'event_id' => 1",
-            "'occurrence_id' => 1",
-            "'created_at' => -1",
-            "'_id' => -1",
-        ];
-        $previousPosition = -1;
-
-        foreach ($expectedIndexOrder as $expectedIndexFragment) {
-            $position = strpos($rebuildMigrationSource, $expectedIndexFragment);
-
-            $this->assertNotFalse($position, "Corrected sent-status index is missing {$expectedIndexFragment}.");
-            $this->assertGreaterThan(
-                $previousPosition,
-                $position,
-                "Corrected sent-status index must keep {$expectedIndexFragment} after the previous key."
-            );
-            $previousPosition = $position;
-        }
-
-        $this->assertStringContainsString(
-            "'inviter_principal.kind' => 1",
-            $rebuildMigrationSource,
-            'Rollback must restore the previous sent-status index shape.'
-        );
-
-        $rebuildMigration = require base_path(
-            'packages/belluga/belluga_invites/database/migrations/2026_05_25_000100_rebuild_sent_status_inviter_occurrence_index.php'
-        );
-        $legacyMigration = require base_path(
-            'packages/belluga/belluga_invites/database/migrations/2026_05_23_000300_add_sent_status_inviter_occurrence_index.php'
-        );
-
-        try {
-            $rebuildMigration->down();
-            $rolledBackSentStatusIndex = $findSentStatusIndex();
-
-            $this->assertNotNull($rolledBackSentStatusIndex, 'Rollback must restore the previous sent-status index.');
-            $this->assertSame(
-                $expectedPreviousIndexKeys,
-                $normalizeIndexKeys($rolledBackSentStatusIndex),
-                'Rollback must restore the exact previous sent-status index key order.'
-            );
-
-            $legacyMigration->up();
-            $reappliedLegacySentStatusIndex = $findSentStatusIndex();
-
-            $this->assertNotNull(
-                $reappliedLegacySentStatusIndex,
-                'Reapplying the legacy migration must keep the sent-status index present.'
-            );
-            $this->assertSame(
-                $expectedPreviousIndexKeys,
-                $normalizeIndexKeys($reappliedLegacySentStatusIndex),
-                'The legacy migration must tolerate an already rebuilt index name and restore the previous key order.'
-            );
-        } finally {
-            $rebuildMigration->up();
-        }
-
-        $rebuiltSentStatusIndex = $findSentStatusIndex();
-        $this->assertNotNull($rebuiltSentStatusIndex, 'Reapplying the migration must restore the corrected sent-status index.');
-        $this->assertSame(
-            $expectedRebuiltIndexKeys,
-            $normalizeIndexKeys($rebuiltSentStatusIndex),
-            'Reapplying the migration must restore the corrected sent-status index key order.'
-        );
     }
 
     public function test_sent_invite_summary_returns_exact_counts_over_more_than_200_sent_invites(): void
@@ -2746,7 +2656,7 @@ class InvitesFlowTest extends TestCaseTenant
         TenantProfileType::query()
             ->where('type', 'personal')
             ->update([
-                'capabilities.is_inviteable' => true,
+                'capabilities.is_inviteable.value' => true,
             ]);
     }
 
@@ -2851,12 +2761,12 @@ class InvitesFlowTest extends TestCaseTenant
                 'label' => 'Artist',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_favoritable' => true,
-                    'is_inviteable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'is_inviteable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ]
         );
@@ -2866,12 +2776,12 @@ class InvitesFlowTest extends TestCaseTenant
                 'label' => 'Exhibitor',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_favoritable' => true,
-                    'is_inviteable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'is_inviteable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ]
         );

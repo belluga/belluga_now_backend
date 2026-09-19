@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Map;
 
+use App\Application\AccountProfiles\AccountProfileManagementService;
+use App\Application\Accounts\AccountManagementService;
 use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
@@ -13,6 +15,8 @@ use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\MapPois\Application\MapPoiProjectionService;
 use Belluga\MapPois\Models\Tenants\MapPoi;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -52,10 +56,10 @@ class MapPoiAccountProfileConcurrencyTest extends TestCase
                 'label' => 'Venue',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ],
         );
@@ -106,6 +110,100 @@ class MapPoiAccountProfileConcurrencyTest extends TestCase
                 publish: false,
                 activate: false,
             );
+        }
+    }
+
+    public function test_ordered_publication_conflict_rolls_back_and_sequential_publication_preserves_activity(): void
+    {
+        $account = Account::query()->create([
+            'name' => 'Ordered Map Account',
+            'document' => 'DOC-ORDERED-MAP',
+            'ownership_state' => 'tenant_owned',
+            'publication' => ['status' => AccountPublicationStateService::DRAFT, 'publish_at' => null],
+        ]);
+        $profile = AccountProfile::query()->create([
+            'account_id' => (string) $account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Ordered Map Venue',
+            'slug' => 'ordered-map-venue',
+            'visibility' => 'public',
+            'location' => ['type' => 'Point', 'coordinates' => [-40.0, -20.0]],
+            'is_active' => false,
+        ]);
+        app(MapPoiProjectionService::class)->upsertFromAccountProfile($profile->fresh());
+        $barrier = sys_get_temp_dir().'/map-poi-ordered-'.bin2hex(random_bytes(8));
+        $tenantSlug = var_export((string) Tenant::current()?->slug, true);
+        $accountId = var_export((string) $account->_id, true);
+        $barrierValue = var_export($barrier, true);
+        $deadlineSeconds = self::BARRIER_TIMEOUT_SECONDS;
+        $code = <<<PHP
+\$tenant = \App\Models\Landlord\Tenant::query()->where('slug', {$tenantSlug})->firstOrFail();
+\$tenant->makeCurrent();
+\$account = \App\Models\Tenants\Account::query()->findOrFail({$accountId});
+\$paused = false;
+\App\Models\Tenants\Account::saved(function (\$saved) use (&\$paused): void {
+    if (\$paused || (string) \$saved->_id !== {$accountId}) {
+        return;
+    }
+    \$paused = true;
+    file_put_contents({$barrierValue}.'.saved', 'ready');
+    \$deadline = microtime(true) + {$deadlineSeconds};
+    while (! is_file({$barrierValue}.'.release')) {
+        if (microtime(true) >= \$deadline) {
+            throw new \RuntimeException('Ordered publication barrier timed out');
+        }
+        usleep(10000);
+    }
+});
+try {
+    app(\App\Application\Accounts\AccountManagementService::class)->update(\$account, [
+        'publication' => ['status' => 'published', 'publish_at' => null],
+    ]);
+    \$result = ['status' => 'ok'];
+} catch (\Illuminate\Validation\ValidationException \$exception) {
+    \$result = ['status' => 'rejected', 'exception' => \$exception::class, 'errors' => \$exception->errors()];
+}
+echo 'MAP_BCI_RESULT='.json_encode(\$result, JSON_THROW_ON_ERROR).PHP_EOL;
+PHP;
+        $process = new Process([PHP_BINARY, 'artisan', 'tinker', '--execute', $code], base_path(), timeout: self::PROCESS_TIMEOUT_SECONDS);
+        try {
+            $process->start();
+            $deadline = microtime(true) + self::BARRIER_TIMEOUT_SECONDS;
+            while (! is_file($barrier.'.saved')) {
+                $this->assertTrue($process->isRunning(), $process->getOutput().$process->getErrorOutput());
+                $this->assertLessThan($deadline, microtime(true), 'Account must reach its open transaction barrier.');
+                usleep(10_000);
+            }
+
+            app(AccountProfileManagementService::class)->update($profile, ['is_active' => true], 'ordered-profile-'.(string) $profile->_id);
+            $event = DB::connection('tenant')->getDatabase()->selectCollection('account_profile_outbox')
+                ->findOne(['profile_id' => (string) $profile->_id]);
+            $this->assertNotNull($event);
+            $this->assertSame('completed', $event['delivery_state']);
+            file_put_contents($barrier.'.release', 'release');
+            $process->wait();
+            $this->assertTrue($process->isSuccessful(), $process->getOutput().$process->getErrorOutput());
+            $this->assertSame([
+                'status' => 'rejected',
+                'exception' => ValidationException::class,
+                'errors' => ['account' => ['Something went wrong when trying to update the account.']],
+            ], $this->lastJsonLine($process));
+            $this->assertEffectiveActivityInvariant($account, $profile, false, true, 'publication conflict rollback');
+
+            app(AccountManagementService::class)->update($account->fresh(), [
+                'publication' => ['status' => AccountPublicationStateService::PUBLISHED, 'publish_at' => null],
+            ]);
+            $this->assertEffectiveActivityInvariant($account, $profile, true, true, 'sequential publication');
+        } finally {
+            file_put_contents($barrier.'.release', 'release');
+            if ($process->isRunning()) {
+                $process->stop(1);
+            }
+            foreach ([$barrier.'.saved', $barrier.'.release'] as $path) {
+                if (is_file($path)) {
+                    unlink($path);
+                }
+            }
         }
     }
 

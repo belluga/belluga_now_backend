@@ -7,6 +7,7 @@ namespace App\Http\Api\v1\Controllers;
 use App\Application\AccountProfiles\AccountProfileGalleryMutationService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Http\Controllers\Controller;
+use App\Models\Tenants\AccountProfile;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,49 +20,61 @@ final class AccountProfileGalleryController extends Controller
     public function createGroup(Request $request, string $tenant_domain, string $account_profile_id): JsonResponse
     {
         $data = $request->validate(['subtitle' => ['required', 'string', 'max:255']]);
+        $profile = $this->profiles->findOrFail($account_profile_id);
 
-        return $this->respond($this->gallery->createGroup($this->profiles->findOrFail($account_profile_id), trim($data['subtitle']), $this->auditAttributes($request)));
+        return $this->respond($this->gallery->createGroup($profile, trim($data['subtitle']), $this->auditAttributes($request)), $profile);
     }
 
     public function updateGroup(Request $request, string $tenant_domain, string $account_profile_id, string $group_id): JsonResponse
     {
         $data = $request->validate(['subtitle' => ['required', 'string', 'max:255']]);
+        $profile = $this->profiles->findOrFail($account_profile_id);
 
-        return $this->respond($this->gallery->renameGroup($this->profiles->findOrFail($account_profile_id), $group_id, trim($data['subtitle']), $this->auditAttributes($request)));
+        return $this->respond($this->gallery->renameGroup($profile, $group_id, trim($data['subtitle']), $this->auditAttributes($request)), $profile);
     }
 
     public function deleteGroup(Request $request, string $tenant_domain, string $account_profile_id, string $group_id): JsonResponse
     {
-        return $this->respond($this->gallery->deleteGroup($this->profiles->findOrFail($account_profile_id), $group_id, $request->getSchemeAndHttpHost(), $this->auditAttributes($request)));
+        $profile = $this->profiles->findOrFail($account_profile_id);
+
+        return $this->respond($this->gallery->deleteGroup($profile, $group_id, $request->getSchemeAndHttpHost(), $this->auditAttributes($request)), $profile);
     }
 
     public function reorderGroups(Request $request, string $tenant_domain, string $account_profile_id): JsonResponse
     {
         $data = $request->validate(['group_ids' => ['required', 'array'], 'group_ids.*' => ['required', 'string']]);
+        $profile = $this->profiles->findOrFail($account_profile_id);
 
-        return $this->respond($this->gallery->reorderGroups($this->profiles->findOrFail($account_profile_id), $data['group_ids'], $this->auditAttributes($request)));
+        return $this->respond($this->gallery->reorderGroups($profile, $data['group_ids'], $this->auditAttributes($request)), $profile);
     }
 
     public function createItem(Request $request, string $tenant_domain, string $account_profile_id, string $group_id): JsonResponse
     {
-        return $this->respond($this->gallery->createItem($this->profiles->findOrFail($account_profile_id), $group_id, $this->itemInput($request, true), $request->getSchemeAndHttpHost(), $this->auditAttributes($request)));
+        $profile = $this->profiles->findOrFail($account_profile_id);
+
+        return $this->respond($this->gallery->createItem($profile, $group_id, $this->itemInput($request, true), $request->getSchemeAndHttpHost(), $this->auditAttributes($request)), $profile);
     }
 
     public function updateItem(Request $request, string $tenant_domain, string $account_profile_id, string $group_id, string $item_id): JsonResponse
     {
-        return $this->respond($this->gallery->updateItem($this->profiles->findOrFail($account_profile_id), $group_id, $item_id, $this->itemInput($request, false), $request->getSchemeAndHttpHost(), $this->auditAttributes($request)));
+        $profile = $this->profiles->findOrFail($account_profile_id);
+
+        return $this->respond($this->gallery->updateItem($profile, $group_id, $item_id, $this->itemInput($request, false), $request->getSchemeAndHttpHost(), $this->auditAttributes($request)), $profile);
     }
 
     public function deleteItem(Request $request, string $tenant_domain, string $account_profile_id, string $group_id, string $item_id): JsonResponse
     {
-        return $this->respond($this->gallery->deleteItem($this->profiles->findOrFail($account_profile_id), $group_id, $item_id, $request->getSchemeAndHttpHost(), $this->auditAttributes($request)));
+        $profile = $this->profiles->findOrFail($account_profile_id);
+
+        return $this->respond($this->gallery->deleteItem($profile, $group_id, $item_id, $request->getSchemeAndHttpHost(), $this->auditAttributes($request)), $profile);
     }
 
     public function reorderItems(Request $request, string $tenant_domain, string $account_profile_id, string $group_id): JsonResponse
     {
         $data = $request->validate(['item_ids' => ['required', 'array'], 'item_ids.*' => ['required', 'string']]);
+        $profile = $this->profiles->findOrFail($account_profile_id);
 
-        return $this->respond($this->gallery->reorderItems($this->profiles->findOrFail($account_profile_id), $group_id, $data['item_ids'], $this->auditAttributes($request)));
+        return $this->respond($this->gallery->reorderItems($profile, $group_id, $data['item_ids'], $this->auditAttributes($request)), $profile);
     }
 
     /** @return array<string,mixed> */
@@ -89,9 +102,9 @@ final class AccountProfileGalleryController extends Controller
     }
 
     /** @param array<int,array<string,mixed>> $groups */
-    private function respond(array $groups): JsonResponse
+    private function respond(array $groups, AccountProfile $profile): JsonResponse
     {
-        return response()->json(['data' => ['gallery_groups' => $groups, 'gallery_capabilities' => $this->gallery->capabilities()]]);
+        return response()->json(['data' => ['gallery_groups' => $groups, 'gallery_capabilities' => $this->gallery->capabilities($profile)]]);
     }
 
     /** @return array{updated_by?:string,updated_by_type?:string} */

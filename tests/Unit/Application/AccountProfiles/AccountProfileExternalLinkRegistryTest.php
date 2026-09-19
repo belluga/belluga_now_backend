@@ -5,39 +5,47 @@ declare(strict_types=1);
 namespace Tests\Unit\Application\AccountProfiles;
 
 use App\Application\AccountProfiles\AccountProfileExternalLinkRegistry;
+use App\Application\AccountProfiles\AccountProfileRegistrySeeder;
 use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\TenantProfileType;
 use Tests\TestCase;
 
 class AccountProfileExternalLinkRegistryTest extends TestCase
 {
-    public function test_current_limit_comes_from_the_temporary_capacity_source(): void
+    public function test_current_limit_comes_from_the_canonical_capability_resolver(): void
     {
-        config(['external_links.max_per_profile' => 5]);
+        app(AccountProfileRegistrySeeder::class)->ensureDefaults();
+        $profile = new AccountProfile(['profile_type' => 'artist']);
 
-        $this->assertSame(5, (new AccountProfileExternalLinkRegistry)->currentLimit());
+        $this->assertSame(3, app(AccountProfileExternalLinkRegistry::class)->currentLimit($profile));
     }
 
     public function test_current_limit_resolver_accepts_a_profile_scope(): void
     {
-        config(['external_links.max_per_profile' => 4]);
+        app(AccountProfileRegistrySeeder::class)->ensureDefaults();
+        $type = TenantProfileType::query()->where('type', 'artist')->firstOrFail();
+        $capabilities = $type->capabilities;
+        $capabilities['has_external_links']['parameters']['max_links'] = 2;
+        $type->capabilities = $capabilities;
+        $type->save();
 
-        $this->assertSame(4, (new AccountProfileExternalLinkRegistry)->currentLimit(new AccountProfile));
+        $this->assertSame(2, app(AccountProfileExternalLinkRegistry::class)->currentLimit(
+            new AccountProfile(['profile_type' => 'artist']),
+        ));
     }
 
-    public function test_missing_temporary_capacity_source_fails_closed_without_a_numeric_fallback(): void
+    public function test_missing_profile_scope_fails_closed_without_a_numeric_fallback(): void
     {
-        config(['external_links.max_per_profile' => null]);
-
-        $this->assertSame(0, (new AccountProfileExternalLinkRegistry)->currentLimit());
+        $this->assertSame(0, app(AccountProfileExternalLinkRegistry::class)->currentLimit());
     }
 
     public function test_stored_duplicate_types_and_identities_fail_closed_without_hiding_unique_items(): void
     {
-        $resolved = (new AccountProfileExternalLinkRegistry)->normalizeStored([
+        $resolved = app(AccountProfileExternalLinkRegistry::class)->normalizeStored([
             ['id' => 'duplicate-type-a', 'type' => 'instagram', 'url' => 'https://instagram.com/first'],
             ['id' => 'duplicate-type-b', 'type' => 'instagram', 'url' => 'https://instagram.com/second'],
             ['id' => 'website', 'type' => 'website', 'url' => 'https://example.org', 'label' => 'Official'],
-        ]);
+        ], 3);
 
         $this->assertSame([
             ['id' => 'website', 'type' => 'website', 'url' => 'https://example.org', 'label' => 'Official'],
@@ -56,7 +64,7 @@ class AccountProfileExternalLinkRegistryTest extends TestCase
             ];
         }
 
-        $resolved = (new AccountProfileExternalLinkRegistry)->normalizeStored($payload);
+        $resolved = app(AccountProfileExternalLinkRegistry::class)->normalizeStored($payload, 3);
 
         $this->assertSame([], $resolved);
     }

@@ -227,7 +227,7 @@ class AccountProfilesController extends Controller
             includeExternalLinks: true,
             includeExternalLinksLimit: true,
         );
-        $data['gallery_capabilities'] = $this->galleryMutations->capabilities();
+        $data['gallery_capabilities'] = $this->galleryMutations->capabilities($profile);
 
         return response()->json(['data' => $data]);
     }

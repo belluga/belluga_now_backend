@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Migrations;
 
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityRegistry;
 use App\Models\Landlord\Tenant;
 use Illuminate\Foundation\Testing\TestCase;
 use Illuminate\Support\Facades\Artisan;
@@ -11,12 +12,11 @@ use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\UTCDateTime;
+use Tests\Support\MongoCommandTrace;
 
 /**
- * Objective, dump-metadata-only replay.  It intentionally never imports a
- * document collection: the two supplied schema exports contain collection
- * options and index definitions only and the ledger exports contain only
- * migration/batch rows.
+ * Production schema/ledger replay with locally authored upgrade fixtures.
+ * No production document collection is imported.
  */
 final class MigrationSchemaConvergenceTest extends TestCase
 {
@@ -73,8 +73,9 @@ final class MigrationSchemaConvergenceTest extends TestCase
         $this->seedSentinel($freshLandlord, 'fresh-landlord');
         $this->seedSentinel($freshTenant, 'fresh-tenant');
         $this->migrateComplete($freshLandlord, $freshTenant);
+        $this->assertCapabilityDefinitions($freshTenant);
         self::assertSame(14, $this->ledgerCount($freshLandlord));
-        self::assertSame(85, $this->ledgerCount($freshTenant));
+        self::assertSame(90, $this->ledgerCount($freshTenant));
         self::assertSame([], $this->retiredSchema($freshLandlord));
         self::assertSame([], $this->retiredSchema($freshTenant));
         $this->assertSentinel($freshLandlord, 'fresh-landlord');
@@ -96,9 +97,112 @@ final class MigrationSchemaConvergenceTest extends TestCase
         $this->seedSentinel($productionTenant, 'production-tenant');
         self::assertContains('idx_account_profile_types_capability_has_content_v1', $this->indexNames($productionTenant, 'account_profile_types'));
         self::assertSame(['_id_'], $this->indexNames($productionTenant, 'account_profile_command_receipts'));
-        $this->migrateComplete($productionLandlord, $productionTenant);
+        $legacyKeys = [
+            'is_queryable', 'is_publicly_navigable', 'is_publicly_discoverable',
+            'is_favoritable', 'is_inviteable', 'is_poi_enabled',
+            'is_reference_location_enabled', 'has_bio', 'has_taxonomies',
+            'has_avatar', 'has_cover', 'has_events', 'has_gallery',
+            'has_nested_profile_groups', 'has_contact_channels', 'has_external_links',
+        ];
+        $legacyTypes = [];
+        foreach (range(1, 205) as $index) {
+            $capabilities = [];
+            foreach ($legacyKeys as $offset => $key) {
+                $capabilities[$key] = ($index + $offset) % 2 === 0;
+            }
+            $capabilities['is_poi_enabled'] = $index <= 3;
+            $legacyTypes[] = [
+                '_id' => new ObjectId,
+                'type' => sprintf('upgrade-%03d', $index),
+                'capabilities' => $capabilities,
+            ];
+        }
+        $types = $productionTenant->selectCollection('account_profile_types');
+        $types->insertMany($legacyTypes);
+        foreach (range(1, 3) as $index) {
+            $profile = [
+                '_id' => new ObjectId,
+                'account_id' => (string) new ObjectId,
+                'profile_type' => sprintf('upgrade-%03d', $index),
+                'display_name' => 'Upgrade profile '.$index,
+                'slug' => 'upgrade-profile-'.$index,
+                'visibility' => 'public',
+                'is_active' => true,
+                'deleted_at' => $index === 3 ? new UTCDateTime : null,
+            ];
+            if ($index === 1) {
+                $profile['location'] = ['type' => 'Point', 'coordinates' => [-43.2, -22.9]];
+            }
+            $productionTenant->selectCollection('account_profiles')->insertOne($profile);
+        }
+
+        $trace = new MongoCommandTrace;
+        \MongoDB\Driver\Monitoring\addSubscriber($trace);
+        try {
+            $this->migrateComplete($productionLandlord, $productionTenant);
+        } finally {
+            \MongoDB\Driver\Monitoring\removeSubscriber($trace);
+        }
+        foreach ($legacyTypes as $index => $legacy) {
+            $converted = $types->findOne(['_id' => $legacy['_id']]);
+            self::assertNotNull($converted);
+            foreach ($legacy['capabilities'] as $key => $value) {
+                if ($key !== 'is_poi_enabled') {
+                    self::assertSame($value, $converted['capabilities'][$key]['value'], $legacy['type'].'.'.$key);
+                }
+            }
+            self::assertArrayNotHasKey('is_poi_enabled', $converted['capabilities']);
+            self::assertSame($index === 0 ? 'required' : ($index < 3 ? 'optional' : 'disabled'), $converted['capabilities']['location_policy']['value']);
+            self::assertSame($legacy['capabilities']['is_poi_enabled'], $converted['capabilities']['is_map_poi_enabled']['value']);
+            self::assertSame($legacy['capabilities']['is_poi_enabled'] && $legacy['capabilities']['is_queryable'], $converted['capabilities']['is_physical_host_enabled']['value']);
+            self::assertSame(6, $converted['capabilities']['has_gallery']['parameters']['max_groups']);
+            self::assertSame(12, $converted['capabilities']['has_gallery']['parameters']['max_items_per_group']);
+            self::assertSame(3, $converted['capabilities']['has_external_links']['parameters']['max_links']);
+            self::assertSame(0, $converted['capability_revision']);
+            self::assertSame(0, $converted['host_admission_fence_revision']);
+        }
+        $capabilityBatches = [];
+        $locationBatches = [];
+        foreach ($trace->commandsForCollection('account_profile_types') as $command) {
+            $operations = $command['updates'] ?? [];
+            $set = $operations[0]['u']['$set'] ?? [];
+            if (! array_key_exists('capabilities', $set) && ! array_key_exists('capabilities.location_policy', $set)) {
+                continue;
+            }
+            if (array_key_exists('capabilities', $set)) {
+                $capabilityBatches[] = count($operations);
+            } else {
+                $locationBatches[] = count($operations);
+            }
+            foreach ($operations as $operation) {
+                self::assertArrayHasKey('_id', $operation['q']);
+                self::assertArrayHasKey('capabilities', $operation['q']);
+                $expectedRevision = array_key_exists('capabilities', $set) ? ['$exists' => false] : 0;
+                self::assertSame($expectedRevision, $operation['q']['capability_revision']);
+                self::assertSame($expectedRevision, $operation['q']['host_admission_fence_revision']);
+                self::assertFalse($operation['multi'] ?? false);
+                self::assertFalse($operation['upsert'] ?? false);
+            }
+        }
+        self::assertSame([100, 100, 5], $capabilityBatches);
+        self::assertSame([100, 100, 5], $locationBatches);
+        $keysetReads = array_values(array_filter(
+            $trace->commandsForCollection('account_profile_types'),
+            static fn (array $command): bool => ($command['find'] ?? null) === 'account_profile_types'
+                && ($command['sort'] ?? []) === ['_id' => 1],
+        ));
+        self::assertCount(12, $keysetReads);
+        foreach ($keysetReads as $offset => $command) {
+            self::assertSame(100, $command['limit']);
+            if ($offset % 3 === 0) {
+                self::assertSame([], $command['filter']);
+            } else {
+                self::assertArrayHasKey('$gt', $command['filter']['_id']);
+            }
+        }
+        $this->assertCapabilityDefinitions($productionTenant);
         self::assertSame(14, $this->ledgerCount($productionLandlord));
-        self::assertSame(85, $this->ledgerCount($productionTenant));
+        self::assertSame(90, $this->ledgerCount($productionTenant));
         self::assertSame($productionRetiredBefore, $this->retiredSchema($productionTenant));
         $this->assertSentinel($productionLandlord, 'production-landlord');
         $this->assertSentinel($productionTenant, 'production-tenant');
@@ -109,7 +213,7 @@ final class MigrationSchemaConvergenceTest extends TestCase
         $evidence = [
             'frozen' => [
                 'landlord' => ['counts' => [18, 70, 1], 'fingerprint' => '1888c52bc3fb0920e2d600eb6b3ce44b80bc12be731b441fbd5d6db90566b956'],
-                'tenant' => ['counts' => [45, 280, 1], 'fingerprint' => '2ea8b7c9c8d0ebb8767dd6460624349bc6352c4b3a5294c1a909d1cde9714e2f'],
+                'tenant' => ['counts' => [46, 287, 1], 'fingerprint' => 'd4aa62f8b9112a686ff64c0ef3c0ffdadf6f5a4fab65737d2a7eb4da079d6721'],
             ],
             'actual' => [
                 'fresh' => [
@@ -122,7 +226,7 @@ final class MigrationSchemaConvergenceTest extends TestCase
                 ],
             ],
             'nominal_delta' => [
-                'tenant_indexes' => 'frozen 280 - actual 280 = 0',
+                'tenant_indexes' => 'frozen 287 - actual 287 = 0',
                 'production_initial_has_content_index' => true,
                 'after_current_tail_has_content_index' => in_array('idx_account_profile_types_capability_has_content_v1', $this->indexNames($productionTenant, 'account_profile_types'), true),
                 'production_command_receipts_indexes' => $this->indexNames($productionTenant, 'account_profile_command_receipts'),
@@ -142,7 +246,10 @@ final class MigrationSchemaConvergenceTest extends TestCase
         fwrite(STDERR, 'MIGRATION_CONVERGENCE_EVIDENCE='.json_encode($evidence, JSON_THROW_ON_ERROR).PHP_EOL);
 
         $before = [$this->ledger($productionLandlord), $this->ledger($productionTenant), $production];
+        $capabilitiesBeforeReplay = json_encode($types->find([], ['sort' => ['type' => 1]])->toArray(), JSON_THROW_ON_ERROR);
         $this->migrateComplete($productionLandlord, $productionTenant);
+        self::assertSame($capabilitiesBeforeReplay, json_encode($types->find([], ['sort' => ['type' => 1]])->toArray(), JSON_THROW_ON_ERROR));
+        $this->assertCapabilityDefinitions($productionTenant);
         self::assertSame($before, [$this->ledger($productionLandlord), $this->ledger($productionTenant), [
             $this->normalizedSchema($productionLandlord, 'landlord', true), $this->normalizedSchema($productionTenant, 'tenant', true),
         ]]);
@@ -159,6 +266,39 @@ final class MigrationSchemaConvergenceTest extends TestCase
             }
         }
         self::assertSame([], $mismatches, json_encode(['evidence' => $evidence, 'mismatches' => $mismatches], JSON_THROW_ON_ERROR));
+    }
+
+    public function test_production_upgrade_rejects_invalid_capabilities_before_partial_capability_writes(): void
+    {
+        foreach ([
+            'unknown-key' => ['is_queryable' => true, 'future_key' => false],
+            'non-boolean' => ['is_queryable' => 1],
+            'mixed-shape' => ['is_queryable' => true, 'has_gallery' => ['value' => true, 'parameters' => []]],
+            'partial-typed' => ['is_queryable' => ['value' => true, 'parameters' => []]],
+        ] as $label => $invalid) {
+            [$landlord, $tenant] = $this->newFixturePair($label);
+            $this->importLedger($landlord, 'landlord.migrations.json');
+            $this->importLedger($tenant, 'tenant_boora.migrations.json');
+            $this->importSchema($landlord, 'landlord.schema.json');
+            $this->importSchema($tenant, 'tenant_boora.schema.json');
+            $types = $tenant->selectCollection('account_profile_types');
+            $types->insertMany([
+                ['_id' => new ObjectId, 'type' => 'valid', 'capabilities' => ['is_queryable' => true]],
+                ['_id' => new ObjectId, 'type' => 'invalid', 'capabilities' => $invalid],
+            ]);
+            $before = json_encode($types->find([], ['sort' => ['type' => 1]])->toArray(), JSON_THROW_ON_ERROR);
+            try {
+                $this->migrateComplete($landlord, $tenant);
+                self::fail('Expected capability preflight rejection: '.$label);
+            } catch (\RuntimeException $exception) {
+                self::assertStringContainsString('tenant.account_profile_capabilities_v1 refuses', $exception->getMessage());
+            }
+            self::assertSame($before, json_encode($types->find([], ['sort' => ['type' => 1]])->toArray(), JSON_THROW_ON_ERROR), $label);
+            self::assertSame(0, $tenant->selectCollection('account_profile_capability_definitions')->countDocuments(), $label);
+            self::assertSame(0, $tenant->selectCollection('migrations')->countDocuments([
+                'migration' => '2026_09_15_000100_hard_cut_account_profile_capabilities',
+            ]), $label);
+        }
     }
 
     public function test_identity_controls_reject_srv_remote_alias_wrong_database_and_missing_marker_before_mutation(): void
@@ -225,8 +365,8 @@ final class MigrationSchemaConvergenceTest extends TestCase
         $this->assertSentinel($landlord, 'isolation-landlord');
         $this->assertSentinel($tenantA, 'isolation-a');
         $this->assertSentinel($tenantB, 'isolation-b');
-        self::assertSame(85, $this->ledgerCount($tenantA));
-        self::assertSame(85, $this->ledgerCount($tenantB));
+        self::assertSame(90, $this->ledgerCount($tenantA));
+        self::assertSame(90, $this->ledgerCount($tenantB));
     }
 
     public function test_fresh_schema_comparator_rejects_every_retired_name_and_includes_unknown_collections(): void
@@ -331,6 +471,17 @@ final class MigrationSchemaConvergenceTest extends TestCase
         return str_starts_with($expected, $this->fixturePrefix.'_')
             && $database->getDatabaseName() === $expected
             && $database->selectCollection('__migration_objective_owner')->countDocuments(['run' => $this->fixturePrefix]) === 1;
+    }
+
+    private function assertCapabilityDefinitions(object $tenant): void
+    {
+        $definitions = [];
+        foreach ($tenant->selectCollection('account_profile_capability_definitions')->find([], ['sort' => ['key' => 1]]) as $document) {
+            unset($document['_id']);
+            $definition = json_decode(json_encode($document, JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR);
+            $definitions[$definition['key']] = $definition;
+        }
+        self::assertSame(app(AccountProfileCapabilityRegistry::class)->definitions(), $definitions);
     }
 
     private function migrateComplete(object $landlord, object $tenant): void

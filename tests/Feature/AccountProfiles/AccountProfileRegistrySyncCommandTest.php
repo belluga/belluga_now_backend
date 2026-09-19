@@ -10,6 +10,7 @@ use App\Application\AccountProfiles\AccountProfileRegistrySyncIndexPrecondition;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
@@ -23,6 +24,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Tests\Helpers\TenantLabels;
+use Tests\Support\MongoCommandTrace;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
@@ -234,7 +236,7 @@ class AccountProfileRegistrySyncCommandTest extends TestCaseTenant
     public function test_sync_inserts_defaults_with_timestamps_and_invalidates_a_warmed_type_set(): void
     {
         TenantProfileType::query()->delete();
-        $provider = new AccountProfileTypeSetProvider;
+        $provider = app(AccountProfileTypeSetProvider::class);
 
         $this->assertSame([], $provider->queryableTypes());
 
@@ -296,7 +298,7 @@ class AccountProfileRegistrySyncCommandTest extends TestCaseTenant
             ]));
         }
 
-        $provider = new AccountProfileTypeSetProvider;
+        $provider = app(AccountProfileTypeSetProvider::class);
         $this->assertNotContains('artist', $provider->queryableTypes());
 
         $upserter = new class extends AccountProfileRegistryDefaultUpserter
@@ -414,7 +416,7 @@ class AccountProfileRegistrySyncCommandTest extends TestCaseTenant
             'visual' => ['mode' => 'icon', 'icon' => 'tenant_owned'],
             'tenant_extension' => ['source' => 'manual'],
             'capabilities' => [
-                'is_favoritable' => false,
+                'is_favoritable' => ['value' => false, 'parameters' => []],
                 'tenant_extension' => 'preserve',
             ],
         ]);
@@ -434,9 +436,89 @@ class AccountProfileRegistrySyncCommandTest extends TestCaseTenant
         $this->assertSame(['genre'], iterator_to_array($artist['allowed_taxonomies']));
         $this->assertSame(['mode' => 'icon', 'icon' => 'tenant_owned'], iterator_to_array($artist['visual']));
         $this->assertSame(['source' => 'manual'], iterator_to_array($artist['tenant_extension']));
-        $this->assertFalse($artist['capabilities']['is_favoritable']);
-        $this->assertSame('preserve', $artist['capabilities']['tenant_extension']);
+        $this->assertFalse($artist['capabilities']['is_favoritable']['value']);
+        $this->assertArrayNotHasKey('tenant_extension', $artist['capabilities']);
         $this->assertArrayHasKey('has_gallery', $artist['capabilities']);
+        $this->assertSame(1, $artist['capability_revision']);
+        $this->assertSame(1, $artist['host_admission_fence_revision']);
+    }
+
+    public function test_request_time_personal_default_is_insert_only_and_does_not_sync_definitions(): void
+    {
+        $this->profileTypesCollection()->deleteMany(['type' => 'personal']);
+        $this->profileTypesCollection()->insertOne([
+            'type' => 'personal',
+            'capability_revision' => 7,
+            'host_admission_fence_revision' => 4,
+            'capabilities' => [
+                'is_favoritable' => ['value' => false, 'parameters' => []],
+            ],
+        ]);
+        $before = $this->profileTypesCollection()->findOne(['type' => 'personal']);
+
+        $client = DB::connection('tenant')->getClient();
+        $trace = new MongoCommandTrace;
+        $client->addSubscriber($trace);
+        try {
+            app(AccountProfileRegistrySeeder::class)->ensurePersonalDefault();
+        } finally {
+            $client->removeSubscriber($trace);
+        }
+
+        $after = $this->profileTypesCollection()->findOne(['type' => 'personal']);
+        $this->assertEquals($before, $after);
+        $this->assertSame(0, $trace->countForCollection('account_profile_types', 'update'));
+        $this->assertSame([], $trace->commandsForCollection('account_profile_capability_definitions'));
+    }
+
+    public function test_registry_repair_rejects_a_stale_nonzero_revision_without_mixing_documents(): void
+    {
+        $this->profileTypesCollection()->deleteMany(['type' => 'artist']);
+        $this->profileTypesCollection()->insertOne([
+            'type' => 'artist',
+            'capability_revision' => 7,
+            'host_admission_fence_revision' => 4,
+            'capabilities' => [
+                'is_favoritable' => ['value' => false, 'parameters' => []],
+            ],
+        ]);
+        $stale = TenantProfileType::query()->where('type', 'artist')->firstOrFail();
+        $adminCapabilities = [
+            'is_favoritable' => ['value' => true, 'parameters' => []],
+            'has_gallery' => [
+                'value' => true,
+                'parameters' => ['max_groups' => 6, 'max_items_per_group' => 12],
+            ],
+        ];
+        $this->profileTypesCollection()->updateOne(
+            ['type' => 'artist', 'capability_revision' => 7],
+            [
+                '$set' => [
+                    'capabilities' => $adminCapabilities,
+                    'capability_revision' => 8,
+                    'host_admission_fence_revision' => 5,
+                ],
+            ],
+        );
+        $beforeRepair = $this->profileTypesCollection()->findOne(['type' => 'artist']);
+        $seeder = app(AccountProfileRegistrySeeder::class);
+        $entry = collect($seeder->defaults())->firstWhere('type', 'artist');
+        $this->assertIsArray($entry);
+
+        $repair = new \ReflectionMethod($seeder, 'repairDefaultCapabilities');
+        try {
+            $repair->invoke($seeder, $stale, $entry);
+            $this->fail('A stale registry repair must lose its revision CAS.');
+        } catch (ConcurrencyConflictException $exception) {
+            $this->assertStringContainsString('changed during registry repair', $exception->getMessage());
+        }
+
+        $afterRepair = $this->profileTypesCollection()->findOne(['type' => 'artist']);
+        $this->assertEquals($beforeRepair, $afterRepair);
+        $this->assertSame(8, (int) ($afterRepair['capability_revision'] ?? -1));
+        $this->assertSame(5, (int) ($afterRepair['host_admission_fence_revision'] ?? -1));
+        $this->assertTrue((bool) ($afterRepair['capabilities']['is_favoritable']['value'] ?? false));
+        $this->assertTrue((bool) ($afterRepair['capabilities']['has_gallery']['value'] ?? false));
     }
 
     #[DataProvider('syncConcurrencyLevels')]

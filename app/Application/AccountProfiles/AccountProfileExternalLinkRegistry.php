@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
 use App\Models\Tenants\AccountProfile;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Validation\ValidationException;
@@ -13,7 +14,7 @@ use MongoDB\Model\BSONDocument;
 final class AccountProfileExternalLinkRegistry
 {
     public function __construct(
-        private readonly ?AccountProfileExternalLinkLimitResolver $limitResolver = null,
+        private readonly AccountProfileCapabilityResolverContract $capabilities,
     ) {}
 
     /** @var array<string, array{label:string,hosts:list<string>}> */
@@ -28,7 +29,13 @@ final class AccountProfileExternalLinkRegistry
 
     public function currentLimit(?AccountProfile $profile = null): int
     {
-        return ($this->limitResolver ?? new AccountProfileExternalLinkLimitResolver)->resolve($profile);
+        if (! $profile instanceof AccountProfile) {
+            return 0;
+        }
+
+        $resolved = $this->capabilities->resolveForProfile($profile, 'has_external_links');
+
+        return max(0, (int) ($resolved['effective']['parameters']['max_links'] ?? 0));
     }
 
     /** @return list<string> */
