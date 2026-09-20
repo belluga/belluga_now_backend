@@ -243,7 +243,7 @@ class AccountProfileQueryService extends AbstractQueryService
      */
     public function publicNear(array $queryParams): array
     {
-        $publicPoiPolicy = $this->publicCatalogSnapshotReader->publicPoiEligibilityPolicy();
+        $publicPoiPolicy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
         $allowedTypes = $publicPoiPolicy->catalogTypeKeys();
         $effectiveTypes = $this->resolveEffectivePublicProfileTypes($queryParams, $allowedTypes);
         $taxonomyFilters = $this->resolvePublicTaxonomyFilters($queryParams);
@@ -306,7 +306,7 @@ class AccountProfileQueryService extends AbstractQueryService
 
         $pipeline = [
             ['$geoNear' => $geoNear],
-            ...$this->publishedParentAccountGateStages(),
+            ...$this->publishedParentAccountGateStages($publicPoiPolicy),
             ['$sort' => ['distance_meters' => 1, '_id' => 1]],
             ['$skip' => $skip],
             ['$limit' => $limit],
@@ -389,7 +389,7 @@ class AccountProfileQueryService extends AbstractQueryService
      * @return array{page_rows: array<int, mixed>, total: int, discovery_filter_facets: array<string, mixed>}
      */
     private function runPublicDiscoveryAggregate(
-        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
+        AccountProfilePublicVisibilityPolicy $publicCatalogPolicy,
         array $selectedTypes,
         array $taxonomyFilters,
         string $search,
@@ -431,7 +431,7 @@ class AccountProfileQueryService extends AbstractQueryService
      * @return array<int, array<string, mixed>>
      */
     private function buildPublicDiscoveryAggregatePipeline(
-        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
+        AccountProfilePublicVisibilityPolicy $publicCatalogPolicy,
         array $selectedTypes,
         array $taxonomyFilters,
         string $search,
@@ -472,7 +472,7 @@ class AccountProfileQueryService extends AbstractQueryService
 
         return [
             ...$pipeline,
-            ...$this->publishedParentAccountGateStages(),
+            ...$this->publishedParentAccountGateStages($publicCatalogPolicy),
             ['$facet' => $facet],
         ];
     }
@@ -480,7 +480,7 @@ class AccountProfileQueryService extends AbstractQueryService
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function publishedParentAccountGateStages(): array
+    private function publishedParentAccountGateStages(AccountProfilePublicVisibilityPolicy $policy): array
     {
         return [
             [
@@ -509,7 +509,7 @@ class AccountProfileQueryService extends AbstractQueryService
                         ],
                         [
                             '$match' => [
-                                'publication.status' => AccountPublicationStateService::PUBLISHED,
+                                ...$policy->publishedParentAccountMatchExpression(),
                             ],
                         ],
                         [
@@ -825,9 +825,12 @@ class AccountProfileQueryService extends AbstractQueryService
             ->whereRaw($publicCatalogPolicy->publicDetailMatchExpression(requireSlug: true));
 
         $profile = $query->first();
-        if (! $profile || ! $this->isPubliclyNavigable($profile)) {
+        $account = $profile instanceof AccountProfile ? Account::query()->where('_id', $profile->account_id)->first() : null;
+        if (! $profile || ! $publicCatalogPolicy->canOpenPublicDetail($profile, $account)) {
             throw (new ModelNotFoundException)->setModel(AccountProfile::class, [$normalizedSlug]);
         }
+
+        $profile->setRelation('account', $account);
 
         return $profile;
     }
@@ -861,53 +864,46 @@ class AccountProfileQueryService extends AbstractQueryService
             $resolved[(string) $profile->getKey()] = $profile;
         }
 
-        $publishedAccountIds = $this->accountPublicationStateService->publishedAccountIds(
-            array_values(array_unique(array_map(
-                static fn (AccountProfile $profile): string => trim((string) $profile->account_id),
-                array_values($resolved)
-            )))
-        );
-        if ($publishedAccountIds === []) {
-            return [];
-        }
+        $accountsById = $this->loadAccountsById(collect($resolved));
 
-        return array_filter(
-            $resolved,
-            static fn (AccountProfile $profile): bool => in_array(
-                trim((string) $profile->account_id),
-                $publishedAccountIds,
-                true,
-            ),
-        );
+        return array_filter($resolved, function (AccountProfile $profile) use ($accountsById, $publicCatalogPolicy): bool {
+            $account = $accountsById[(string) $profile->account_id] ?? null;
+            if (! $publicCatalogPolicy->canDiscoverPublicRow($profile, $account)) {
+                return false;
+            }
+
+            $profile->setRelation('account', $account);
+
+            return true;
+        });
     }
 
-    public function isPubliclyExposed(AccountProfile $profile): bool
+    public function canExposePublicMedia(AccountProfile $profile, string $kind): bool
     {
+        $account = Account::query()->where('_id', $profile->account_id)->first();
+
         return $this->publicCatalogSnapshotReader
             ->catalogSnapshot()
             ->policy()
-            ->isPubliclyExposed($profile)
-            && $this->isParentAccountPublished($profile);
+            ->canExposePublicMedia($profile, $account, $kind);
     }
 
     public function isPublicNestedParent(AccountProfile $profile): bool
     {
+        $account = Account::query()->where('_id', $profile->account_id)->first();
+
         return $this->publicCatalogSnapshotReader
             ->catalogSnapshot()
             ->policy()
-            ->isPublicNestedParent($profile)
-            && $this->isParentAccountPublished($profile);
+            ->isPublicNestedParent($profile, $account);
     }
 
     public function isPubliclyNavigable(AccountProfile $profile): bool
     {
-        return $profile->getAttribute('is_active') === true
-            && $profile->getAttribute('deleted_at') === null
-            && trim((string) $profile->getAttribute('visibility')) === 'public'
-            && $this->typeSetProvider->isPubliclyNavigable(
-                trim((string) $profile->getAttribute('profile_type'))
-            )
-            && $this->isParentAccountPublished($profile);
+        $account = Account::query()->where('_id', $profile->account_id)->first();
+
+        return $this->publicCatalogSnapshotReader->catalogSnapshot()->policy()
+            ->canOpenPublicDetail($profile, $account);
     }
 
     public function findOrFail(string $profileId, bool $onlyTrashed = false): AccountProfile
@@ -965,7 +961,7 @@ class AccountProfileQueryService extends AbstractQueryService
         AccountProfile $profile,
         ?Account $account = null,
         array $userOperatedLookup = [],
-        ?AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy = null,
+        ?AccountProfilePublicVisibilityPolicy $publicCatalogPolicy = null,
         ?array $effectiveContactChannels = null,
     ): array {
         $baseUrl = request()->getSchemeAndHttpHost();
@@ -973,6 +969,8 @@ class AccountProfileQueryService extends AbstractQueryService
         // missing/dangling Account must remain nullable instead of triggering
         // a per-row fallback query during serialization.
         $resolvedAccount = $account;
+        $publicMediaPolicy = $publicCatalogPolicy
+            ?? $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
         $slug = trim((string) ($profile->slug ?? ''));
         $canOpenPublicDetail = $resolvedAccount instanceof Account
             ? $this->canOpenPublicDetailForProfile(
@@ -991,18 +989,22 @@ class AccountProfileQueryService extends AbstractQueryService
             'slug' => $profile->slug,
             'can_open_public_detail' => $canOpenPublicDetail,
             'public_detail_path' => $canOpenPublicDetail ? '/parceiro/'.$slug : null,
-            'avatar_url' => $this->mediaService->normalizePublicUrl(
-                $baseUrl,
-                $profile,
-                'avatar',
-                is_string($profile->avatar_url) ? $profile->avatar_url : null
-            ),
-            'cover_url' => $this->mediaService->normalizePublicUrl(
-                $baseUrl,
-                $profile,
-                'cover',
-                is_string($profile->cover_url) ? $profile->cover_url : null
-            ),
+            'avatar_url' => $publicMediaPolicy->canExposePublicMedia($profile, $resolvedAccount, 'avatar')
+                ? $this->mediaService->normalizePublicUrl(
+                    $baseUrl,
+                    $profile,
+                    'avatar',
+                    is_string($profile->avatar_url) ? $profile->avatar_url : null
+                )
+                : null,
+            'cover_url' => $publicMediaPolicy->canExposePublicMedia($profile, $resolvedAccount, 'cover')
+                ? $this->mediaService->normalizePublicUrl(
+                    $baseUrl,
+                    $profile,
+                    'cover',
+                    is_string($profile->cover_url) ? $profile->cover_url : null
+                )
+                : null,
             'bio' => $this->richTextReadCanonicalizer->canonicalize(
                 $profile->bio,
                 allowExplicitHttpsLinks: true,
@@ -1049,13 +1051,12 @@ class AccountProfileQueryService extends AbstractQueryService
     private function canOpenPublicDetailForProfile(
         AccountProfile $profile,
         ?Account $account = null,
-        ?AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy = null,
+        ?AccountProfilePublicVisibilityPolicy $publicCatalogPolicy = null,
     ): bool {
         $policy = $publicCatalogPolicy
             ?? $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
 
-        return $policy->canOpenPublicDetail($profile)
-            && $this->isParentAccountPublished($profile, $account);
+        return $policy->canOpenPublicDetail($profile, $account);
     }
 
     /**

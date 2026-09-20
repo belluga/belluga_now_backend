@@ -60,6 +60,7 @@ use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\Regex;
 use MongoDB\Laravel\Connection;
 use RuntimeException;
+use Symfony\Component\Process\Process;
 use Tests\Helpers\TenantLabels;
 use Tests\Support\MongoCommandTrace;
 use Tests\TestCaseTenant;
@@ -82,6 +83,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
     private Account $account;
 
     private AccountRoleTemplate $accountRoleTemplate;
+
+    private const BCI_BARRIER_TIMEOUT_SECONDS = 30;
+
+    private const BCI_PROCESS_TIMEOUT_SECONDS = 60;
 
     /**
      * The authenticated base harness initializes a tenant during its setUp.
@@ -263,6 +268,248 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 ->selectCollection('account_profile_outbox')
                 ->countDocuments(['command_id' => $commandId]),
         );
+    }
+
+    public function test_tenant_admin_reads_the_exact_lifecycle_state_of_a_soft_deleted_profile(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Soft Deleted Admin Read',
+            'visibility' => 'private',
+            'is_active' => false,
+        ]);
+        app(AccountProfileLifecycleService::class)->delete(
+            $profile,
+            'u07a-soft-deleted-admin-read-'.uniqid('', true),
+        );
+
+        $response = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}",
+            $this->getHeaders(),
+        );
+
+        $response->assertOk();
+        $response->assertJsonPath('data.id', (string) $profile->_id);
+        $response->assertJsonPath('data.visibility', 'private');
+        $response->assertJsonPath('data.is_active', false);
+        $this->assertNotNull($response->json('data.deleted_at'));
+        $this->assertArrayHasKey('parent_account_publication_status', $response->json('data'));
+    }
+
+    public function test_tenant_admin_updates_a_soft_deleted_profile_without_restoring_or_publishing_and_replays_the_receipt(): void
+    {
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Soft Deleted Update Source',
+            'is_active' => false,
+        ]);
+        app(AccountProfileLifecycleService::class)->delete(
+            $profile,
+            'u07a-soft-deleted-update-delete-'.uniqid('', true),
+        );
+        $deletedAt = AccountProfile::withTrashed()->findOrFail($profile->_id)->deleted_at?->toJSON();
+        $commandId = 'u07a-soft-deleted-update-'.uniqid('', true);
+        $url = "{$this->base_tenant_api_admin}account_profiles/{$profile->_id}";
+        $headers = [...$this->getHeaders(), 'X-Request-Id' => $commandId];
+
+        $first = $this->patchJson($url, ['display_name' => 'Soft Deleted Update Applied'], $headers);
+        $second = $this->patchJson($url, ['display_name' => 'Soft Deleted Update Applied'], $headers);
+
+        $first->assertOk();
+        $second->assertOk();
+        $first->assertJsonPath('data.display_name', 'Soft Deleted Update Applied');
+        $this->assertSame($first->json('data.id'), $second->json('data.id'));
+        $this->assertSame($first->json('data.display_name'), $second->json('data.display_name'));
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $persisted = AccountProfile::withTrashed()->findOrFail($profile->_id);
+        $this->assertSame('Soft Deleted Update Applied', $persisted->display_name);
+        $this->assertSame($deletedAt, $persisted->deleted_at?->toJSON());
+
+        $database = DB::connection('tenant')->getDatabase();
+        $receipt = $database
+            ->selectCollection('account_profile_command_receipts')
+            ->findOne(['_id' => $commandId]);
+        $this->assertNotNull($receipt);
+        $this->assertSame($commandId, (string) ($receipt['command_id'] ?? ''));
+        $this->assertNull($receipt['outbox_event_id'] ?? null);
+        $this->assertSame(
+            0,
+            $database->selectCollection('account_profile_outbox')->countDocuments(['command_id' => $commandId]),
+        );
+        $this->assertSame(
+            0,
+            $database->selectCollection('account_profile_outbox')->countDocuments([
+                'profile_id' => (string) $profile->_id,
+                'operation' => 'upsert',
+            ]),
+        );
+        $this->assertSame(
+            1,
+            $database->selectCollection('account_profile_command_receipts')->countDocuments(['_id' => $commandId]),
+        );
+    }
+
+    public function test_bci_overlapping_deleted_reference_cleanup_and_restore_preserve_tombstone_projection_ordering(): void
+    {
+        foreach (range(1, 3) as $batch) {
+            $target = $this->createNestedProfileFixture(
+                "BCI target {$batch}",
+                "bci-target-{$batch}",
+                ['is_active' => false],
+            );
+            $parent = $this->createNestedProfileFixture(
+                "BCI deleted parent {$batch}",
+                "bci-deleted-parent-{$batch}",
+                [
+                    'is_active' => false,
+                    'contact_mode' => 'mirrored_account_profile',
+                    'contact_source_account_profile_id' => (string) $target->getKey(),
+                ],
+            );
+            $initialDeleteCommandId = "u07a-bci-parent-initial-delete-{$batch}-".uniqid('', true);
+            app(AccountProfileLifecycleService::class)->delete($parent, $initialDeleteCommandId);
+
+            $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+            $database = DB::connection('tenant')->getDatabase();
+            $parentId = (string) $parent->getKey();
+            $initialTombstone = $database->selectCollection('account_profile_outbox')->findOne([
+                'command_id' => $initialDeleteCommandId,
+            ]);
+            $this->assertSame('tombstone', $initialTombstone['operation'] ?? null);
+            $this->assertSame(
+                0,
+                $database->selectCollection('account_profile_outbox')->countDocuments([
+                    'profile_id' => $parentId,
+                    'operation' => 'upsert',
+                ]),
+            );
+
+            $updateCommandId = "u07a-bci-parent-update-{$batch}-".uniqid('', true);
+            $targetDeleteCommandId = "u07a-bci-target-delete-{$batch}-".uniqid('', true);
+            $restoreCommandId = "u07a-bci-parent-restore-{$batch}-".uniqid('', true);
+            $results = $this->runDeletedReferenceCleanupRestoreOverlapBatch(
+                batch: $batch,
+                parentId: $parentId,
+                targetId: (string) $target->getKey(),
+                updateCommandId: $updateCommandId,
+                targetDeleteCommandId: $targetDeleteCommandId,
+                restoreCommandId: $restoreCommandId,
+            );
+            $this->assertSame(
+                array_fill(0, 10, true),
+                array_column($results, 'successful'),
+                'BCI batch '.$batch.': '.json_encode($results, JSON_THROW_ON_ERROR),
+            );
+            $admittedUpdates = 0;
+            $rejectedUpdates = 0;
+            foreach ($results as $result) {
+                $payload = $result['result'];
+                $operation = $payload['operation'] ?? null;
+                if ($operation !== 'update') {
+                    $this->assertContains($operation, ['delete-target', 'restore-parent']);
+                    $this->assertSame('ok', $payload['status'] ?? null, json_encode($result, JSON_THROW_ON_ERROR));
+
+                    continue;
+                }
+
+                if (($payload['status'] ?? null) === 'ok') {
+                    $admittedUpdates++;
+
+                    continue;
+                }
+
+                $rejectedUpdates++;
+                $this->assertSame('error', $payload['status'] ?? null, json_encode($result, JSON_THROW_ON_ERROR));
+                $this->assertSame(
+                    'Illuminate\\Validation\\ValidationException',
+                    $payload['exception'] ?? null,
+                    json_encode($result, JSON_THROW_ON_ERROR),
+                );
+                $this->assertSame(
+                    ['account_profile' => ['Something went wrong when trying to update the account profile.']],
+                    $payload['errors'] ?? null,
+                    json_encode($result, JSON_THROW_ON_ERROR),
+                );
+                $this->assertContains(
+                    $payload['mongo_failures'] ?? [],
+                    [
+                        [
+                            ['command' => 'findAndModify', 'code' => 112],
+                        ],
+                        [
+                            ['command' => 'findAndModify', 'code' => 112],
+                            ['command' => 'abortTransaction', 'code' => 251],
+                        ],
+                    ],
+                    json_encode($result, JSON_THROW_ON_ERROR),
+                );
+            }
+
+            $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+            $receipts = $database->selectCollection('account_profile_command_receipts');
+            $outbox = $database->selectCollection('account_profile_outbox');
+            $this->assertSame(8, $admittedUpdates + $rejectedUpdates);
+            $burstUpdateReceiptCount = $receipts->countDocuments(['_id' => $updateCommandId]);
+            $this->assertSame($admittedUpdates > 0 ? 1 : 0, $burstUpdateReceiptCount);
+            if ($admittedUpdates === 0) {
+                $this->assertSame(0, $outbox->countDocuments(['command_id' => $updateCommandId]));
+            }
+            fwrite(STDOUT, sprintf(
+                "ACCOUNT_PROFILE_BCI_BURST batch=%d updates_admitted=%d updates_rejected=%d\n",
+                $batch,
+                $admittedUpdates,
+                $rejectedUpdates,
+            ));
+
+            $management = app(AccountProfileManagementService::class);
+            $management->update(
+                AccountProfile::withTrashed()->findOrFail($parentId),
+                ['display_name' => 'BCI concurrent deleted parent update'],
+                $updateCommandId,
+            );
+            $management->update(
+                AccountProfile::withTrashed()->findOrFail($parentId),
+                ['display_name' => 'BCI concurrent deleted parent update'],
+                $updateCommandId,
+            );
+
+            $updateReceipt = $receipts->findOne(['_id' => $updateCommandId]);
+            $cleanupReceipt = $receipts->findOne([
+                '_id' => "{$targetDeleteCommandId}:reference-cleanup:{$parentId}",
+            ]);
+            $restoreReceipt = $receipts->findOne(['_id' => $restoreCommandId]);
+            $this->assertNotNull($updateReceipt);
+            $this->assertNotNull($cleanupReceipt);
+            $this->assertNotNull($restoreReceipt);
+            $this->assertSame(
+                1,
+                $receipts->countDocuments(['_id' => $updateCommandId]),
+                'Eight same-key updates must share one command receipt.',
+            );
+            $this->assertNotSame('', trim((string) ($restoreReceipt['outbox_event_id'] ?? '')));
+
+            $restoreRevision = (int) ($restoreReceipt['aggregate_revision'] ?? 0);
+            $parentUpserts = iterator_to_array($outbox->find(
+                ['profile_id' => $parentId, 'operation' => 'upsert'],
+                ['sort' => ['aggregate_revision' => 1]],
+            ));
+            $this->assertNotEmpty($parentUpserts);
+            $this->assertSame($restoreRevision, (int) ($parentUpserts[0]['aggregate_revision'] ?? 0));
+            foreach (array_slice($parentUpserts, 1) as $upsert) {
+                $this->assertGreaterThan($restoreRevision, (int) ($upsert['aggregate_revision'] ?? 0));
+            }
+            foreach ([$updateReceipt, $cleanupReceipt] as $receipt) {
+                $receiptOutboxEventId = trim((string) ($receipt['outbox_event_id'] ?? ''));
+                if ($receiptOutboxEventId !== '') {
+                    $this->assertGreaterThan($restoreRevision, (int) ($receipt['aggregate_revision'] ?? 0));
+                }
+            }
+            $this->assertNull(AccountProfile::onlyTrashed()->find($parentId));
+            $this->assertNotNull(AccountProfile::onlyTrashed()->find((string) $target->getKey()));
+        }
     }
 
     public function test_unknown_commit_reconciles_from_a_durable_command_receipt_without_replaying_the_body(): void
@@ -1579,6 +1826,38 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $aggregateCalls[0]['pipeline'],
             'public account profile index',
         );
+        $database = DB::connection('tenant')->getDatabase();
+        $explain = json_decode(json_encode($database->command([
+            'explain' => [
+                'aggregate' => 'account_profiles',
+                'pipeline' => $aggregateCalls[0]['pipeline'],
+                'cursor' => new \stdClass,
+            ],
+            'verbosity' => 'executionStats',
+        ])->toArray()[0], JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR);
+        $plannerValues = function (mixed $node, string $key) use (&$plannerValues): array {
+            if (! is_array($node)) {
+                return [];
+            }
+
+            $values = array_key_exists($key, $node) ? [$node[$key]] : [];
+            foreach ($node as $value) {
+                $values = [...$values, ...$plannerValues($value, $key)];
+            }
+
+            return $values;
+        };
+        $profileCursor = collect($explain['stages'] ?? [])
+            ->first(static fn (array $stage): bool => isset($stage['$cursor']));
+        $this->assertIsArray($profileCursor, 'Public discovery explain must expose the Profile cursor plan.');
+        $profileStages = $plannerValues($profileCursor['$cursor']['queryPlanner']['winningPlan'] ?? [], 'stage');
+        $this->assertContains('IXSCAN', $profileStages);
+        $this->assertNotContains('COLLSCAN', $profileStages);
+        $parentLookup = collect($explain['stages'] ?? [])
+            ->first(static fn (array $stage): bool => isset($stage['$lookup']));
+        $this->assertIsArray($parentLookup, 'Public discovery explain must expose the parent Account lookup.');
+        $this->assertSame(0, (int) ($parentLookup['collectionScans'] ?? -1));
+        $this->assertContains('_id_', $parentLookup['indexesUsed'] ?? []);
         $queryLog = $connection->getQueryLog();
         $connection->disableQueryLog();
         $connection->flushQueryLog();
@@ -2926,7 +3205,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ]);
     }
 
-    public function test_public_account_profile_index_excludes_non_queryable_type_even_if_discoverable_flag_is_true(): void
+    public function test_public_account_profile_index_includes_discoverable_type_even_if_not_queryable(): void
     {
         $this->createAccountUser([]);
 
@@ -2942,7 +3221,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ];
         $venueType->save();
 
-        AccountProfile::create([
+        $profile = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
             'profile_type' => 'venue',
             'display_name' => 'Non Queryable Venue',
@@ -2954,7 +3233,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response = $this->getJson("{$this->base_api_tenant}account_profiles");
 
         $response->assertStatus(200);
-        $this->assertSame([], $response->json('data'));
+        $payload = collect($response->json('data'))
+            ->firstWhere('id', (string) $profile->_id);
+        $this->assertIsArray($payload);
+        $this->assertSame('non-queryable-venue', $payload['slug'] ?? null);
+        $this->assertTrue($payload['can_open_public_detail'] ?? false);
     }
 
     public function test_public_account_profile_show_by_slug_uses_canonical_public_catalog_eligibility(): void
@@ -3001,6 +3284,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $landlordUser = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlordUser, []);
+
+        $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $capabilities = $venueType->capabilities;
+        $capabilities['has_cover'] = ['value' => true, 'parameters' => []];
+        $venueType->capabilities = $capabilities;
+        $venueType->save();
 
         $profile = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -3509,7 +3798,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         return $event;
     }
 
-    public function test_public_account_profile_near_returns_distance_sorted_public_poi_types(): void
+    public function test_public_account_profile_near_returns_distance_sorted_discoverable_profiles_independently_of_poi(): void
     {
         $this->createAccountUser([]);
 
@@ -3604,13 +3893,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonPath('has_more', false);
 
         $items = collect($response->json('data'));
-        $this->assertCount(3, $items);
+        $this->assertCount(4, $items);
         $this->assertSame(
-            ['Near Venue', 'Blocked Poi', 'Far Venue'],
+            ['Non Poi Artist', 'Near Venue', 'Blocked Poi', 'Far Venue'],
             $items->pluck('display_name')->values()->all()
-        );
-        $this->assertFalse(
-            $items->contains(static fn (array $item): bool => ($item['display_name'] ?? null) === 'Non Poi Artist')
         );
         $this->assertNotNull($items->first()['distance_meters'] ?? null);
         $this->assertIsNumeric($items->first()['distance_meters'] ?? null);
@@ -4484,8 +4770,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
             static fn (array $entry): bool => $entry['name'] === 'find'
                 && ($entry['command']['find'] ?? null) === 'account_profile_types',
         ));
+        // The request-scoped catalog snapshot adds one indexed type read for each
+        // nested-group, avatar, and cover capability; all remain one-time reads.
         $this->assertCount(
-            5,
+            8,
             $profileTypeFinds,
             json_encode($profileTypeFinds, JSON_INVALID_UTF8_SUBSTITUTE),
         );
@@ -4507,6 +4795,33 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ],
         ));
         $this->assertCount(1, $locationPolicyFinds);
+        $nestedGroupCapabilityFinds = array_values(array_filter(
+            $profileTypeFinds,
+            static fn (array $entry): bool => ($entry['command']['filter']['capabilities.has_nested_profile_groups.value'] ?? null) === [
+                '$eq' => true,
+                '$type' => 'bool',
+                '$not' => ['$type' => 'array'],
+            ],
+        ));
+        $this->assertCount(1, $nestedGroupCapabilityFinds);
+        $avatarCapabilityFinds = array_values(array_filter(
+            $profileTypeFinds,
+            static fn (array $entry): bool => ($entry['command']['filter']['capabilities.has_avatar.value'] ?? null) === [
+                '$eq' => true,
+                '$type' => 'bool',
+                '$not' => ['$type' => 'array'],
+            ],
+        ));
+        $this->assertCount(1, $avatarCapabilityFinds);
+        $coverCapabilityFinds = array_values(array_filter(
+            $profileTypeFinds,
+            static fn (array $entry): bool => ($entry['command']['filter']['capabilities.has_cover.value'] ?? null) === [
+                '$eq' => true,
+                '$type' => 'bool',
+                '$not' => ['$type' => 'array'],
+            ],
+        ));
+        $this->assertCount(1, $coverCapabilityFinds);
 
         $profileFinds = array_values(array_filter(
             $trace->commands(),
@@ -4706,13 +5021,20 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertStatus(201);
         $avatarUrl = $response->json('data.account_profile.avatar_url');
         $coverUrl = $response->json('data.account_profile.cover_url');
-        $this->assertNotEmpty($avatarUrl);
-        $this->assertNotEmpty($coverUrl);
+        $this->assertNull($avatarUrl);
+        $this->assertNull($coverUrl);
 
         $profileId = (string) $response->json('data.account_profile.id');
+        $slug = (string) $response->json('data.account_profile.slug');
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $profile = AccountProfile::query()->findOrFail($profileId);
         $account = Account::query()->findOrFail((string) $profile->account_id);
+        $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $capabilities = $venueType->capabilities;
+        $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
+        $capabilities['has_cover'] = ['value' => true, 'parameters' => []];
+        $venueType->capabilities = $capabilities;
+        $venueType->save();
         $profile->profile_type = 'venue';
         $profile->visibility = 'public';
         $profile->is_active = true;
@@ -4723,8 +5045,9 @@ class AccountProfilesControllerTest extends TestCaseTenant
         ];
         $account->save();
 
-        $this->assertMediaUrlHealthy($avatarUrl);
-        $this->assertMediaUrlHealthy($coverUrl);
+        $publicDetail = $this->getJson("{$this->base_api_tenant}account_profiles/{$slug}")->assertOk();
+        $this->assertMediaUrlHealthy($publicDetail->json('data.avatar_url'));
+        $this->assertMediaUrlHealthy($publicDetail->json('data.cover_url'));
         $this->assertMediaStored($profileId, 'avatar');
         $this->assertMediaStored($profileId, 'cover');
     }
@@ -4732,13 +5055,19 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function test_avatar_and_cover_media_of_draft_account_return_404(): void
     {
         Storage::fake('public');
+        $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $capabilities = $venueType->capabilities;
+        $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
+        $capabilities['has_cover'] = ['value' => true, 'parameters' => []];
+        $venueType->capabilities = $capabilities;
+        $venueType->save();
 
         $response = $this->withHeaders($this->getMultipartHeaders())->post(
             "{$this->base_tenant_api_admin}account_onboardings",
             [
                 'name' => 'Profile Media Draft Gate',
                 'ownership_state' => 'tenant_owned',
-                'profile_type' => 'personal',
+                'profile_type' => 'venue',
                 'document' => 'DOC-DRAFT-MEDIA-'.uniqid('', true),
                 'avatar' => UploadedFile::fake()->image('avatar.png', 200, 200),
                 'cover' => UploadedFile::fake()->image('cover.jpg', 1200, 600),
@@ -4746,18 +5075,33 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertStatus(201);
-        $avatarUrl = $response->json('data.account_profile.avatar_url');
-        $coverUrl = $response->json('data.account_profile.cover_url');
-        $this->assertNotEmpty($avatarUrl);
-        $this->assertNotEmpty($coverUrl);
+        $profileId = (string) $response->json('data.account_profile.id');
+        $this->assertNull($response->json('data.account_profile.avatar_url'));
+        $this->assertNull($response->json('data.account_profile.cover_url'));
 
-        $this->assertMediaUrlAccess($avatarUrl, 404);
-        $this->assertMediaUrlAccess($coverUrl, 404);
+        $this->assertMediaUrlAccess("{$this->base_api_tenant}media/account-profiles/{$profileId}/avatar", 404);
+        $this->assertMediaUrlAccess("{$this->base_api_tenant}media/account-profiles/{$profileId}/cover", 404);
+        $adminDetail = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            $this->getHeaders(),
+        )->assertOk();
+        $adminAvatarUrl = $adminDetail->json('data.admin_avatar_url');
+        $adminCoverUrl = $adminDetail->json('data.admin_cover_url');
+        $this->assertIsString($adminAvatarUrl);
+        $this->assertIsString($adminCoverUrl);
+        $this->get($adminAvatarUrl, $this->getHeaders())->assertOk();
+        $this->get($adminCoverUrl, $this->getHeaders())->assertOk();
     }
 
     public function test_avatar_and_cover_media_are_not_publicly_served_when_profile_is_not_publicly_exposed(): void
     {
         Storage::fake('public');
+        $personalType = TenantProfileType::query()->where('type', 'personal')->firstOrFail();
+        $capabilities = $personalType->capabilities;
+        $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
+        $capabilities['has_cover'] = ['value' => true, 'parameters' => []];
+        $personalType->capabilities = $capabilities;
+        $personalType->save();
 
         $response = $this->withHeaders($this->getMultipartHeaders())->post(
             "{$this->base_tenant_api_admin}account_onboardings",
@@ -4772,10 +5116,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $response->assertStatus(201);
         $profileId = (string) $response->json('data.account_profile.id');
-        $avatarUrl = $response->json('data.account_profile.avatar_url');
-        $coverUrl = $response->json('data.account_profile.cover_url');
-        $this->assertNotEmpty($avatarUrl);
-        $this->assertNotEmpty($coverUrl);
+        $avatarUrl = "{$this->base_api_tenant}media/account-profiles/{$profileId}/avatar";
+        $coverUrl = "{$this->base_api_tenant}media/account-profiles/{$profileId}/cover";
+        $this->assertNull($response->json('data.account_profile.avatar_url'));
+        $this->assertNull($response->json('data.account_profile.cover_url'));
 
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $profile = AccountProfile::query()->findOrFail($profileId);
@@ -4785,6 +5129,16 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'publish_at' => null,
         ];
         $account->save();
+        $adminDetail = $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$profileId}",
+            $this->getHeaders(),
+        )->assertOk();
+        $adminAvatarUrl = $adminDetail->json('data.admin_avatar_url');
+        $adminCoverUrl = $adminDetail->json('data.admin_cover_url');
+        $this->assertIsString($adminAvatarUrl);
+        $this->assertIsString($adminCoverUrl);
+        $this->get($adminAvatarUrl, $this->getHeaders())->assertOk();
+        $this->get($adminCoverUrl, $this->getHeaders())->assertOk();
 
         $profile->visibility = 'friends_only';
         $profile->save();
@@ -4810,6 +5164,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
                     'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
                     'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                     'has_events' => ['value' => false, 'parameters' => []],
+                    'has_avatar' => ['value' => true, 'parameters' => []],
+                    'has_cover' => ['value' => true, 'parameters' => []],
                 ],
             ],
         );
@@ -4827,6 +5183,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
                     'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
                     'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                     'has_events' => ['value' => false, 'parameters' => []],
+                    'has_avatar' => ['value' => true, 'parameters' => []],
+                    'has_cover' => ['value' => true, 'parameters' => []],
                 ],
             ],
         );
@@ -4922,6 +5280,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function test_account_profile_update_replaces_avatar_upload(): void
     {
         Storage::fake('public');
+        $personalType = TenantProfileType::query()->where('type', 'personal')->firstOrFail();
+        $capabilities = $personalType->capabilities;
+        $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
+        $personalType->capabilities = $capabilities;
+        $personalType->save();
 
         $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
             "{$this->base_tenant_api_admin}account_onboardings",
@@ -4935,8 +5298,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $createResponse->assertStatus(201);
         $profileId = (string) $createResponse->json('data.account_profile.id');
-        $originalAvatarUrl = $createResponse->json('data.account_profile.avatar_url');
-        $this->assertNotEmpty($originalAvatarUrl);
+        $this->assertNull($createResponse->json('data.account_profile.avatar_url'));
         $originalPath = $this->assertMediaStored($profileId, 'avatar');
 
         $updateResponse = $this->withHeaders($this->getMultipartHeaders())->post(
@@ -4948,10 +5310,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $updateResponse->assertStatus(200);
-        $newAvatarUrl = $updateResponse->json('data.avatar_url');
+        $newAvatarUrl = $updateResponse->json('data.admin_avatar_url');
+        $this->assertNull($updateResponse->json('data.avatar_url'));
         $this->assertNotEmpty($newAvatarUrl);
+        $this->assertIsString($newAvatarUrl);
 
-        $this->assertMediaUrlAccess($newAvatarUrl, 404);
+        $this->get($newAvatarUrl, $this->getHeaders())->assertOk();
+        $this->assertMediaUrlAccess("{$this->base_api_tenant}media/account-profiles/{$profileId}/avatar", 404);
         $this->assertMediaStored($profileId, 'avatar');
         if ($originalPath) {
             Storage::disk('public')->assertMissing($originalPath);
@@ -4961,6 +5326,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function test_account_profile_update_replaces_cover_upload(): void
     {
         Storage::fake('public');
+        $personalType = TenantProfileType::query()->where('type', 'personal')->firstOrFail();
+        $capabilities = $personalType->capabilities;
+        $capabilities['has_cover'] = ['value' => true, 'parameters' => []];
+        $personalType->capabilities = $capabilities;
+        $personalType->save();
 
         $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
             "{$this->base_tenant_api_admin}account_onboardings",
@@ -4974,8 +5344,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $createResponse->assertStatus(201);
         $profileId = (string) $createResponse->json('data.account_profile.id');
-        $originalCoverUrl = $createResponse->json('data.account_profile.cover_url');
-        $this->assertNotEmpty($originalCoverUrl);
+        $this->assertNull($createResponse->json('data.account_profile.cover_url'));
         $originalPath = $this->assertMediaStored($profileId, 'cover');
 
         $updateResponse = $this->withHeaders($this->getMultipartHeaders())->post(
@@ -4987,10 +5356,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $updateResponse->assertStatus(200);
-        $newCoverUrl = $updateResponse->json('data.cover_url');
+        $newCoverUrl = $updateResponse->json('data.admin_cover_url');
+        $this->assertNull($updateResponse->json('data.cover_url'));
         $this->assertNotEmpty($newCoverUrl);
+        $this->assertIsString($newCoverUrl);
 
-        $this->assertMediaUrlAccess($newCoverUrl, 404);
+        $this->get($newCoverUrl, $this->getHeaders())->assertOk();
+        $this->assertMediaUrlAccess("{$this->base_api_tenant}media/account-profiles/{$profileId}/cover", 404);
         $this->assertMediaStored($profileId, 'cover');
         if ($originalPath) {
             Storage::disk('public')->assertMissing($originalPath);
@@ -5000,6 +5372,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function test_account_profile_update_media_uploads_refresh_map_poi_projection_urls(): void
     {
         Storage::fake('public');
+        $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $capabilities = $venueType->capabilities;
+        $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
+        $capabilities['has_cover'] = ['value' => true, 'parameters' => []];
+        $venueType->capabilities = $capabilities;
+        $venueType->save();
 
         $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
             "{$this->base_tenant_api_admin}account_onboardings",
@@ -5017,6 +5395,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $createResponse->assertStatus(201);
         $profileId = (string) $createResponse->json('data.account_profile.id');
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $profile = AccountProfile::query()->findOrFail($profileId);
+        Account::query()->findOrFail((string) $profile->account_id)->update([
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ],
+        ]);
 
         $projection = MapPoi::query()
             ->where('ref_type', 'account_profile')
@@ -5178,6 +5563,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function test_account_profile_update_media_removals_refresh_map_poi_projection_urls(): void
     {
         Storage::fake('public');
+        $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $capabilities = $venueType->capabilities;
+        $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
+        $capabilities['has_cover'] = ['value' => true, 'parameters' => []];
+        $venueType->capabilities = $capabilities;
+        $venueType->save();
 
         $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
             "{$this->base_tenant_api_admin}account_onboardings",
@@ -5196,12 +5587,21 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
         $createResponse->assertStatus(201);
         $profileId = (string) $createResponse->json('data.account_profile.id');
-        $avatarUrl = $createResponse->json('data.account_profile.avatar_url');
-        $coverUrl = $createResponse->json('data.account_profile.cover_url');
-        $this->assertNotEmpty($avatarUrl);
-        $this->assertNotEmpty($coverUrl);
+        $this->assertNull($createResponse->json('data.account_profile.avatar_url'));
+        $this->assertNull($createResponse->json('data.account_profile.cover_url'));
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
         $profile = AccountProfile::query()->findOrFail($profileId);
+        Account::query()->findOrFail((string) $profile->account_id)->update([
+            'publication' => [
+                'status' => AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ],
+        ]);
+        $publicDetail = $this->getJson("{$this->base_api_tenant}account_profiles/{$profile->slug}")->assertOk();
+        $avatarUrl = $publicDetail->json('data.avatar_url');
+        $coverUrl = $publicDetail->json('data.cover_url');
+        $this->assertMediaUrlHealthy($avatarUrl);
+        $this->assertMediaUrlHealthy($coverUrl);
 
         $projection = MapPoi::query()
             ->where('ref_type', 'account_profile')
@@ -5277,6 +5677,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
     public function test_account_profile_show_and_public_detail_include_gallery_readback_while_avatar_cover_and_gallery_share_the_canonical_media_directory(): void
     {
         Storage::fake('public');
+        $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $capabilities = $venueType->capabilities;
+        $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
+        $capabilities['has_cover'] = ['value' => true, 'parameters' => []];
+        $venueType->capabilities = $capabilities;
+        $venueType->save();
 
         $createResponse = $this->withHeaders($this->getMultipartHeaders())->post(
             "{$this->base_tenant_api_admin}account_onboardings",
@@ -5308,8 +5714,11 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $profileId = (string) $createResponse->json('data.account_profile.id');
         $slug = (string) $createResponse->json('data.account_profile.slug');
         $this->assertNotSame('', $slug);
-        $this->assertMediaUrlHealthy($createResponse->json('data.account_profile.avatar_url'));
-        $this->assertMediaUrlHealthy($createResponse->json('data.account_profile.cover_url'));
+        $this->assertNull($createResponse->json('data.account_profile.avatar_url'));
+        $this->assertNull($createResponse->json('data.account_profile.cover_url'));
+        $publicDetail = $this->getJson("{$this->base_api_tenant}account_profiles/{$slug}")->assertOk();
+        $this->assertMediaUrlHealthy($publicDetail->json('data.avatar_url'));
+        $this->assertMediaUrlHealthy($publicDetail->json('data.cover_url'));
 
         $galleryBaseUrl = "{$this->base_tenant_api_admin}account_profiles/{$profileId}/gallery/groups";
         $groupResponse = $this->postJson(
@@ -7289,6 +7698,59 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertSame('completed', $cleanupOutbox['delivery_state'] ?? null);
     }
 
+    public function test_profile_delete_cleans_an_already_deleted_reference_parent_without_positive_upsert(): void
+    {
+        $target = $this->createNestedProfileFixture(
+            'Reference Cleanup Target',
+            'reference-cleanup-target',
+            ['is_active' => false],
+        );
+        $alreadyDeletedParent = $this->createNestedProfileFixture(
+            'Already Deleted Reference Parent',
+            'already-deleted-reference-parent',
+            [
+                'is_active' => false,
+                'contact_mode' => 'mirrored_account_profile',
+                'contact_source_account_profile_id' => (string) $target->_id,
+            ],
+        );
+        app(AccountProfileLifecycleService::class)->delete(
+            $alreadyDeletedParent,
+            'u07a-reference-parent-delete-'.uniqid('', true),
+        );
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $database = DB::connection('tenant')->getDatabase();
+        $outboxCountBeforeTargetDelete = $database
+            ->selectCollection('account_profile_outbox')
+            ->countDocuments(['profile_id' => (string) $alreadyDeletedParent->_id]);
+        $targetDeleteCommandId = 'u07a-reference-target-delete-'.uniqid('', true);
+
+        app(AccountProfileLifecycleService::class)->delete($target, $targetDeleteCommandId);
+
+        $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
+        $parent = AccountProfile::withTrashed()->findOrFail($alreadyDeletedParent->_id);
+        $this->assertSame('own', $parent->contact_mode);
+        $this->assertNull($parent->contact_source_account_profile_id);
+        $this->assertNotNull($parent->deleted_at);
+        $this->assertSame(
+            $outboxCountBeforeTargetDelete,
+            $database->selectCollection('account_profile_outbox')
+                ->countDocuments(['profile_id' => (string) $alreadyDeletedParent->_id]),
+        );
+        $receipt = $database->selectCollection('account_profile_command_receipts')->findOne([
+            '_id' => "{$targetDeleteCommandId}:reference-cleanup:{$alreadyDeletedParent->_id}",
+        ]);
+        $this->assertNotNull($receipt);
+        $this->assertNull($receipt['outbox_event_id'] ?? null);
+        $this->assertSame(
+            0,
+            $database->selectCollection('account_profile_outbox')->countDocuments([
+                'command_id' => "{$targetDeleteCommandId}:reference-cleanup:{$alreadyDeletedParent->_id}",
+            ]),
+        );
+    }
+
     public function test_profile_delete_purges_its_owned_nested_graph_and_map_pois_while_preserving_siblings(): void
     {
         $target = $this->createNestedProfileFixture('Owned Graph Target', 'owned-graph-target');
@@ -7551,7 +8013,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $membersResponse->assertJsonPath('data.0', [
             'id' => (string) $queryable->_id,
             'display_name' => 'Queryable Linked Profile',
-            'is_queryable_candidate' => false,
+            'is_queryable_candidate' => true,
             'is_contact_capable_candidate' => false,
         ]);
         $membersResponse->assertJsonPath('data.1', [
@@ -7668,7 +8130,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $response->assertJsonValidationErrors(['nested_profile_groups']);
     }
 
-    public function test_account_profile_update_rejects_private_nested_profile_group_members(): void
+    public function test_account_profile_update_accepts_private_nested_profile_group_members(): void
     {
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
@@ -7699,8 +8161,14 @@ class AccountProfilesControllerTest extends TestCaseTenant
             $this->getHeaders()
         );
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['nested_profile_groups']);
+        $response->assertOk()->assertJsonPath('data.member_count', 1);
+        $this->getJson(
+            "{$this->base_tenant_api_admin}account_profiles/".(string) $parent->_id.'/nested_profile_groups/parceiros/members',
+            $this->getHeaders(),
+        )
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', (string) $privateMember->_id);
     }
 
     public function test_account_profile_update_rejects_nested_profile_group_limits(): void
@@ -7946,6 +8414,146 @@ class AccountProfilesControllerTest extends TestCaseTenant
             ['public-partner-b', 'public-partner-a'],
             collect($members->json('data'))->pluck('slug')->all()
         );
+    }
+
+    public function test_public_account_profile_detail_keeps_nested_group_shell_for_navigable_non_discoverable_parent(): void
+    {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'navigable-non-discoverable-parent'],
+            ['capabilities' => [
+                'is_queryable' => ['value' => false, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'has_nested_profile_groups' => ['value' => true, 'parameters' => []],
+            ]],
+        );
+
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'navigable-non-discoverable-parent',
+            'display_name' => 'Navigable Non Discoverable Parent',
+            'slug' => 'navigable-non-discoverable-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $member = $this->createNestedProfileFixture(
+            'Discoverable Nested Member',
+            'discoverable-nested-member',
+        );
+        $this->createNestedGroupHead(
+            $parent,
+            'Parceiros',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
+        )->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/parceiros/members",
+            ['add_ids' => [(string) $member->_id]],
+            $this->getHeaders(),
+        )->assertOk()->assertJsonPath('data.member_count', 1);
+
+        $this->getJson("{$this->base_api_tenant}account_profiles/{$parent->slug}")
+            ->assertOk()
+            ->assertJsonCount(1, 'data.nested_profile_groups')
+            ->assertJsonPath('data.nested_profile_groups.0.id', 'parceiros')
+            ->assertJsonPath('data.nested_profile_groups.0.member_count', 1)
+            ->assertJsonPath(
+                'data.nested_profile_groups.0.members_path',
+                '/api/v1/account_profiles/navigable-non-discoverable-parent/nested_profile_groups/parceiros/members',
+            );
+        $this->getJson(
+            "{$this->base_api_tenant}account_profiles/{$parent->slug}/nested_profile_groups/parceiros/members",
+            $this->getHeaders(),
+        )->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.slug', 'discoverable-nested-member');
+
+        $catalog = $this->getJson("{$this->base_api_tenant}account_profiles")->assertOk();
+        $this->assertNotContains(
+            (string) $parent->_id,
+            collect($catalog->json('data'))->pluck('id')->all(),
+        );
+    }
+
+    public function test_public_catalog_and_nested_member_rows_hide_dormant_media_and_restore_it_per_kind(): void
+    {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'public-media-member'],
+            ['capabilities' => [
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'has_avatar' => ['value' => true, 'parameters' => []],
+                'has_cover' => ['value' => true, 'parameters' => []],
+            ]],
+        );
+        $parent = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'venue',
+            'display_name' => 'Public Media Parent',
+            'slug' => 'public-media-parent',
+            'is_active' => true,
+            'visibility' => 'public',
+        ])->fresh();
+        $member = $this->createNestedProfileFixture(
+            'Public Media Member',
+            'public-media-member',
+            [
+                'profile_type' => 'public-media-member',
+                'avatar_url' => 'https://cdn.example.test/public-media-member-avatar.jpg',
+                'cover_url' => 'https://cdn.example.test/public-media-member-cover.jpg',
+            ],
+        );
+        $this->createNestedGroupHead(
+            $parent,
+            'Parceiros',
+            max(1, (int) ($parent->aggregate_revision ?? 1)),
+        )->assertCreated();
+        $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profiles/{$parent->_id}/nested_profile_groups/parceiros/members",
+            ['add_ids' => [(string) $member->_id]],
+            $this->getHeaders(),
+        )->assertOk();
+
+        $catalogUrl = "{$this->base_api_tenant}account_profiles";
+        $nestedUrl = "{$this->base_api_tenant}account_profiles/{$parent->slug}/nested_profile_groups/parceiros/members";
+        foreach ([['avatar', 'cover'], ['cover', 'avatar']] as [$kind, $otherKind]) {
+            $initialCatalog = $this->getJson($catalogUrl)->assertOk();
+            $initialCatalogRow = collect($initialCatalog->json('data'))->firstWhere('id', (string) $member->_id);
+            $initialNested = $this->getJson($nestedUrl, $this->getHeaders())->assertOk();
+            $initialNestedRow = collect($initialNested->json('data'))->firstWhere('id', (string) $member->_id);
+            $this->assertIsArray($initialCatalogRow);
+            $this->assertIsArray($initialNestedRow);
+            $initialUrl = $initialCatalogRow["{$kind}_url"] ?? null;
+            $initialOtherUrl = $initialCatalogRow["{$otherKind}_url"] ?? null;
+            $this->assertIsString($initialUrl);
+            $this->assertIsString($initialOtherUrl);
+
+            $type = TenantProfileType::query()->where('type', $member->profile_type)->firstOrFail();
+            $capabilities = $type->capabilities;
+            $capabilities["has_{$kind}"]['value'] = false;
+            $type->capabilities = $capabilities;
+            $type->save();
+
+            $disabledCatalog = $this->getJson($catalogUrl)->assertOk();
+            $disabledCatalogRow = collect($disabledCatalog->json('data'))->firstWhere('id', (string) $member->_id);
+            $disabledNested = $this->getJson($nestedUrl, $this->getHeaders())->assertOk();
+            $disabledNestedRow = collect($disabledNested->json('data'))->firstWhere('id', (string) $member->_id);
+            $this->assertSame(null, $disabledCatalogRow["{$kind}_url"] ?? null);
+            $this->assertSame($initialOtherUrl, $disabledCatalogRow["{$otherKind}_url"] ?? null);
+            $this->assertSame(null, $disabledNestedRow["{$kind}_url"] ?? null);
+            $this->assertSame($initialOtherUrl, $disabledNestedRow["{$otherKind}_url"] ?? null);
+
+            $capabilities["has_{$kind}"]['value'] = true;
+            $type->capabilities = $capabilities;
+            $type->save();
+
+            $restoredCatalog = $this->getJson($catalogUrl)->assertOk();
+            $restoredCatalogRow = collect($restoredCatalog->json('data'))->firstWhere('id', (string) $member->_id);
+            $restoredNested = $this->getJson($nestedUrl, $this->getHeaders())->assertOk();
+            $restoredNestedRow = collect($restoredNested->json('data'))->firstWhere('id', (string) $member->_id);
+            $this->assertSame($initialUrl, $restoredCatalogRow["{$kind}_url"] ?? null);
+            $this->assertSame($initialUrl, $restoredNestedRow["{$kind}_url"] ?? null);
+        }
     }
 
     public function test_public_nested_group_members_page_from_canonical_accounts_nested_without_projection_rows(): void
@@ -8254,6 +8862,12 @@ class AccountProfilesControllerTest extends TestCaseTenant
 
     public function test_red_07_account_public_member_card_reads_current_profile_without_relationship_refresh(): void
     {
+        $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $capabilities = $venueType->capabilities;
+        $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
+        $venueType->capabilities = $capabilities;
+        $venueType->save();
+
         $parent = AccountProfile::create([
             'account_id' => (string) $this->account->_id,
             'profile_type' => 'venue',
@@ -9398,6 +10012,271 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
         $this->assertSame(0, $trace->countForCollection('accounts', 'find'));
         $this->assertSame(0, $trace->countForCollection('account_users', 'find'));
+    }
+
+    public function test_public_account_profile_near_includes_a_discoverable_type_with_a_valid_point_even_when_map_poi_is_disabled(): void
+    {
+        $this->createAccountUser([]);
+
+        TenantProfileType::query()->create([
+            'type' => 'discoverable-not-map-poi',
+            'label' => 'Discoverable Not Map POI',
+            'allowed_taxonomies' => [],
+            'capabilities' => [
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+                'is_queryable' => ['value' => false, 'parameters' => []],
+                'is_favoritable' => ['value' => false, 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []],
+                'is_physical_host_enabled' => ['value' => false, 'parameters' => []],
+                'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_events' => ['value' => false, 'parameters' => []],
+            ],
+        ]);
+        AccountProfile::query()->create([
+            'account_id' => (string) $this->account->getKey(),
+            'profile_type' => 'discoverable-not-map-poi',
+            'display_name' => 'Discoverable Non Map POI',
+            'slug' => 'discoverable-non-map-poi',
+            'visibility' => 'public',
+            'is_active' => true,
+            'location' => [
+                'type' => 'Point',
+                'coordinates' => [-40.0001, -20.0001],
+            ],
+        ]);
+
+        $response = $this->getJson(
+            "{$this->base_api_tenant}account_profiles/near?origin_lat=-20.0&origin_lng=-40.0&page=1&page_size=10"
+        );
+
+        $response->assertOk();
+        $this->assertContains(
+            'discoverable-non-map-poi',
+            collect($response->json('data'))->pluck('slug')->all(),
+        );
+    }
+
+    /**
+     * @return list<array{successful: bool, stdout: string, stderr: string, result: array<string, mixed>}>
+     */
+    private function runDeletedReferenceCleanupRestoreOverlapBatch(
+        int $batch,
+        string $parentId,
+        string $targetId,
+        string $updateCommandId,
+        string $targetDeleteCommandId,
+        string $restoreCommandId,
+    ): array {
+        $barrier = sys_get_temp_dir().'/account-profile-bci-'.$batch.'-'.bin2hex(random_bytes(8));
+        $tenantSlug = (string) Tenant::current()?->slug;
+        $processes = [];
+
+        try {
+            foreach (range(1, 8) as $worker) {
+                $processes[] = $this->deletedReferenceCleanupRestoreOverlapProcess(
+                    tenantSlug: $tenantSlug,
+                    parentId: $parentId,
+                    targetId: $targetId,
+                    barrier: $barrier,
+                    worker: $worker,
+                    operation: 'update',
+                    commandId: $updateCommandId,
+                );
+            }
+            $processes[] = $this->deletedReferenceCleanupRestoreOverlapProcess(
+                tenantSlug: $tenantSlug,
+                parentId: $parentId,
+                targetId: $targetId,
+                barrier: $barrier,
+                worker: 9,
+                operation: 'delete-target',
+                commandId: $targetDeleteCommandId,
+            );
+            $processes[] = $this->deletedReferenceCleanupRestoreOverlapProcess(
+                tenantSlug: $tenantSlug,
+                parentId: $parentId,
+                targetId: $targetId,
+                barrier: $barrier,
+                worker: 10,
+                operation: 'restore-parent',
+                commandId: $restoreCommandId,
+            );
+
+            foreach ($processes as $process) {
+                $process->start();
+            }
+
+            $results = [];
+            foreach ($processes as $process) {
+                $process->wait();
+                $diagnostic = sprintf(
+                    'exit=%s stdout=%s stderr=%s',
+                    (string) $process->getExitCode(),
+                    $process->getOutput(),
+                    $process->getErrorOutput(),
+                );
+                $this->assertTrue($process->isSuccessful(), $diagnostic);
+                $matched = preg_match(
+                    '/ACCOUNT_PROFILE_BCI_RESULT=(\{[^\r\n]+\})/',
+                    $process->getOutput(),
+                    $matches,
+                );
+                $this->assertSame(1, $matched, $diagnostic);
+                $this->assertJson($matches[1], $diagnostic);
+                $decoded = json_decode($matches[1], true, flags: JSON_THROW_ON_ERROR);
+                $this->assertIsArray($decoded);
+                $results[] = [
+                    'successful' => $process->isSuccessful(),
+                    'stdout' => $process->getOutput(),
+                    'stderr' => $process->getErrorOutput(),
+                    'result' => $decoded,
+                ];
+            }
+
+            return $results;
+        } finally {
+            foreach ($processes as $process) {
+                if ($process->isRunning()) {
+                    $process->stop(1);
+                }
+            }
+            foreach (glob($barrier.'.ready.*') ?: [] as $path) {
+                @unlink($path);
+            }
+        }
+    }
+
+    private function deletedReferenceCleanupRestoreOverlapProcess(
+        string $tenantSlug,
+        string $parentId,
+        string $targetId,
+        string $barrier,
+        int $worker,
+        string $operation,
+        string $commandId,
+    ): Process {
+        $tenantSlugValue = var_export($tenantSlug, true);
+        $parentIdValue = var_export($parentId, true);
+        $targetIdValue = var_export($targetId, true);
+        $barrierValue = var_export($barrier, true);
+        $workerValue = var_export((string) $worker, true);
+        $operationValue = var_export($operation, true);
+        $commandIdValue = var_export($commandId, true);
+        $timeoutValue = var_export(self::BCI_BARRIER_TIMEOUT_SECONDS, true);
+        $code = <<<PHP
+\$operation = {$operationValue};
+\$subscriber = null;
+\$client = null;
+\$subscriberAttached = false;
+\$result = null;
+try {
+    \$tenant = \App\Models\Landlord\Tenant::query()->where('slug', {$tenantSlugValue})->firstOrFail();
+    \$tenant->makeCurrent();
+    \$barrier = {$barrierValue};
+    file_put_contents(\$barrier.'.ready.'.{$workerValue}, 'ready');
+    \$deadline = microtime(true) + {$timeoutValue};
+    while (count(glob(\$barrier.'.ready.*')) < 10) {
+        if (microtime(true) >= \$deadline) {
+            throw new \RuntimeException('Account Profile BCI barrier timed out');
+        }
+        usleep(10_000);
+    }
+
+    \$subscriber = new class implements \MongoDB\Driver\Monitoring\CommandSubscriber {
+        /** @var list<int> */
+        private array \$codes = [];
+
+        public function commandStarted(\MongoDB\Driver\Monitoring\CommandStartedEvent \$event): void {}
+
+        public function commandSucceeded(\MongoDB\Driver\Monitoring\CommandSucceededEvent \$event): void
+        {
+            \$reply = get_object_vars(\$event->getReply());
+            foreach ((array) (\$reply['writeErrors'] ?? []) as \$writeError) {
+                \$writeError = is_object(\$writeError) ? get_object_vars(\$writeError) : (array) \$writeError;
+                \$code = (int) (\$writeError['code'] ?? 0);
+                if (\$code !== 0) {
+                    \$this->record(\$event->getCommandName(), \$code);
+                }
+            }
+        }
+
+        public function commandFailed(\MongoDB\Driver\Monitoring\CommandFailedEvent \$event): void
+        {
+            \$code = (int) \$event->getError()->getCode();
+            if (\$code !== 0) {
+                \$this->record(\$event->getCommandName(), \$code);
+            }
+        }
+
+        /** @return list<int> */
+        public function codes(): array
+        {
+            return array_values(array_unique(\$this->codes));
+        }
+
+        /** @return list<array{command: string, code: int}> */
+        public function failures(): array
+        {
+            return \$this->failures;
+        }
+
+        /** @var list<array{command: string, code: int}> */
+        private array \$failures = [];
+
+        private function record(string \$command, int \$code): void
+        {
+            \$this->codes[] = \$code;
+            \$this->failures[] = ['command' => \$command, 'code' => \$code];
+        }
+    };
+    \$client = \Illuminate\Support\Facades\DB::connection('tenant')->getClient();
+    \$client->addSubscriber(\$subscriber);
+    \$subscriberAttached = true;
+    if (\$operation === 'update') {
+        \$parent = \App\Models\Tenants\AccountProfile::withTrashed()->findOrFail({$parentIdValue});
+        app(\App\Application\AccountProfiles\AccountProfileManagementService::class)->update(
+            \$parent,
+            ['display_name' => 'BCI concurrent deleted parent update'],
+            {$commandIdValue},
+        );
+    } elseif (\$operation === 'delete-target') {
+        \$target = \App\Models\Tenants\AccountProfile::query()->findOrFail({$targetIdValue});
+        app(\App\Application\AccountProfiles\AccountProfileLifecycleService::class)->delete(\$target, {$commandIdValue});
+    } elseif (\$operation === 'restore-parent') {
+        \$parent = \App\Models\Tenants\AccountProfile::withTrashed()->findOrFail({$parentIdValue});
+        app(\App\Application\AccountProfiles\AccountProfileLifecycleService::class)->restore(\$parent, {$commandIdValue});
+    } else {
+        throw new \RuntimeException('Unknown Account Profile BCI operation.');
+    }
+
+    \$result = ['status' => 'ok', 'operation' => \$operation];
+} catch (\Throwable \$exception) {
+    \$result = [
+        'status' => 'error',
+        'operation' => \$operation,
+        'exception' => \$exception::class,
+        'message' => \$exception->getMessage(),
+        'errors' => method_exists(\$exception, 'errors') ? \$exception->errors() : null,
+    ];
+} finally {
+    if (\$subscriberAttached && \$client !== null && \$subscriber !== null) {
+        \$client->removeSubscriber(\$subscriber);
+    }
+}
+\$result['mongo_codes'] = \$subscriber?->codes() ?? [];
+\$result['mongo_failures'] = \$subscriber?->failures() ?? [];
+echo 'ACCOUNT_PROFILE_BCI_RESULT='.json_encode(\$result, JSON_THROW_ON_ERROR).PHP_EOL;
+PHP;
+
+        return new Process(
+            [PHP_BINARY, 'artisan', 'tinker', '--execute', $code],
+            base_path(),
+            null,
+            null,
+            self::BCI_PROCESS_TIMEOUT_SECONDS,
+        );
     }
 
     /**

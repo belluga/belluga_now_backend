@@ -2,6 +2,7 @@
 
 use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\AccountProfileGalleryController;
+use App\Http\Api\v1\Controllers\AccountProfileMediaController;
 use App\Http\Api\v1\Controllers\AccountProfilesController;
 use App\Http\Api\v1\Controllers\AccountProfileTypesController;
 use App\Http\Api\v1\Controllers\AuthControllerLandlord;
@@ -207,6 +208,10 @@ Route::prefix('account_profiles')
 
         Route::prefix('{account_profile_id}')
             ->group(function () {
+                Route::get('/media/{kind}', [AccountProfileMediaController::class, 'adminMedia'])
+                    ->whereIn('kind', ['avatar', 'cover'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
                 Route::post('/nested_profile_groups', [AccountProfilesController::class, 'storeNestedGroup'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
                 Route::delete('/nested_profile_groups/{group_id}', [AccountProfilesController::class, 'deleteNestedGroup'])

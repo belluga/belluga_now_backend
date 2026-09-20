@@ -125,7 +125,9 @@ final class AccountProfileRelationAdmissionService
     {
         if (
             $requirement['queryable']
-            && ! $this->publicCatalogSnapshotReader->catalogSnapshot()->policy()->isPubliclyExposed($profile)
+            && (! (bool) $profile->is_active
+                || $profile->deleted_at !== null
+                || ! $this->typeSetProvider->isQueryable((string) $profile->profile_type))
         ) {
             throw $this->validationFailure($requirement);
         }

@@ -22,9 +22,9 @@ final class AccountProfilePublicCatalogSnapshotReader
     /** @var array<int, string>|null */
     private ?array $publicDetailTypeKeys = null;
 
-    private ?AccountProfilePublicCatalogEligibilityPolicy $publicPoiEligibilityPolicy = null;
+    private ?AccountProfilePublicVisibilityPolicy $publicPoiEligibilityPolicy = null;
 
-    private ?AccountProfilePublicCatalogEligibilityPolicy $publicPhysicalHostEligibilityPolicy = null;
+    private ?AccountProfilePublicVisibilityPolicy $publicPhysicalHostEligibilityPolicy = null;
 
     private int $cacheRevision = -1;
 
@@ -78,19 +78,16 @@ final class AccountProfilePublicCatalogSnapshotReader
             $records,
         ));
         $publicDetailTypeKeys = $this->publicDetailTypeKeys();
-        $nestedParentTypeKeys = array_values(array_map(
-            static fn (array $record): string => $record['type'],
-            array_filter(
-                $records,
-                static fn (array $record): bool => $record['has_nested_profile_groups'],
-            ),
-        ));
+        $nestedParentTypeKeys = $this->capabilityResolver
+            ->typeIdsWhereAllEffectiveValues(['has_nested_profile_groups' => true]);
 
         return $this->catalogSnapshot = new AccountProfilePublicCatalogSnapshot(
             $records,
             $catalogTypeKeys,
             $publicDetailTypeKeys,
             $nestedParentTypeKeys,
+            $this->profileTypeSets->avatarEnabledTypes(),
+            $this->profileTypeSets->coverEnabledTypes(),
         );
     }
 
@@ -111,11 +108,11 @@ final class AccountProfilePublicCatalogSnapshotReader
         return $this->publicPoiTypeKeys;
     }
 
-    public function publicPoiEligibilityPolicy(): AccountProfilePublicCatalogEligibilityPolicy
+    public function publicPoiEligibilityPolicy(): AccountProfilePublicVisibilityPolicy
     {
         $this->refreshIfStale();
 
-        if ($this->publicPoiEligibilityPolicy instanceof AccountProfilePublicCatalogEligibilityPolicy) {
+        if ($this->publicPoiEligibilityPolicy instanceof AccountProfilePublicVisibilityPolicy) {
             return $this->publicPoiEligibilityPolicy;
         }
 
@@ -125,18 +122,18 @@ final class AccountProfilePublicCatalogSnapshotReader
             $this->publicDetailTypeKeys(),
         ));
 
-        return $this->publicPoiEligibilityPolicy = new AccountProfilePublicCatalogEligibilityPolicy(
+        return $this->publicPoiEligibilityPolicy = new AccountProfilePublicVisibilityPolicy(
             $publicPoiTypeKeys,
             $publicDetailPoiTypeKeys,
             [],
         );
     }
 
-    public function publicPhysicalHostEligibilityPolicy(): AccountProfilePublicCatalogEligibilityPolicy
+    public function publicPhysicalHostEligibilityPolicy(): AccountProfilePublicVisibilityPolicy
     {
         $this->refreshIfStale();
 
-        if ($this->publicPhysicalHostEligibilityPolicy instanceof AccountProfilePublicCatalogEligibilityPolicy) {
+        if ($this->publicPhysicalHostEligibilityPolicy instanceof AccountProfilePublicVisibilityPolicy) {
             return $this->publicPhysicalHostEligibilityPolicy;
         }
 
@@ -147,7 +144,7 @@ final class AccountProfilePublicCatalogSnapshotReader
             $this->publicDetailTypeKeys(),
         ));
 
-        return $this->publicPhysicalHostEligibilityPolicy = new AccountProfilePublicCatalogEligibilityPolicy(
+        return $this->publicPhysicalHostEligibilityPolicy = new AccountProfilePublicVisibilityPolicy(
             $publicPhysicalHostTypeKeys,
             $publicDetailTypeKeys,
             [],

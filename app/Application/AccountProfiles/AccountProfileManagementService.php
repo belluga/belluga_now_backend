@@ -33,6 +33,7 @@ class AccountProfileManagementService
         private readonly AccountProfileOutboxPublisher $outboxPublisher,
         private readonly AccountProfileOutboxDispatcher $outboxDispatcher,
         private readonly AccountProfileLifecycleService $lifecycleService,
+        private readonly AccountProfileMutationGate $mutationGate,
         private readonly AccountProfileRelationAdmissionService $relationAdmissionService,
         private readonly AccountProfileLocationPolicy $locationPolicy,
         private readonly AccountProfileAdmissionFenceService $admissionFences,
@@ -345,14 +346,22 @@ class AccountProfileManagementService
                         return $this->resultForCommandReceipt($receipt, $fingerprint);
                     }
 
-                    $persistedProfile = AccountProfile::query()->findOrFail($profileId);
-                    $this->lifecycleService->assertProfileMutationAllowed($persistedProfile, $context);
+                    $persistedProfile = AccountProfile::withTrashed()->findOrFail($profileId);
+                    $isDeleted = $persistedProfile->deleted_at !== null;
+                    if ($isDeleted) {
+                        $this->mutationGate->assertAccountMutationAllowed(
+                            (string) $persistedProfile->account_id,
+                            $context,
+                        );
+                    } else {
+                        $this->lifecycleService->assertProfileMutationAllowed($persistedProfile, $context);
+                    }
                     $oldProfileType = trim((string) $persistedProfile->profile_type);
                     $nextProfileType = trim((string) ($attributes['profile_type'] ?? $oldProfileType));
                     $profileTypeChanged = $nextProfileType !== $oldProfileType;
                     $locationChanged = array_key_exists('location', $attributes)
                         && $attributes['location'] !== ($persistedProfile->location ?? null);
-                    if ($profileTypeChanged || $locationChanged) {
+                    if (! $isDeleted && ($profileTypeChanged || $locationChanged)) {
                         $typeDocuments = $this->admissionFences->touchProfileTypes(
                             $context->database(),
                             $context->session(),
@@ -380,31 +389,35 @@ class AccountProfileManagementService
                             [$profileId],
                         );
                     }
-                    $this->nestedGroupMemberStore->assertCanonicalGroupHeadsAvailableWithinContext(
-                        $context,
-                        $persistedProfile,
-                    );
+                    if (! $isDeleted) {
+                        $this->nestedGroupMemberStore->assertCanonicalGroupHeadsAvailableWithinContext(
+                            $context,
+                            $persistedProfile,
+                        );
+                    }
                     $persistedProfile->fill($attributes);
                     if ($forceSearchRefresh) {
                         $this->applyCanonicalSearchFields($persistedProfile);
                     }
                     if (
                         ! $this->hasSemanticMutation($persistedProfile)
-                        && ! array_key_exists('nested_profile_groups', $attributes)
+                        && ($isDeleted || ! array_key_exists('nested_profile_groups', $attributes))
                         && $mutateWithinTransaction === null
                     ) {
-                        $admittedTargets = $this->relationAdmissionService->admit(
-                            $context,
-                            $profileId,
-                            $relationAttributes,
-                            touchTargets: false,
-                        );
-                        $contactSourceId = trim((string) ($relationAttributes['contact_source_account_profile_id'] ?? ''));
-                        if ($contactSourceId !== '' && isset($admittedTargets[$contactSourceId])) {
-                            $this->contactChannelsService->assertMirroredAdmissionStillValid(
-                                $admittedTargets[$contactSourceId],
+                        if (! $isDeleted) {
+                            $admittedTargets = $this->relationAdmissionService->admit(
+                                $context,
+                                $profileId,
                                 $relationAttributes,
+                                touchTargets: false,
                             );
+                            $contactSourceId = trim((string) ($relationAttributes['contact_source_account_profile_id'] ?? ''));
+                            if ($contactSourceId !== '' && isset($admittedTargets[$contactSourceId])) {
+                                $this->contactChannelsService->assertMirroredAdmissionStillValid(
+                                    $admittedTargets[$contactSourceId],
+                                    $relationAttributes,
+                                );
+                            }
                         }
 
                         $this->outboxPublisher->recordReceiptOnly(
@@ -420,17 +433,19 @@ class AccountProfileManagementService
                         ];
                     }
 
-                    $admittedTargets = $this->relationAdmissionService->admit(
-                        $context,
-                        $profileId,
-                        $relationAttributes,
-                    );
-                    $contactSourceId = trim((string) ($relationAttributes['contact_source_account_profile_id'] ?? ''));
-                    if ($contactSourceId !== '' && isset($admittedTargets[$contactSourceId])) {
-                        $this->contactChannelsService->assertMirroredAdmissionStillValid(
-                            $admittedTargets[$contactSourceId],
+                    if (! $isDeleted) {
+                        $admittedTargets = $this->relationAdmissionService->admit(
+                            $context,
+                            $profileId,
                             $relationAttributes,
                         );
+                        $contactSourceId = trim((string) ($relationAttributes['contact_source_account_profile_id'] ?? ''));
+                        if ($contactSourceId !== '' && isset($admittedTargets[$contactSourceId])) {
+                            $this->contactChannelsService->assertMirroredAdmissionStillValid(
+                                $admittedTargets[$contactSourceId],
+                                $relationAttributes,
+                            );
+                        }
                     }
 
                     try {
@@ -448,7 +463,7 @@ class AccountProfileManagementService
                                 $context,
                                 $persistedProfile,
                             );
-                        if (array_key_exists('nested_profile_groups', $attributes)) {
+                        if (! $isDeleted && array_key_exists('nested_profile_groups', $attributes)) {
                             $this->nestedGroupMemberStore->synchronizeGroupHeadsWithinContext(
                                 $context,
                                 $persistedProfile,
@@ -467,13 +482,23 @@ class AccountProfileManagementService
                         ]);
                     }
 
-                    $persistedProfile = $persistedProfile->fresh();
-                    $outboxEventId = $this->outboxPublisher->recordUpsert(
-                        $context,
-                        $persistedProfile,
-                        $commandId,
-                        $fingerprint,
-                    );
+                    $persistedProfile = AccountProfile::withTrashed()->findOrFail($profileId);
+                    $outboxEventId = $isDeleted
+                        ? null
+                        : $this->outboxPublisher->recordUpsert(
+                            $context,
+                            $persistedProfile,
+                            $commandId,
+                            $fingerprint,
+                        );
+                    if ($isDeleted) {
+                        $this->outboxPublisher->recordReceiptOnly(
+                            $context,
+                            $persistedProfile,
+                            $commandId,
+                            $fingerprint,
+                        );
+                    }
 
                     return [
                         'profile' => $persistedProfile,
@@ -1048,7 +1073,7 @@ class AccountProfileManagementService
             throw new ConcurrencyConflictException('Account Profile aggregate revision changed during mutation.');
         }
 
-        if ($searchChanged) {
+        if ($searchChanged && $profile->deleted_at === null) {
             $this->nestedGroupMemberStore->refreshSearchForMemberWithinContext(
                 $context,
                 $profileId,
@@ -1059,7 +1084,7 @@ class AccountProfileManagementService
             );
         }
 
-        return AccountProfile::query()->findOrFail($profileId);
+        return AccountProfile::withTrashed()->findOrFail($profileId);
     }
 
     private function persistWithoutAggregateRevisionCas(
@@ -1102,7 +1127,7 @@ class AccountProfileManagementService
             throw new ConcurrencyConflictException('Account Profile aggregate could not be updated.');
         }
 
-        if ($searchChanged) {
+        if ($searchChanged && $profile->deleted_at === null) {
             $this->nestedGroupMemberStore->refreshSearchForMemberWithinContext(
                 $context,
                 $profileId,
@@ -1113,7 +1138,7 @@ class AccountProfileManagementService
             );
         }
 
-        return AccountProfile::query()->findOrFail($profileId);
+        return AccountProfile::withTrashed()->findOrFail($profileId);
     }
 
     private function applyCanonicalSearchFields(AccountProfile $profile): void

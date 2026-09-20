@@ -232,7 +232,7 @@ final class AccountProfileCapabilityTypeSetProviderTest extends TestCase
 
         $scenarios = [
             [['is_queryable' => true], 'idx_account_profile_types_candidate_queryable_v2'],
-            [['is_queryable' => true, 'is_publicly_discoverable' => true], 'idx_account_profile_types_public_discovery_v2'],
+            [['is_publicly_discoverable' => true], 'idx_account_profile_types_capability_is_publicly_discoverable_v1'],
             [['is_publicly_navigable' => true], 'idx_account_profile_types_public_navigation_v2'],
             [['has_gallery' => true], 'idx_account_profile_types_capability_has_gallery_v1'],
             [['has_contact_channels' => true], 'idx_account_profile_types_candidate_contact_capable_v2'],

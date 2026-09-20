@@ -389,6 +389,11 @@ class EventCrudControllerTest extends TestCaseTenant
 
     public function test_event_occurrence_member_patch_resolves_dynamic_account_profile_party_type_from_profile_id_and_keeps_admin_and_public_read_models_separate(): void
     {
+        $bandType = TenantProfileType::query()->where('type', 'band')->firstOrFail();
+        $capabilities = $bandType->capabilities;
+        $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
+        $bandType->capabilities = $capabilities;
+        $bandType->save();
         $this->band->avatar_url = 'https://example.org/public-band-avatar.jpg';
         $this->band->save();
         $this->venue->cover_url = 'https://example.org/public-venue-cover.jpg';
@@ -447,6 +452,11 @@ class EventCrudControllerTest extends TestCaseTenant
 
     public function test_event_update_without_occurrence_payload_keeps_canonical_related_account_storage(): void
     {
+        $bandType = TenantProfileType::query()->where('type', 'band')->firstOrFail();
+        $capabilities = $bandType->capabilities;
+        $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
+        $bandType->capabilities = $capabilities;
+        $bandType->save();
         $this->band->avatar_url = 'https://example.org/update-band-avatar.jpg';
         $this->band->save();
         $this->venue->cover_url = 'https://example.org/update-venue-cover.jpg';
@@ -6198,7 +6208,7 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => ['value' => false, 'parameters' => []],
+                    'is_queryable' => ['value' => true, 'parameters' => []],
                     'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
                     'is_publicly_navigable' => ['value' => true, 'parameters' => []],
                 ],
@@ -6238,6 +6248,12 @@ class EventCrudControllerTest extends TestCaseTenant
             ],
         )->assertOk();
 
+        $hiddenGuestType = TenantProfileType::query()->where('type', 'hidden_guest')->firstOrFail();
+        $hiddenGuestCapabilities = $hiddenGuestType->capabilities;
+        $hiddenGuestCapabilities['is_queryable']['value'] = false;
+        $hiddenGuestType->capabilities = $hiddenGuestCapabilities;
+        $hiddenGuestType->save();
+
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$firstOccurrence->_id}");
         $management = $this->getJson($this->accountEventsBase.'/'.$eventId);
 
@@ -6248,7 +6264,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $this->publicEventRelatedProfileMemberRows((string) $public->json('data.slug'), $tabId)
         );
         $this->assertSame(
-            [(string) $this->artist->_id, (string) $delegate->_id],
+            [(string) $hiddenGuest->_id, (string) $this->artist->_id, (string) $delegate->_id],
             $profiles->pluck('id')->values()->all()
         );
         $membersPath = $this->assertManagementOccurrenceProfileGroupMetadata(
@@ -6265,8 +6281,13 @@ class EventCrudControllerTest extends TestCaseTenant
                 ->values()
                 ->all()
         );
-        $public->assertJsonPath('data.counterpart_preview.0.id', (string) $this->artist->_id);
-        $public->assertJsonPath('data.counterpart_count', 2);
+        $public->assertJsonPath('data.counterpart_preview.0.id', (string) $hiddenGuest->_id);
+        $public->assertJsonPath('data.counterpart_preview.0.can_open_public_detail', true);
+        $public->assertJsonPath(
+            'data.counterpart_preview.0.public_detail_path',
+            '/parceiro/'.$hiddenGuest->slug,
+        );
+        $public->assertJsonPath('data.counterpart_count', 3);
         $public->assertJsonMissingPath('data.linked_account_profiles');
         $management->assertJsonMissingPath('data.occurrences.1.own_linked_account_profiles');
         $management->assertJsonMissingPath('data.occurrences.1.own_event_parties');
@@ -6280,7 +6301,8 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->assertSame(false, $delegatePayload['can_open_public_detail'] ?? null);
         $this->assertNull($delegatePayload['public_detail_path'] ?? null);
-        $this->assertNull($hiddenGuestPayload);
+        $this->assertSame(true, $hiddenGuestPayload['can_open_public_detail'] ?? null);
+        $this->assertSame('/parceiro/'.$hiddenGuest->slug, $hiddenGuestPayload['public_detail_path'] ?? null);
         $this->assertSame(true, $artistPayload['can_open_public_detail'] ?? null);
         $this->assertSame('/parceiro/'.$this->artist->slug, $artistPayload['public_detail_path'] ?? null);
     }

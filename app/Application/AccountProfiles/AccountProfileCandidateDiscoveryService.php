@@ -206,7 +206,7 @@ final class AccountProfileCandidateDiscoveryService
      */
     private function selectedSummariesFromProfiles(array $profileIds, Collection $profilesById): array
     {
-        $queryablePolicy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
+        $queryableTypes = array_flip($this->eligibleTypes(self::SCOPE_QUERYABLE));
         $contactCapableTypes = array_flip($this->eligibleTypes(self::SCOPE_CONTACT_CAPABLE));
 
         $summaries = [];
@@ -225,7 +225,7 @@ final class AccountProfileCandidateDiscoveryService
             $summaries[$profileId] = [
                 'id' => $profileId,
                 'display_name' => $displayName === '' ? null : $displayName,
-                'is_queryable_candidate' => $queryablePolicy->isPubliclyExposed($profile),
+                'is_queryable_candidate' => $isActive && isset($queryableTypes[$profileType]),
                 'is_contact_capable_candidate' => $isActive
                     && isset($contactCapableTypes[$profileType])
                     && trim((string) $profile->contact_mode) === AccountProfileContactChannelsService::CONTACT_MODE_OWN,

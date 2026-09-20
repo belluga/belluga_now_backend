@@ -38,19 +38,19 @@ class AccountProfileFormatterService
         bool $publicContactProjection = false,
         bool $includeExternalLinks = false,
         bool $includeExternalLinksLimit = false,
+        ?Account $account = null,
+        bool $includeAdminVisibility = false,
     ): array {
         $baseUrl = request()->getSchemeAndHttpHost();
-        $account = Account::query()->where('_id', $profile->account_id)->first();
+        $account ??= $profile->relationLoaded('account')
+            ? $profile->getRelation('account')
+            : Account::query()->where('_id', $profile->account_id)->first();
         $slug = trim((string) ($profile->slug ?? ''));
         $publicCatalogPolicy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
-        $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile)
-            && $account instanceof Account
-            && $this->accountPublicationStateService->isPublished(
-                $account->getAttribute('publication')
-            );
+        $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile, $account);
 
         $nestedProfileGroups = $includeAgendaOccurrences
-            ? ($publicCatalogPolicy->isPublicNestedParent($profile)
+            ? ($publicCatalogPolicy->isPublicNestedParent($profile, $account)
                 ? $this->nestedGroupMemberStore->publicMetadataGroups($profile)
                 : [])
             : $this->nestedGroupMemberStore->metadataGroups($profile);
@@ -69,18 +69,22 @@ class AccountProfileFormatterService
                 : max(0, (int) ($profile->aggregate_revision ?? 0)),
             'can_open_public_detail' => $canOpenPublicDetail,
             'public_detail_path' => $canOpenPublicDetail ? '/parceiro/'.$slug : null,
-            'avatar_url' => $this->mediaService->normalizePublicUrl(
-                $baseUrl,
-                $profile,
-                'avatar',
-                is_string($profile->avatar_url) ? $profile->avatar_url : null
-            ),
-            'cover_url' => $this->mediaService->normalizePublicUrl(
-                $baseUrl,
-                $profile,
-                'cover',
-                is_string($profile->cover_url) ? $profile->cover_url : null
-            ),
+            'avatar_url' => $publicCatalogPolicy->canExposePublicMedia($profile, $account, 'avatar')
+                ? $this->mediaService->normalizePublicUrl(
+                    $baseUrl,
+                    $profile,
+                    'avatar',
+                    is_string($profile->avatar_url) ? $profile->avatar_url : null
+                )
+                : null,
+            'cover_url' => $publicCatalogPolicy->canExposePublicMedia($profile, $account, 'cover')
+                ? $this->mediaService->normalizePublicUrl(
+                    $baseUrl,
+                    $profile,
+                    'cover',
+                    is_string($profile->cover_url) ? $profile->cover_url : null
+                )
+                : null,
             'bio' => $this->canonicalRichText($profile, 'bio'),
             'taxonomy_terms' => $this->taxonomyTermSummaryResolver->ensureSnapshots(
                 is_array($profile->taxonomy_terms ?? null) ? $profile->taxonomy_terms : []
@@ -122,7 +126,38 @@ class AccountProfileFormatterService
             $payload['agenda_occurrences'] = $this->agendaOccurrencesService->forProfile($profile);
         }
 
+        if ($includeAdminVisibility) {
+            $payload = [
+                ...$payload,
+                'visibility' => $profile->visibility,
+                'is_active' => (bool) $profile->is_active,
+                'parent_account_publication_status' => $account instanceof Account
+                    ? $this->accountPublicationStateService->normalizePublication($account->publication)['status']
+                    : null,
+                ...$this->adminMediaUrls($profile, $baseUrl),
+            ];
+        }
+
         return $payload;
+    }
+
+    /** @return array<string, string> */
+    private function adminMediaUrls(AccountProfile $profile, string $baseUrl): array
+    {
+        $profileType = (string) $profile->profile_type;
+        $urls = [];
+
+        foreach (['avatar' => $this->typeSetProvider->avatarEnabledTypes(), 'cover' => $this->typeSetProvider->coverEnabledTypes()] as $kind => $enabledTypes) {
+            if (! in_array($profileType, $enabledTypes, true)
+                || $this->mediaService->resolveMediaPathForBaseUrl($profile, $kind, $baseUrl) === null) {
+                continue;
+            }
+
+            $urls['admin_'.$kind.'_url'] = rtrim($baseUrl, '/')
+                .'/admin/api/v1/account_profiles/'.$profile->getKey().'/media/'.$kind;
+        }
+
+        return $urls;
     }
 
     private function canonicalRichText(AccountProfile $profile, string $field): string

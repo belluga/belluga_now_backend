@@ -342,6 +342,19 @@ class FavoritesControllerTest extends TestCaseTenant
 
     public function test_favorites_exposes_account_profile_visual_preview_and_live_occurrence_state_fields(): void
     {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'restaurant'],
+            [
+                'label' => 'Restaurant',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'has_cover' => ['value' => true, 'parameters' => []],
+                ],
+            ],
+        );
+
         $profile = $this->createProfile(
             displayName: 'Profile Visual Payload',
             slug: 'profile-visual-payload',
@@ -376,13 +389,13 @@ class FavoritesControllerTest extends TestCaseTenant
         $response->assertStatus(200);
         $response->assertJsonPath('items.0.target.cover_url', 'https://cdn.test/profile-cover.png');
         $response->assertJsonPath('items.0.target.profile_type', 'restaurant');
-        $response->assertJsonPath('items.0.target.can_open_public_detail', false);
-        $response->assertJsonPath('items.0.target.public_detail_path', null);
+        $response->assertJsonPath('items.0.target.can_open_public_detail', true);
+        $response->assertJsonPath('items.0.target.public_detail_path', '/parceiro/profile-visual-payload');
         $response->assertJsonPath('items.0.navigation.kind', 'event');
-        $response->assertJsonPath('items.0.navigation.can_open_public_detail', false);
+        $response->assertJsonPath('items.0.navigation.can_open_public_detail', true);
         $response->assertJsonPath('items.0.navigation.target_slug', 'event-visual-payload');
         $response->assertJsonPath('items.0.navigation.target_path', '/agenda/evento/event-visual-payload?occurrence='.(string) $liveOccurrence->_id);
-        $response->assertJsonPath('items.0.navigation.profile_target_path', null);
+        $response->assertJsonPath('items.0.navigation.profile_target_path', '/parceiro/profile-visual-payload');
         $response->assertJsonPath('items.0.navigation.event_target_path', '/agenda/evento/event-visual-payload?occurrence='.(string) $liveOccurrence->_id);
         $response->assertJsonPath('items.0.navigation.event_target_slug', 'event-visual-payload');
         $response->assertJsonPath('items.0.navigation.event_occurrence_id', (string) $liveOccurrence->_id);
@@ -481,6 +494,18 @@ class FavoritesControllerTest extends TestCaseTenant
 
     public function test_favorites_omit_profiles_whose_parent_account_is_draft_without_deleting_edges_or_published_rows(): void
     {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'restaurant'],
+            [
+                'label' => 'Restaurant',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                ],
+            ],
+        );
+
         $publishedLead = $this->createProfile(
             displayName: 'Profile Published Lead',
             slug: 'profile-published-lead',

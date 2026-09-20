@@ -45,10 +45,7 @@ final class AccountProfileTypeSetProvider
     public function publiclyDiscoverableTypes(): array
     {
         return $this->remember('publicly_discoverable', fn (): array => $this->capabilities
-            ->typeIdsWhereAllEffectiveValues([
-                'is_queryable' => true,
-                'is_publicly_discoverable' => true,
-            ]));
+            ->typeIdsWhereAllEffectiveValues(['is_publicly_discoverable' => true]));
     }
 
     /**
@@ -66,6 +63,20 @@ final class AccountProfileTypeSetProvider
     {
         return $this->remember('publicly_navigable', fn (): array => $this->capabilities
             ->typeIdsWhereAllEffectiveValues(['is_publicly_navigable' => true]));
+    }
+
+    /** @return array<int, string> */
+    public function avatarEnabledTypes(): array
+    {
+        return $this->remember('avatar_enabled', fn (): array => $this->capabilities
+            ->typeIdsWhereAllEffectiveValues(['has_avatar' => true]));
+    }
+
+    /** @return array<int, string> */
+    public function coverEnabledTypes(): array
+    {
+        return $this->remember('cover_enabled', fn (): array => $this->capabilities
+            ->typeIdsWhereAllEffectiveValues(['has_cover' => true]));
     }
 
     /**

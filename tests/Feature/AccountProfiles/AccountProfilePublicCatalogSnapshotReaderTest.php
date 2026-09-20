@@ -8,6 +8,7 @@ use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
+use App\Models\Tenants\Account;
 use App\Models\Tenants\TenantProfileType;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -61,6 +62,7 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
         ]);
 
         $reader = app(AccountProfilePublicCatalogSnapshotReader::class);
+        $publishedAccount = $this->publishedAccount();
 
         $snapshot = $reader->catalogSnapshot();
 
@@ -73,6 +75,7 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
                 'visibility' => 'public',
                 'slug' => 'venue-detail',
             ]),
+            $publishedAccount,
         ));
         $this->assertTrue($snapshot->policy()->canOpenPublicDetail(
             new \App\Models\Tenants\AccountProfile([
@@ -81,6 +84,7 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
                 'visibility' => 'public',
                 'slug' => 'hidden-detail',
             ]),
+            $publishedAccount,
         ));
         $this->assertSame(['artist', 'hidden', 'venue'], array_column($snapshot->filterOptions(), 'value'));
         $this->assertSame(['Alpha Artist', 'Hidden Type', 'Zoo Venue'], array_column($snapshot->filterOptions(), 'label'));
@@ -124,6 +128,7 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
         ]);
 
         $reader = app(AccountProfilePublicCatalogSnapshotReader::class);
+        $publishedAccount = $this->publishedAccount();
 
         $snapshot = $reader->catalogSnapshot();
 
@@ -136,6 +141,7 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
                 'visibility' => 'public',
                 'slug' => 'direct-only-detail',
             ]),
+            $publishedAccount,
         ));
     }
 
@@ -150,6 +156,7 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
         ]);
 
         $reader = app(AccountProfilePublicCatalogSnapshotReader::class);
+        $publishedAccount = $this->publishedAccount();
         $profile = new \App\Models\Tenants\AccountProfile([
             'profile_type' => 'venue',
             'is_active' => true,
@@ -157,8 +164,8 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
             'slug' => 'venue-detail',
         ]);
 
-        $this->assertTrue($reader->catalogSnapshot()->policy()->canOpenPublicDetail($profile));
-        $this->assertTrue($reader->publicPoiEligibilityPolicy()->canOpenPublicDetail($profile));
+        $this->assertTrue($reader->catalogSnapshot()->policy()->canOpenPublicDetail($profile, $publishedAccount));
+        $this->assertTrue($reader->publicPoiEligibilityPolicy()->canOpenPublicDetail($profile, $publishedAccount));
 
         $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $venueType->capabilities = [
@@ -170,8 +177,8 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
         ];
         $venueType->save();
 
-        $this->assertFalse($reader->catalogSnapshot()->policy()->canOpenPublicDetail($profile));
-        $this->assertFalse($reader->publicPoiEligibilityPolicy()->canOpenPublicDetail($profile));
+        $this->assertFalse($reader->catalogSnapshot()->policy()->canOpenPublicDetail($profile, $publishedAccount));
+        $this->assertFalse($reader->publicPoiEligibilityPolicy()->canOpenPublicDetail($profile, $publishedAccount));
     }
 
     public function test_the_container_scopes_the_reader_to_one_request_lifecycle(): void
@@ -197,6 +204,13 @@ class AccountProfilePublicCatalogSnapshotReaderTest extends TestCase
             'allowed_taxonomies' => ['cuisine'],
             'visual' => ['mode' => 'icon', 'icon' => 'store'],
             'capabilities' => $capabilities,
+        ]);
+    }
+
+    private function publishedAccount(): Account
+    {
+        return new Account([
+            'publication' => ['status' => 'published'],
         ]);
     }
 

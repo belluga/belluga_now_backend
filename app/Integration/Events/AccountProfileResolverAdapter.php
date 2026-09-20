@@ -7,14 +7,13 @@ namespace App\Integration\Events;
 use App\Application\AccountProfiles\AccountProfileAdmissionFenceService;
 use App\Application\AccountProfiles\AccountProfileGalleryService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
-use App\Application\AccountProfiles\AccountProfilePublicCatalogEligibilityPolicy;
 use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
+use App\Application\AccountProfiles\AccountProfilePublicVisibilityPolicy;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
 use App\Application\AccountProfiles\AccountProfileSearchV1;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\AccountProfiles\PhysicalHostEligibilityPolicy;
-use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Taxonomies\TaxonomyTermSummaryResolverService;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\TenantProfileType;
@@ -149,11 +148,12 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             $this->throwPhysicalHostEligibilityError($ids, $missing);
         }
 
+        $accountsById = $this->accountsByProfiles($profiles->all());
         $resolved = [];
         foreach ($ids as $profileId) {
             /** @var AccountProfile $profile */
             $profile = $profiles[$profileId];
-            $resolved[$profileId] = $this->formatPhysicalHostProfile($profile, $eligibleTypes);
+            $resolved[$profileId] = $this->formatPhysicalHostProfile($profile, $eligibleTypes, account: $accountsById[(string) $profile->account_id] ?? null);
         }
 
         return $resolved;
@@ -178,24 +178,36 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     private function formatPhysicalHostProfile(
         AccountProfile $profile,
         array $eligiblePhysicalHostTypes,
-        ?AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy = null,
+        ?AccountProfilePublicVisibilityPolicy $publicCatalogPolicy = null,
+        ?\App\Models\Tenants\Account $account = null,
     ): array {
         $location = $this->validatedPhysicalHostLocation($profile, $eligiblePhysicalHostTypes);
         $slug = $this->normalizeSlug($profile->slug ?? null);
-        $canOpenPublicDetail = $this->canOpenPublicDetail($profile, $publicCatalogPolicy);
+        $canOpenPublicDetail = $this->canOpenPublicDetail($profile, $publicCatalogPolicy, $account);
+        $publicMediaPolicy = $publicCatalogPolicy === null
+            ? null
+            : $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
+        $canExposePublicMedia = $publicMediaPolicy === null
+            || $publicMediaPolicy->canExposePublicMedia($profile, $account, 'avatar');
+        $canExposePublicCover = $publicMediaPolicy === null
+            || $publicMediaPolicy->canExposePublicMedia($profile, $account, 'cover');
         $baseUrl = request()->getSchemeAndHttpHost();
-        $avatarUrl = $this->accountProfileMediaService->normalizePublicUrl(
-            $baseUrl,
-            $profile,
-            'avatar',
-            $this->normalizeCandidateMediaInput($profile->avatar_url ?? null),
-        );
-        $coverUrl = $this->accountProfileMediaService->normalizePublicUrl(
-            $baseUrl,
-            $profile,
-            'cover',
-            $this->normalizeCandidateMediaInput($profile->cover_url ?? null),
-        );
+        $avatarUrl = $canExposePublicMedia
+            ? $this->accountProfileMediaService->normalizePublicUrl(
+                $baseUrl,
+                $profile,
+                'avatar',
+                $this->normalizeCandidateMediaInput($profile->avatar_url ?? null),
+            )
+            : null;
+        $coverUrl = $canExposePublicCover
+            ? $this->accountProfileMediaService->normalizePublicUrl(
+                $baseUrl,
+                $profile,
+                'cover',
+                $this->normalizeCandidateMediaInput($profile->cover_url ?? null),
+            )
+            : null;
 
         return [
             'venue' => [
@@ -282,36 +294,18 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             return [];
         }
 
-        $resolved = [];
-        foreach ($this->accountProfileQueryService->findExistingPublicCatalogProfilesByIds($requestedIds) as $profile) {
-            if (! $profile instanceof AccountProfile) {
-                continue;
-            }
-
-            $resolved[(string) $profile->_id] = $this->formatEventPartyProfile($profile);
-        }
-
-        return $resolved;
-    }
-
-    public function resolveExistingEventPartyDisplayProfilesByIds(array $profileIds): array
-    {
-        $requestedIds = $this->normalizeProfileIds($profileIds);
-        if ($requestedIds === []) {
-            return [];
-        }
-
-        $profiles = AccountProfile::query()
-            ->whereIn('_id', $requestedIds)
-            ->get();
-
+        $profiles = $this->accountProfileQueryService->findExistingPublicCatalogProfilesByIds($requestedIds);
         $resolved = [];
         foreach ($profiles as $profile) {
             if (! $profile instanceof AccountProfile) {
                 continue;
             }
 
-            $resolved[(string) $profile->_id] = $this->formatEventPartyProfile($profile);
+            $resolved[(string) $profile->_id] = $this->formatEventPartyProfile(
+                $profile,
+                $profile->relationLoaded('account') ? $profile->getRelation('account') : null,
+                $this->publicCatalogSnapshotReader->catalogSnapshot()->policy(),
+            );
         }
 
         return $resolved;
@@ -572,7 +566,10 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
 
     public function publicMemberAccountMatchExpression(): array
     {
-        return ['publication.status' => AccountPublicationStateService::PUBLISHED];
+        return $this->publicCatalogSnapshotReader
+            ->catalogSnapshot()
+            ->policy()
+            ->publishedParentAccountMatchExpression();
     }
 
     public function normalizeMemberSearch(mixed $rawSearch): ?string
@@ -682,8 +679,11 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
     /**
      * @return array<string, mixed>
      */
-    private function formatEventPartyProfile(AccountProfile $profile): array
-    {
+    private function formatEventPartyProfile(
+        AccountProfile $profile,
+        ?\App\Models\Tenants\Account $account = null,
+        ?AccountProfilePublicVisibilityPolicy $publicCatalogPolicy = null,
+    ): array {
         $taxonomy = $profile->taxonomy_terms ?? [];
         $genres = [];
 
@@ -701,15 +701,25 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
         }
 
         $slug = $this->normalizeSlug($profile->slug ?? null);
-        $canOpenPublicDetail = $this->canOpenPublicDetail($profile);
+        $canOpenPublicDetail = $this->canOpenPublicDetail($profile, account: $account);
+        $avatarUrl = $profile->avatar_url ?? null;
+        $coverUrl = $profile->cover_url ?? null;
+        if ($publicCatalogPolicy !== null) {
+            $avatarUrl = $publicCatalogPolicy->canExposePublicMedia($profile, $account, 'avatar')
+                ? $avatarUrl
+                : null;
+            $coverUrl = $publicCatalogPolicy->canExposePublicMedia($profile, $account, 'cover')
+                ? $coverUrl
+                : null;
+        }
 
         return [
             'id' => (string) $profile->_id,
             'display_name' => $profile->display_name,
             'slug' => $slug,
             'profile_type' => (string) ($profile->profile_type ?? ''),
-            'avatar_url' => $profile->avatar_url ?? null,
-            'cover_url' => $profile->cover_url ?? null,
+            'avatar_url' => $avatarUrl,
+            'cover_url' => $coverUrl,
             'highlight' => false,
             'genres' => array_values(array_filter($genres, static fn ($item): bool => $item !== '')),
             'taxonomy_terms' => $this->taxonomyTermSummaryResolver->resolve(
@@ -850,8 +860,10 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
             $query->whereIn('profile_type', $eligiblePhysicalHostTypes);
         }
 
+        $profiles = $query->get();
+        $accountsById = $this->accountsByProfiles($profiles->all());
         $resolved = [];
-        foreach ($query->get() as $profile) {
+        foreach ($profiles as $profile) {
             if (! $profile instanceof AccountProfile) {
                 continue;
             }
@@ -861,6 +873,7 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
                     $profile,
                     $eligiblePhysicalHostTypes,
                     $publicCatalogPolicy,
+                    $accountsById[(string) $profile->account_id] ?? null,
                 );
             } catch (ValidationException) {
                 continue;
@@ -904,11 +917,28 @@ class AccountProfileResolverAdapter implements EventProfileResolverContract
 
     private function canOpenPublicDetail(
         AccountProfile $profile,
-        ?AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy = null,
+        ?AccountProfilePublicVisibilityPolicy $publicCatalogPolicy = null,
+        ?\App\Models\Tenants\Account $account = null,
     ): bool {
         return ($publicCatalogPolicy ?? $this->publicCatalogSnapshotReader
             ->catalogSnapshot()
             ->policy())
-            ->canOpenPublicDetail($profile);
+            ->canOpenPublicDetail($profile, $account);
+    }
+
+    /** @param array<int, AccountProfile> $profiles @return array<string, \App\Models\Tenants\Account> */
+    private function accountsByProfiles(array $profiles): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(
+            static fn (AccountProfile $profile): string => trim((string) $profile->account_id),
+            $profiles,
+        ))));
+        if ($ids === []) {
+            return [];
+        }
+
+        return \App\Models\Tenants\Account::query()->whereIn('_id', $ids)->get()
+            ->keyBy(static fn (\App\Models\Tenants\Account $account): string => (string) $account->getKey())
+            ->all();
     }
 }
