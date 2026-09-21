@@ -53,8 +53,7 @@ final class AccountProfileMapPoiOutboxConsumer implements AccountProfileOutboxCo
             if (! is_array($projection)) {
                 throw new RuntimeException('Account Profile Map POI upsert event requires an immutable projection.');
             }
-            $eventProfileType = trim((string) ($projection['profile_type'] ?? ''));
-            if ($eventProfileType === '') {
+            if (trim((string) ($projection['profile_type'] ?? '')) === '') {
                 throw new RuntimeException('Account Profile Map POI outbox event requires a profile type.');
             }
             try {
@@ -66,16 +65,16 @@ final class AccountProfileMapPoiOutboxConsumer implements AccountProfileOutboxCo
                 ['_id' => $objectId, 'deleted_at' => null],
                 $context->rawOptions(),
             ));
-            $currentProfileType = trim((string) ($currentProfile['profile_type'] ?? ''));
-            $profileTypes = $this->admissionFences->touchProfileTypes(
-                $context->database(),
-                $context->session(),
-                [$eventProfileType, $currentProfileType],
-            );
 
             if ($currentProfile === null) {
                 $this->mapPois->deleteByRef('account_profile', $profileId);
             } else {
+                $currentProfileType = trim((string) ($currentProfile['profile_type'] ?? ''));
+                $profileTypes = $this->admissionFences->touchProfileTypes(
+                    $context->database(),
+                    $context->session(),
+                    [$currentProfileType],
+                );
                 $currentType = $this->profileType($profileTypes[$currentProfileType] ?? null);
                 $this->mapPois->upsertFromAccountProfile(
                     (object) $currentProfile,
