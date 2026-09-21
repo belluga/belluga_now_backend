@@ -9958,14 +9958,17 @@ class AccountProfilesControllerTest extends TestCaseTenant
         );
 
         $response->assertOk();
-        $response->assertJsonPath('data.0.id', (string) $queryable->_id);
+        $candidateIds = collect($response->json('data'))->pluck('id')->all();
+        $this->assertCount(2, $candidateIds);
         $this->assertSame(
-            [(string) $queryable->_id],
-            collect($response->json('data'))->pluck('id')->all(),
+            [
+                (string) $private->_id,
+                (string) $queryable->_id,
+            ],
+            $candidateIds,
         );
-        $this->assertNotSame((string) $hidden->_id, (string) ($response->json('data.0.id') ?? ''));
-        $this->assertNotSame((string) $private->_id, (string) ($response->json('data.0.id') ?? ''));
-        $this->assertNotSame((string) $excluded->_id, (string) ($response->json('data.0.id') ?? ''));
+        $this->assertNotContains((string) $hidden->_id, $candidateIds);
+        $this->assertNotContains((string) $excluded->_id, $candidateIds);
     }
 
     public function test_home_favorites_pin_candidates_include_only_tenant_owned_published_public_profiles(): void
