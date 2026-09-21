@@ -27,9 +27,6 @@
         <testsuite name="Feature-Migrations">
             <directory>tests/Feature/Migrations</directory>
         </testsuite>
-        <testsuite name="Feature-StaticAssets">
-            <directory>tests/Feature/StaticAssets</directory>
-        </testsuite>
         <testsuite name="Feature-Taxonomies">
             <directory>tests/Feature/Taxonomies</directory>
         </testsuite>

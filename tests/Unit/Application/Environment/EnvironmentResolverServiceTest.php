@@ -216,8 +216,8 @@ class EnvironmentResolverServiceTest extends TestCase
             ],
             'type_asset_url' => 'https://tenant-beta.test/api/v1/media/account-profile-types/type-1/type_asset?v=123',
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
         $type->save();
@@ -248,6 +248,10 @@ class EnvironmentResolverServiceTest extends TestCase
             'https://tenant-beta.test/api/v1/media/account-profile-types/type-1/type_asset?v=123',
             data_get($restaurant, 'poi_visual.image_url')
         );
+        $this->assertSame('required', data_get($restaurant, 'capabilities.location_policy.effective.value'));
+        $this->assertTrue(data_get($restaurant, 'capabilities.is_map_poi_enabled.effective.value'));
+        $this->assertTrue(data_get($restaurant, 'capabilities.is_physical_host_enabled.effective.value'));
+        $this->assertTrue(data_get($restaurant, 'capabilities.is_reference_location_enabled.effective.value'));
     }
 
     public function test_resolve_falls_back_to_landlord_environment(): void

@@ -237,7 +237,6 @@ class TenantEnvironmentPayloadFactory
         return match (strtolower(trim($entity))) {
             'event' => 'event',
             'account_profile' => 'account_profile',
-            'static_asset' => 'static_asset',
             default => null,
         };
     }

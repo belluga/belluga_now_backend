@@ -17,8 +17,6 @@ interface MapPoiSourceReaderContract
 
     public function isParentAccountPublished(object $profile): bool;
 
-    public function findStaticAssetById(string $assetId): ?object;
-
     /**
      * @return iterable<string>
      */
@@ -34,13 +32,4 @@ interface MapPoiSourceReaderContract
      */
     public function allTrashedAccountProfileIds(?\DateTimeInterface $deletedSince = null): iterable;
 
-    /**
-     * @return iterable<string>
-     */
-    public function allStaticAssetIds(): iterable;
-
-    /**
-     * @return iterable<string>
-     */
-    public function allTrashedStaticAssetIds(?\DateTimeInterface $deletedSince = null): iterable;
 }

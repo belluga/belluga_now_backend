@@ -26,6 +26,7 @@ use Illuminate\Support\Facades\Event as EventFacade;
 use Illuminate\Support\Str;
 use Mockery;
 use RuntimeException;
+use Symfony\Component\Process\Process;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -43,6 +44,10 @@ class AttendanceCommitmentServiceTest extends TestCaseTenant
     }
 
     private static bool $bootstrapped = false;
+
+    private const BARRIER_TIMEOUT_SECONDS = 30;
+
+    private const PROCESS_TIMEOUT_SECONDS = 60;
 
     private Account $account;
 
@@ -324,6 +329,170 @@ class AttendanceCommitmentServiceTest extends TestCaseTenant
         $this->assertSame(0, $leftoverPending);
     }
 
+    public function test_real_twenty_operation_overlap_batches_preserve_one_commitment_and_at_most_one_credit(): void
+    {
+        $tenantSlug = (string) Tenant::current()?->slug;
+        $this->assertNotSame('', $tenantSlug);
+
+        foreach (range(1, 5) as $batch) {
+            foreach (['mixed', 'duplicate_accept'] as $mode) {
+                $event = $this->createEvent();
+                $occurrenceId = $this->firstOccurrenceId($event);
+                $inviter = $this->createAccountUser("Overlap Inviter {$batch} {$mode}");
+                $invite = $this->createInvite($inviter, $this->user, $event, $occurrenceId, 'pending');
+                $this->runAttendanceOverlapBurst($tenantSlug, $event, $occurrenceId, (string) $invite->_id, $mode, $batch);
+            }
+        }
+    }
+
+    private function runAttendanceOverlapBurst(string $tenantSlug, Event $event, string $occurrenceId, string $inviteId, string $mode, int $batch): void
+    {
+        $concurrency = 20;
+        $barrier = sys_get_temp_dir().'/attendance-overlap-'.bin2hex(random_bytes(8));
+        $processes = [];
+
+        try {
+            foreach (range(1, $concurrency) as $worker) {
+                $operation = $mode === 'mixed' && $worker > 10 ? 'direct' : 'accept';
+                $processes[] = $this->attendanceOverlapProcess(
+                    tenantSlug: $tenantSlug,
+                    userId: (string) $this->user->_id,
+                    eventId: (string) $event->_id,
+                    occurrenceId: $occurrenceId,
+                    inviteId: $inviteId,
+                    barrier: $barrier,
+                    concurrency: $concurrency,
+                    worker: $worker,
+                    operation: $operation,
+                );
+            }
+            foreach ($processes as $process) {
+                $process->start();
+            }
+
+            $results = [];
+            foreach ($processes as $process) {
+                $process->wait();
+                $this->assertTrue($process->isSuccessful(), $process->getOutput().$process->getErrorOutput());
+                $results[] = $this->attendanceOverlapResult($process);
+            }
+            $label = "batch {$batch}, mode {$mode}";
+            $successful = 0;
+            $attendanceEvents = 0;
+            $creditEvents = 0;
+            foreach ($results as $result) {
+                $this->assertArrayHasKey('attendance_events', $result, $label);
+                $this->assertArrayHasKey('credit_events', $result, $label);
+                $attendanceEvents += (int) $result['attendance_events'];
+                $creditEvents += (int) $result['credit_events'];
+                if (($result['status'] ?? null) === 'ok') {
+                    $this->assertContains($result['operation'] ?? null, ['accept', 'direct'], $label);
+                    $successful++;
+
+                    continue;
+                }
+
+                $this->assertSame('conflict', $result['status'] ?? null, $label.': '.json_encode($results, JSON_THROW_ON_ERROR));
+                $this->assertContains($result['exception'] ?? null, [
+                    \MongoDB\Driver\Exception\BulkWriteException::class,
+                    \MongoDB\Driver\Exception\CommandException::class,
+                ], $label);
+                $this->assertContains((int) ($result['code'] ?? 0), [11000, 112, 251], $label);
+                $this->assertSame(0, $result['attendance_events'], $label.': failed worker emitted confirmation');
+                $this->assertSame(0, $result['credit_events'], $label.': failed worker emitted credit');
+            }
+            $this->assertGreaterThan(0, $successful, $label.': no operation succeeded');
+            $this->assertSame(1, $this->activeCommitmentCount($event, $occurrenceId), $label);
+            $creditedAcceptances = InviteEdge::query()
+                ->where('event_id', (string) $event->_id)
+                ->where('occurrence_id', $occurrenceId)
+                ->where('receiver_user_id', (string) $this->user->_id)
+                ->where('credited_acceptance', true)
+                ->count();
+            if ($mode === 'duplicate_accept') {
+                $this->assertSame(1, $creditedAcceptances, $label);
+            } else {
+                $this->assertLessThanOrEqual(1, $creditedAcceptances, $label);
+            }
+            $this->assertSame(1, $attendanceEvents, $label.': attendance confirmation must be emitted once');
+            $this->assertSame($creditedAcceptances, $creditEvents, $label.': emitted credit must match committed attribution');
+        } finally {
+            foreach ($processes as $process) {
+                if ($process->isRunning()) {
+                    $process->stop(1);
+                }
+            }
+            foreach (glob($barrier.'.ready.*') ?: [] as $path) {
+                @unlink($path);
+            }
+        }
+    }
+
+    private function attendanceOverlapProcess(string $tenantSlug, string $userId, string $eventId, string $occurrenceId, string $inviteId, string $barrier, int $concurrency, int $worker, string $operation): Process
+    {
+        $values = array_map(static fn (mixed $value): string => var_export($value, true), compact('tenantSlug', 'userId', 'eventId', 'occurrenceId', 'inviteId', 'barrier', 'concurrency', 'worker', 'operation'));
+        $timeout = var_export(self::BARRIER_TIMEOUT_SECONDS, true);
+        $code = <<<PHP
+\$attendanceEvents = 0;
+\$creditEvents = 0;
+try {
+    \$tenant = \App\Models\Landlord\Tenant::query()->where('slug', {$values['tenantSlug']})->firstOrFail();
+    \$tenant->makeCurrent();
+    \Illuminate\Support\Facades\Event::listen(
+        \App\Domain\Events\Events\OccurrenceAttendanceConfirmed::class,
+        static function () use (&\$attendanceEvents): void { \$attendanceEvents++; },
+    );
+    \Illuminate\Support\Facades\Event::listen(
+        \Belluga\Invites\Domain\Events\CreditedInviteAccepted::class,
+        static function () use (&\$creditEvents): void { \$creditEvents++; },
+    );
+    file_put_contents({$values['barrier']} . '.ready.' . {$values['worker']}, 'ready');
+    \$deadline = microtime(true) + {$timeout};
+    while (count(glob({$values['barrier']} . '.ready.*')) < {$values['concurrency']}) {
+        if (microtime(true) >= \$deadline) { throw new \RuntimeException('attendance overlap barrier timed out'); }
+        usleep(10000);
+    }
+    if ({$values['operation']} === 'accept') {
+        app(\Belluga\Invites\Application\Mutations\InviteMutationService::class)->acceptForUserId({$values['userId']}, {$values['inviteId']});
+    } else {
+        app(\App\Application\Events\AttendanceCommitmentService::class)->confirm({$values['userId']}, {$values['eventId']}, {$values['occurrenceId']});
+    }
+    echo 'ATTENDANCE_OVERLAP_RESULT='.json_encode(['status' => 'ok', 'operation' => {$values['operation']}, 'attendance_events' => \$attendanceEvents, 'credit_events' => \$creditEvents], JSON_THROW_ON_ERROR);
+} catch (\Throwable \$exception) {
+    \$conflict = null;
+    for (\$candidate = \$exception; \$candidate !== null; \$candidate = \$candidate->getPrevious()) {
+        \$candidateCode = (int) \$candidate->getCode();
+        if ((\$candidate instanceof \MongoDB\Driver\Exception\BulkWriteException && in_array(\$candidateCode, [11000, 112], true))
+            || (\$candidate instanceof \MongoDB\Driver\Exception\CommandException && in_array(\$candidateCode, [112, 251], true))) {
+            \$conflict = \$candidate;
+            break;
+        }
+    }
+    \$reported = \$conflict ?? \$exception;
+    echo 'ATTENDANCE_OVERLAP_RESULT='.json_encode([
+        'status' => \$conflict !== null ? 'conflict' : 'error',
+        'exception' => \$reported::class,
+        'code' => (int) \$reported->getCode(),
+        'message' => \$exception->getMessage(),
+        'attendance_events' => \$attendanceEvents,
+        'credit_events' => \$creditEvents,
+    ], JSON_THROW_ON_ERROR);
+    if (\$conflict === null) { exit(1); }
+}
+PHP;
+
+        return new Process([PHP_BINARY, 'artisan', 'tinker', '--execute', $code], base_path(), null, null, self::PROCESS_TIMEOUT_SECONDS);
+    }
+
+    /** @return array<string, mixed> */
+    private function attendanceOverlapResult(Process $process): array
+    {
+        $matched = preg_match('/ATTENDANCE_OVERLAP_RESULT=(\{[^\r\n]+\})/', $process->getOutput(), $matches);
+        $this->assertSame(1, $matched, $process->getOutput().$process->getErrorOutput());
+
+        return json_decode($matches[1], true, flags: JSON_THROW_ON_ERROR);
+    }
+
     public function test_invite_accept_after_direct_confirmation_cannot_late_bind_credited_attribution(): void
     {
         $event = $this->createEvent();
@@ -371,6 +540,27 @@ class AttendanceCommitmentServiceTest extends TestCaseTenant
         $this->assertSame('direct_confirmation', (string) $firstInvite->fresh()?->supersession_reason);
         $this->assertSame('superseded', (string) $secondInvite->fresh()?->status);
         $this->assertSame('direct_confirmation', (string) $secondInvite->fresh()?->supersession_reason);
+    }
+
+    public function test_repeated_direct_confirmation_preserves_existing_provenance_and_emits_only_for_activation(): void
+    {
+        $event = $this->createEvent();
+        $occurrenceId = $this->firstOccurrenceId($event);
+        AttendanceCommitment::query()->create([
+            'user_id' => (string) $this->user->_id,
+            'event_id' => (string) $event->_id,
+            'occurrence_id' => $occurrenceId,
+            'kind' => 'free_confirmation',
+            'status' => 'active',
+            'source' => 'invite',
+            'confirmed_at' => Carbon::now(),
+        ]);
+        EventFacade::fake([OccurrenceAttendanceConfirmed::class]);
+
+        $commitment = $this->attendanceService()->confirm((string) $this->user->_id, (string) $event->_id, $occurrenceId);
+
+        $this->assertSame('invite', (string) $commitment->source);
+        EventFacade::assertNotDispatched(OccurrenceAttendanceConfirmed::class);
     }
 
     public function test_direct_confirmation_supersession_query_is_bounded_to_target_and_pending_viewed_statuses(): void

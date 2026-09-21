@@ -33,7 +33,11 @@ class AccountProfileManagementService
         private readonly AccountProfileOutboxPublisher $outboxPublisher,
         private readonly AccountProfileOutboxDispatcher $outboxDispatcher,
         private readonly AccountProfileLifecycleService $lifecycleService,
+        private readonly AccountProfileMutationGate $mutationGate,
         private readonly AccountProfileRelationAdmissionService $relationAdmissionService,
+        private readonly AccountProfileLocationPolicy $locationPolicy,
+        private readonly AccountProfileAdmissionFenceService $admissionFences,
+        private readonly AccountProfileTypeChangeImpactService $changeImpact,
     ) {}
 
     /**
@@ -176,14 +180,13 @@ class AccountProfileManagementService
             ]);
         }
 
-        if ($this->registryService->isPoiEnabled($profileType)) {
-            $location = $payload['location'] ?? null;
-            if (! is_array($location) || ! isset($location['lat'], $location['lng'])) {
-                throw ValidationException::withMessages([
-                    'location' => ['Location is required for POI-enabled profiles.'],
-                ]);
-            }
-        }
+        $typeDocuments = $this->admissionFences->touchProfileTypes(
+            $context->database(),
+            $context->session(),
+            [$profileType],
+        );
+        $type = $this->hydrateProfileType($typeDocuments[$profileType]);
+        $this->locationPolicy->assertCreateAllowedForType($type, $payload['location'] ?? null);
 
         $taxonomyTerms = $payload['taxonomy_terms'] ?? [];
         if (is_array($taxonomyTerms) && $taxonomyTerms !== []) {
@@ -263,15 +266,13 @@ class AccountProfileManagementService
             ]);
         }
 
-        if ($profileType && $this->registryService->isPoiEnabled($profileType)) {
-            if (array_key_exists('location', $attributes)) {
-                $location = $attributes['location'] ?? null;
-                if (! is_array($location) || ! isset($location['lat'], $location['lng'])) {
-                    throw ValidationException::withMessages([
-                        'location' => ['Location is required for POI-enabled profiles.'],
-                    ]);
-                }
-            }
+        if ($profileType) {
+            $this->locationPolicy->assertUpdateAllowed(
+                $profile,
+                (string) $profileType,
+                array_key_exists('location', $attributes),
+                $attributes['location'] ?? null,
+            );
         }
 
         if (array_key_exists('taxonomy_terms', $attributes)) {
@@ -345,33 +346,78 @@ class AccountProfileManagementService
                         return $this->resultForCommandReceipt($receipt, $fingerprint);
                     }
 
-                    $persistedProfile = AccountProfile::query()->findOrFail($profileId);
-                    $this->lifecycleService->assertProfileMutationAllowed($persistedProfile, $context);
-                    $this->nestedGroupMemberStore->assertCanonicalGroupHeadsAvailableWithinContext(
-                        $context,
-                        $persistedProfile,
-                    );
+                    $persistedProfile = AccountProfile::withTrashed()->findOrFail($profileId);
+                    $isDeleted = $persistedProfile->deleted_at !== null;
+                    if ($isDeleted) {
+                        $this->mutationGate->assertAccountMutationAllowed(
+                            (string) $persistedProfile->account_id,
+                            $context,
+                        );
+                    } else {
+                        $this->lifecycleService->assertProfileMutationAllowed($persistedProfile, $context);
+                    }
+                    $oldProfileType = trim((string) $persistedProfile->profile_type);
+                    $nextProfileType = trim((string) ($attributes['profile_type'] ?? $oldProfileType));
+                    $profileTypeChanged = $nextProfileType !== $oldProfileType;
+                    $locationChanged = array_key_exists('location', $attributes)
+                        && $attributes['location'] !== ($persistedProfile->location ?? null);
+                    if (! $isDeleted && ($profileTypeChanged || $locationChanged)) {
+                        $typeDocuments = $this->admissionFences->touchProfileTypes(
+                            $context->database(),
+                            $context->session(),
+                            [$oldProfileType, $nextProfileType],
+                        );
+                        $nextType = $this->hydrateProfileType($typeDocuments[$nextProfileType]);
+                        $this->locationPolicy->assertUpdateAllowedForType(
+                            $persistedProfile,
+                            $nextType,
+                            array_key_exists('location', $attributes),
+                            $attributes['location'] ?? null,
+                        );
+                        $effectiveLocation = array_key_exists('location', $attributes)
+                            ? $attributes['location']
+                            : ($persistedProfile->location ?? null);
+                        $this->changeImpact->assertProfileMutationAllowed(
+                            $persistedProfile,
+                            $nextType,
+                            $effectiveLocation,
+                            $context,
+                        );
+                        $this->admissionFences->touchProfiles(
+                            $context->database(),
+                            $context->session(),
+                            [$profileId],
+                        );
+                    }
+                    if (! $isDeleted) {
+                        $this->nestedGroupMemberStore->assertCanonicalGroupHeadsAvailableWithinContext(
+                            $context,
+                            $persistedProfile,
+                        );
+                    }
                     $persistedProfile->fill($attributes);
                     if ($forceSearchRefresh) {
                         $this->applyCanonicalSearchFields($persistedProfile);
                     }
                     if (
                         ! $this->hasSemanticMutation($persistedProfile)
-                        && ! array_key_exists('nested_profile_groups', $attributes)
+                        && ($isDeleted || ! array_key_exists('nested_profile_groups', $attributes))
                         && $mutateWithinTransaction === null
                     ) {
-                        $admittedTargets = $this->relationAdmissionService->admit(
-                            $context,
-                            $profileId,
-                            $relationAttributes,
-                            touchTargets: false,
-                        );
-                        $contactSourceId = trim((string) ($relationAttributes['contact_source_account_profile_id'] ?? ''));
-                        if ($contactSourceId !== '' && isset($admittedTargets[$contactSourceId])) {
-                            $this->contactChannelsService->assertMirroredAdmissionStillValid(
-                                $admittedTargets[$contactSourceId],
+                        if (! $isDeleted) {
+                            $admittedTargets = $this->relationAdmissionService->admit(
+                                $context,
+                                $profileId,
                                 $relationAttributes,
+                                touchTargets: false,
                             );
+                            $contactSourceId = trim((string) ($relationAttributes['contact_source_account_profile_id'] ?? ''));
+                            if ($contactSourceId !== '' && isset($admittedTargets[$contactSourceId])) {
+                                $this->contactChannelsService->assertMirroredAdmissionStillValid(
+                                    $admittedTargets[$contactSourceId],
+                                    $relationAttributes,
+                                );
+                            }
                         }
 
                         $this->outboxPublisher->recordReceiptOnly(
@@ -387,17 +433,19 @@ class AccountProfileManagementService
                         ];
                     }
 
-                    $admittedTargets = $this->relationAdmissionService->admit(
-                        $context,
-                        $profileId,
-                        $relationAttributes,
-                    );
-                    $contactSourceId = trim((string) ($relationAttributes['contact_source_account_profile_id'] ?? ''));
-                    if ($contactSourceId !== '' && isset($admittedTargets[$contactSourceId])) {
-                        $this->contactChannelsService->assertMirroredAdmissionStillValid(
-                            $admittedTargets[$contactSourceId],
+                    if (! $isDeleted) {
+                        $admittedTargets = $this->relationAdmissionService->admit(
+                            $context,
+                            $profileId,
                             $relationAttributes,
                         );
+                        $contactSourceId = trim((string) ($relationAttributes['contact_source_account_profile_id'] ?? ''));
+                        if ($contactSourceId !== '' && isset($admittedTargets[$contactSourceId])) {
+                            $this->contactChannelsService->assertMirroredAdmissionStillValid(
+                                $admittedTargets[$contactSourceId],
+                                $relationAttributes,
+                            );
+                        }
                     }
 
                     try {
@@ -415,7 +463,7 @@ class AccountProfileManagementService
                                 $context,
                                 $persistedProfile,
                             );
-                        if (array_key_exists('nested_profile_groups', $attributes)) {
+                        if (! $isDeleted && array_key_exists('nested_profile_groups', $attributes)) {
                             $this->nestedGroupMemberStore->synchronizeGroupHeadsWithinContext(
                                 $context,
                                 $persistedProfile,
@@ -434,13 +482,23 @@ class AccountProfileManagementService
                         ]);
                     }
 
-                    $persistedProfile = $persistedProfile->fresh();
-                    $outboxEventId = $this->outboxPublisher->recordUpsert(
-                        $context,
-                        $persistedProfile,
-                        $commandId,
-                        $fingerprint,
-                    );
+                    $persistedProfile = AccountProfile::withTrashed()->findOrFail($profileId);
+                    $outboxEventId = $isDeleted
+                        ? null
+                        : $this->outboxPublisher->recordUpsert(
+                            $context,
+                            $persistedProfile,
+                            $commandId,
+                            $fingerprint,
+                        );
+                    if ($isDeleted) {
+                        $this->outboxPublisher->recordReceiptOnly(
+                            $context,
+                            $persistedProfile,
+                            $commandId,
+                            $fingerprint,
+                        );
+                    }
 
                     return [
                         'profile' => $persistedProfile,
@@ -527,6 +585,16 @@ class AccountProfileManagementService
         $commandId = trim((string) $commandId);
 
         return $commandId === '' ? (string) Str::uuid() : $commandId;
+    }
+
+    /** @param array<string, mixed> $document */
+    private function hydrateProfileType(array $document): \App\Models\Tenants\TenantProfileType
+    {
+        $model = new \App\Models\Tenants\TenantProfileType;
+        $model->setRawAttributes($document, true);
+        $model->exists = true;
+
+        return $model;
     }
 
     public function delete(AccountProfile $profile, ?string $commandId = null): void
@@ -1005,7 +1073,7 @@ class AccountProfileManagementService
             throw new ConcurrencyConflictException('Account Profile aggregate revision changed during mutation.');
         }
 
-        if ($searchChanged) {
+        if ($searchChanged && $profile->deleted_at === null) {
             $this->nestedGroupMemberStore->refreshSearchForMemberWithinContext(
                 $context,
                 $profileId,
@@ -1016,7 +1084,7 @@ class AccountProfileManagementService
             );
         }
 
-        return AccountProfile::query()->findOrFail($profileId);
+        return AccountProfile::withTrashed()->findOrFail($profileId);
     }
 
     private function persistWithoutAggregateRevisionCas(
@@ -1059,7 +1127,7 @@ class AccountProfileManagementService
             throw new ConcurrencyConflictException('Account Profile aggregate could not be updated.');
         }
 
-        if ($searchChanged) {
+        if ($searchChanged && $profile->deleted_at === null) {
             $this->nestedGroupMemberStore->refreshSearchForMemberWithinContext(
                 $context,
                 $profileId,
@@ -1070,7 +1138,7 @@ class AccountProfileManagementService
             );
         }
 
-        return AccountProfile::query()->findOrFail($profileId);
+        return AccountProfile::withTrashed()->findOrFail($profileId);
     }
 
     private function applyCanonicalSearchFields(AccountProfile $profile): void

@@ -367,6 +367,24 @@ class InviteMutationService
 
         try {
             $result = $this->transactions->run(function () use ($edge, $userId, $receiverAccountProfileId): array {
+                $isFreeConfirmation = (string) ($edge->attendance_policy ?? 'free_confirmation_only') === 'free_confirmation_only';
+                $attendanceActivated = $isFreeConfirmation
+                    ? $this->attendanceGateway->activateFreeConfirmation($userId, (string) $edge->event_id, (string) $edge->occurrence_id)
+                    : false;
+
+                if ($isFreeConfirmation && ! $attendanceActivated) {
+                    if (in_array((string) $edge->status, ['pending', 'viewed'], true)) {
+                        $edge->fill([
+                            'status' => 'superseded',
+                            'supersession_reason' => self::SUPERSESSION_REASON_DIRECT_CONFIRMATION,
+                            'credited_acceptance' => false,
+                        ]);
+                        $edge->save();
+                    }
+
+                    return [$edge, [], false, false];
+                }
+
                 $acceptedAt = Carbon::now();
 
                 $edge->fill([
@@ -385,7 +403,7 @@ class InviteMutationService
                     exceptInviteId: (string) $edge->getAttribute('_id'),
                 );
 
-                return [$edge, $supersededIds];
+                return [$edge, $supersededIds, $attendanceActivated, true];
             });
         } catch (Throwable $exception) {
             if (! $this->isDuplicateKey($exception)) {
@@ -406,8 +424,28 @@ class InviteMutationService
         }
 
         /** @var InviteEdge $acceptedEdge */
-        [$acceptedEdge, $supersededIds] = $result;
+        [$acceptedEdge, $supersededIds, $attendanceActivated, $creditedAcceptance] = $result;
         $this->projectionService->rebuildReceiverTargetProjection($userId, $this->targetRef($acceptedEdge));
+        if (! $creditedAcceptance) {
+            $this->telemetry->emit(
+                event: 'invite.accepted',
+                userId: $userId,
+                properties: $this->buildAcceptedTelemetryProperties($acceptedEdge, 'already_accepted', false, [], $shareCode),
+                idempotencyKey: 'invite.accepted:'.(string) $acceptedEdge->getAttribute('_id').':already_confirmed',
+                source: 'invite_api',
+                context: [
+                    'actor' => ['type' => 'user', 'id' => $userId],
+                    'target' => ['type' => 'user', 'id' => $userId],
+                    'object' => ['type' => 'event', 'id' => (string) $acceptedEdge->event_id],
+                ],
+            );
+
+            return $this->acceptResponse($acceptedEdge, 'already_accepted', [], false);
+        }
+
+        if ($attendanceActivated) {
+            $this->attendanceGateway->notifyFreeConfirmationCommitted($userId, (string) $acceptedEdge->event_id, (string) $acceptedEdge->occurrence_id);
+        }
         event(new CreditedInviteAccepted(
             (string) $acceptedEdge->getAttribute('_id'),
             $userId,

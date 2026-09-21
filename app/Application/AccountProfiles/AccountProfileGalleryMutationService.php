@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
 use App\Models\Tenants\AccountProfile;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
@@ -18,26 +19,31 @@ final class AccountProfileGalleryMutationService
         private readonly AccountProfileGalleryService $gallery,
         private readonly AccountProfileManagementService $profiles,
         private readonly AccountProfileMediaService $media,
-        private readonly AccountProfileTypeSetProvider $types,
+        private readonly AccountProfileCapabilityResolverContract $capabilityResolver,
         private readonly YoutubeVideoMetadataResolver $youtubeMetadata,
     ) {}
 
     /** @return array{max_galleries:int,max_items_per_gallery:int} */
-    public function capabilities(): array
+    public function capabilities(AccountProfile $profile): array
     {
-        return ['max_galleries' => max(0, (int) config('gallery.max_galleries', 6)), 'max_items_per_gallery' => max(0, (int) config('gallery.max_items_per_gallery', 12))];
+        $resolved = $this->capabilityResolver->resolveForProfile($profile, 'has_gallery');
+
+        return [
+            'max_galleries' => max(0, (int) ($resolved['effective']['parameters']['max_groups'] ?? 0)),
+            'max_items_per_gallery' => max(0, (int) ($resolved['effective']['parameters']['max_items_per_group'] ?? 0)),
+        ];
     }
 
     public function isAllowed(AccountProfile $profile): bool
     {
-        return $this->types->hasGalleryEnabled((string) $profile->profile_type);
+        return $this->capabilityResolver->resolveForProfile($profile, 'has_gallery')['effective']['value'] === true;
     }
 
     /** @return array<int,array<string,mixed>> */
     public function createGroup(AccountProfile $profile, string $subtitle, array $auditAttributes = []): array
     {
-        return $this->change($profile, function (array &$groups) use ($subtitle): void {
-            if (count($groups) >= $this->capabilities()['max_galleries']) {
+        return $this->change($profile, function (array &$groups) use ($profile, $subtitle): void {
+            if (count($groups) >= $this->capabilities($profile)['max_galleries']) {
                 $this->fail('gallery_capabilities.max_galleries', 'Gallery capacity has been reached.');
             }
             $groups[] = ['group_id' => Str::lower((string) Str::ulid()), 'subtitle' => $subtitle, 'order' => count($groups), 'items' => []];
@@ -91,7 +97,7 @@ final class AccountProfileGalleryMutationService
         return $this->change($profile, function (array &$groups) use ($groupId, $input, $profile, $baseUrl, $type, $itemId): void {
             $group = $this->groupIndex($groups, $groupId);
             $items = $this->array($groups[$group]['items'] ?? []);
-            if (count($items) >= $this->capabilities()['max_items_per_gallery']) {
+            if (count($items) >= $this->capabilities($profile)['max_items_per_gallery']) {
                 $this->fail('gallery_capabilities.max_items_per_gallery', 'Gallery item capacity has been reached.');
             }
             $item = ['item_id' => $itemId, 'type' => $type, 'title' => $this->nullable($input['title'] ?? null), 'description' => $this->nullable($input['description'] ?? null), 'order' => count($items)];

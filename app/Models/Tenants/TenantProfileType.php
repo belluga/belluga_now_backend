@@ -25,9 +25,13 @@ class TenantProfileType extends Model
         'poi_visual',
         'type_asset_url',
         'capabilities',
+        'capability_revision',
+        'host_admission_fence_revision',
     ];
 
     protected $casts = [
+        'capability_revision' => 'int',
+        'host_admission_fence_revision' => 'int',
     ];
 
     protected static function booted(): void
@@ -38,100 +42,5 @@ class TenantProfileType extends Model
 
         static::saved($invalidateTypeSets);
         static::deleted($invalidateTypeSets);
-    }
-
-    public function scopeQueryable($query)
-    {
-        return $query->whereRaw(self::queryabilityCapabilityExpression());
-    }
-
-    public function scopePubliclyNavigable($query)
-    {
-        return $query->whereRaw(self::publicNavigabilityCapabilityExpression());
-    }
-
-    public function scopePubliclyDiscoverable($query)
-    {
-        return $query
-            ->queryable()
-            ->whereRaw(self::publicDiscoveryCapabilityExpression());
-    }
-
-    public function scopePublicCatalog($query)
-    {
-        return $query->publiclyDiscoverable();
-    }
-
-    public function scopeFavoritable($query)
-    {
-        return $query->whereRaw(self::favoritableCapabilityExpression());
-    }
-
-    public function scopePublicDiscoverySurface($query)
-    {
-        return $query
-            ->publicCatalog();
-    }
-
-    public function scopePublicPoiCatalog($query)
-    {
-        return $query
-            ->publicCatalog()
-            ->where('capabilities.is_poi_enabled', true);
-    }
-
-    public function scopeGalleryEnabled($query)
-    {
-        return $query->whereRaw(self::galleryEnabledCapabilityExpression());
-    }
-
-    public function scopeContactChannelsEnabled($query)
-    {
-        return $query->where('capabilities.has_contact_channels', true);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public static function queryabilityCapabilityExpression(): array
-    {
-        return [
-            '$and' => [
-                ['type' => ['$ne' => self::PERSONAL_TYPE]],
-                ['capabilities.is_queryable' => true],
-            ],
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public static function publicDiscoveryCapabilityExpression(): array
-    {
-        return ['capabilities.is_publicly_discoverable' => true];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public static function publicNavigabilityCapabilityExpression(): array
-    {
-        return ['capabilities.is_publicly_navigable' => true];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public static function favoritableCapabilityExpression(): array
-    {
-        return ['capabilities.is_favoritable' => true];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public static function galleryEnabledCapabilityExpression(): array
-    {
-        return ['capabilities.has_gallery' => true];
     }
 }

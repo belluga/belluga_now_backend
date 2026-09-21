@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Jobs\AccountProfiles\DispatchAccountProfileOutboxEventJob;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use MongoDB\BSON\UTCDateTime;
@@ -19,7 +20,7 @@ final class AccountProfileOutboxDispatcher
 {
     private const OUTBOX_COLLECTION = 'account_profile_outbox';
 
-    private const CLAIM_TTL_SECONDS = 30;
+    private const CLAIM_TTL_SECONDS = DispatchAccountProfileOutboxEventJob::TIMEOUT_SECONDS + 60;
 
     public function __construct(
         private readonly AccountProfileTransactionRunner $transactionRunner,
@@ -41,6 +42,17 @@ final class AccountProfileOutboxDispatcher
         }
 
         try {
+            if (($event['operation'] ?? null) === 'map_poi_type_reconcile') {
+                $hasNextPage = $this->transactionRunner->run(function (AccountProfileTransactionContext $context) use ($event): bool {
+                    return $this->mapPoiConsumer->consumeTypeReconcilePage($context, $event);
+                });
+                if ($hasNextPage) {
+                    DispatchAccountProfileOutboxEventJob::dispatch($eventId);
+                }
+
+                return true;
+            }
+
             $this->transactionRunner->run(function (AccountProfileTransactionContext $context) use ($event): void {
                 foreach ($this->consumers() as $consumer) {
                     $consumer->consume($context, $event);

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Application\AccountProfiles;
 
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\TenantProfileType;
 use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
@@ -24,8 +23,8 @@ final class AccountProfileCandidateDiscoveryService
     private const MAX_BROWSE_ROWS = 2500;
 
     public function __construct(
-        private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly HomeFavoritesPinnedProfileService $homeFavoritesPinnedProfileService,
+        private readonly AccountProfileTypeSetProvider $profileTypeSets,
     ) {}
 
     /**
@@ -130,8 +129,7 @@ final class AccountProfileCandidateDiscoveryService
         if ($scope === self::SCOPE_HOME_FAVORITES_PINNED_PROFILE) {
             return collect($profileIds)
                 ->reject(static fn (string $profileId): bool => $profileId === $excludedProfileId)
-                ->map(fn (string $profileId): ?AccountProfile =>
-                    $this->homeFavoritesPinnedProfileService->findEligibleProfile($profileId))
+                ->map(fn (string $profileId): ?AccountProfile => $this->homeFavoritesPinnedProfileService->findEligibleProfile($profileId))
                 ->filter(static fn (?AccountProfile $profile): bool => $profile instanceof AccountProfile)
                 ->values();
         }
@@ -207,7 +205,7 @@ final class AccountProfileCandidateDiscoveryService
      */
     private function selectedSummariesFromProfiles(array $profileIds, Collection $profilesById): array
     {
-        $queryablePolicy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
+        $queryableTypes = array_flip($this->eligibleTypes(self::SCOPE_QUERYABLE));
         $contactCapableTypes = array_flip($this->eligibleTypes(self::SCOPE_CONTACT_CAPABLE));
 
         $summaries = [];
@@ -226,7 +224,7 @@ final class AccountProfileCandidateDiscoveryService
             $summaries[$profileId] = [
                 'id' => $profileId,
                 'display_name' => $displayName === '' ? null : $displayName,
-                'is_queryable_candidate' => $queryablePolicy->isPubliclyExposed($profile),
+                'is_queryable_candidate' => $isActive && isset($queryableTypes[$profileType]),
                 'is_contact_capable_candidate' => $isActive
                     && isset($contactCapableTypes[$profileType])
                     && trim((string) $profile->contact_mode) === AccountProfileContactChannelsService::CONTACT_MODE_OWN,
@@ -241,20 +239,11 @@ final class AccountProfileCandidateDiscoveryService
      */
     private function eligibleTypes(string $scope): array
     {
-        $query = TenantProfileType::query();
-        match ($scope) {
-            self::SCOPE_QUERYABLE => $query->queryable(),
-            self::SCOPE_CONTACT_CAPABLE => $query->contactChannelsEnabled(),
+        return match ($scope) {
+            self::SCOPE_QUERYABLE => $this->profileTypeSets->queryableTypes(),
+            self::SCOPE_CONTACT_CAPABLE => $this->profileTypeSets->contactChannelsEnabledTypes(),
             default => throw new InvalidArgumentException("Unsupported account profile candidate scope [{$scope}]."),
         };
-
-        return $query
-            ->pluck('type')
-            ->map(static fn (mixed $type): string => trim((string) $type))
-            ->filter(static fn (string $type): bool => $type !== '')
-            ->unique()
-            ->values()
-            ->all();
     }
 
     /**
@@ -262,17 +251,6 @@ final class AccountProfileCandidateDiscoveryService
      */
     private function applyScopeConstraint($query, string $scope): bool
     {
-        if ($scope === self::SCOPE_QUERYABLE) {
-            $policy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
-            if ($policy->catalogTypeKeys() === []) {
-                return false;
-            }
-
-            $policy->applyCatalogConstraint($query);
-
-            return true;
-        }
-
         $eligibleTypes = $this->eligibleTypes($scope);
         if ($eligibleTypes === []) {
             return false;
@@ -293,14 +271,6 @@ final class AccountProfileCandidateDiscoveryService
     /** @return array<string, mixed>|null */
     private function scopeExpression(string $scope): ?array
     {
-        if ($scope === self::SCOPE_QUERYABLE) {
-            $policy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
-
-            return $policy->catalogTypeKeys() === []
-                ? null
-                : $policy->catalogMatchExpression();
-        }
-
         $eligibleTypes = $this->eligibleTypes($scope);
         if ($eligibleTypes === []) {
             return null;

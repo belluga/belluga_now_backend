@@ -18,7 +18,7 @@ class TaxonomyStoreRequest extends FormRequest
             'slug' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
             'name' => ['required', 'string', 'max:'.InputConstraints::NAME_MAX],
             'applies_to' => ['required', 'array', 'min:1', 'max:'.InputConstraints::METADATA_MAX_ITEMS],
-            'applies_to.*' => ['required', 'string', 'in:account_profile,static_asset,event'],
+            'applies_to.*' => ['required', 'string', 'in:account_profile,event'],
             'icon' => ['nullable', 'string', 'max:'.InputConstraints::NAME_MAX],
             'color' => ['nullable', 'string', 'max:'.InputConstraints::NAME_MAX, 'regex:/^#[0-9A-Fa-f]{6}$/'],
         ];

@@ -7,6 +7,7 @@ namespace App\Http\Api\v1\Controllers;
 use App\Application\AccountProfiles\AccountProfileGalleryService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileQueryService;
+use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -18,6 +19,7 @@ class AccountProfileMediaController extends Controller
         private readonly AccountProfileMediaService $mediaService,
         private readonly AccountProfileQueryService $profileQueryService,
         private readonly AccountProfileGalleryService $galleryService,
+        private readonly AccountProfileTypeSetProvider $typeSetProvider,
     ) {}
 
     public function avatar(Request $request): Response
@@ -28,6 +30,36 @@ class AccountProfileMediaController extends Controller
     public function cover(Request $request): Response
     {
         return $this->serve($request, 'cover');
+    }
+
+    public function adminMedia(
+        Request $request,
+        string $tenant_domain,
+        string $account_profile_id,
+        string $kind,
+    ): Response {
+        if (! in_array($kind, ['avatar', 'cover'], true)) {
+            abort(404);
+        }
+
+        $profile = $this->profileQueryService->findWithTrashedOrFail($account_profile_id);
+        $enabledTypes = $kind === 'avatar'
+            ? $this->typeSetProvider->avatarEnabledTypes()
+            : $this->typeSetProvider->coverEnabledTypes();
+        if (! in_array((string) $profile->profile_type, $enabledTypes, true)) {
+            abort(404);
+        }
+
+        $path = $this->mediaService->resolveMediaPathForBaseUrl(
+            $profile,
+            $kind,
+            $request->getSchemeAndHttpHost(),
+        );
+        if ($path === null) {
+            abort(404);
+        }
+
+        return $this->buildPrivateFileResponse($path);
     }
 
     public function gallery(Request $request): Response
@@ -81,7 +113,7 @@ class AccountProfileMediaController extends Controller
 
         $accountProfileId = trim($profileId);
         $profile = $this->profileQueryService->findOrFail($accountProfileId);
-        if (! $this->profileQueryService->isPubliclyExposed($profile)) {
+        if (! $this->profileQueryService->canExposePublicMedia($profile, $kind)) {
             abort(404);
         }
         $path = $this->mediaService->resolveMediaPathForBaseUrl(
@@ -116,6 +148,16 @@ class AccountProfileMediaController extends Controller
         if ($response->isNotModified($request)) {
             return $response->setNotModified();
         }
+
+        return $response;
+    }
+
+    private function buildPrivateFileResponse(string $path): Response
+    {
+        $response = response()->file(Storage::disk('public')->path($path));
+        $response->setPrivate();
+        $response->headers->set('Cache-Control', 'private, no-store');
+        $response->headers->set('Vary', 'Authorization, Host');
 
         return $response;
     }

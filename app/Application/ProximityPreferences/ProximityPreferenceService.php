@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace App\Application\ProximityPreferences;
 
-use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
+use App\Application\AccountProfiles\AccountProfileLocationPolicy;
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\ProximityPreference;
@@ -23,7 +24,8 @@ class ProximityPreferenceService
     private const REFERENCE_REASON_SOURCE_CAPABILITY_DISABLED = 'source_capability_disabled';
 
     public function __construct(
-        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
+        private readonly AccountProfileCapabilityResolverContract $capabilityResolver,
+        private readonly AccountProfileLocationPolicy $locationPolicy,
     ) {}
 
     public function findForUser(AccountUser $user): ?ProximityPreference
@@ -249,6 +251,7 @@ class ProximityPreferenceService
     {
         $profileType = $this->nullableString($fixedReference['entity_type'] ?? null);
         $entityId = $this->nullableString($fixedReference['entity_id'] ?? null);
+        $profile = null;
 
         if ($entityId !== null) {
             $profile = AccountProfile::query()->find($entityId);
@@ -260,28 +263,16 @@ class ProximityPreferenceService
             }
         }
 
-        $capabilities = [];
-        if ($profileType !== null) {
-            $type = TenantProfileType::query()
-                ->where('type', $profileType)
-                ->first();
-            $capabilities = is_array($type?->capabilities ?? null)
-                ? $type->capabilities
-                : [];
-        }
-
-        if (! $this->capabilityCatalog->isEnabled(
-            AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED,
-            $capabilities,
-            $capabilities,
-        )) {
-            return $this->disabledReference(
-                $this->capabilityCatalog->firstDisabledRequirement(
-                    AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED,
-                    $capabilities,
-                    $capabilities,
-                ) ?? AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED,
-            );
+        $type = $profileType === null
+            ? null
+            : TenantProfileType::query()->where('type', $profileType)->first();
+        if (! $profile instanceof AccountProfile
+            || ! $type instanceof TenantProfileType
+            || ! $this->locationPolicy->isLocationPermittedForType($type)
+            || ! $this->locationPolicy->hasValidPoint($profile->location ?? null)
+            || $this->capabilityResolver
+                ->resolveForProfileType($type, 'is_reference_location_enabled')['effective']['value'] !== true) {
+            return $this->disabledReference('is_reference_location_enabled');
         }
 
         return $this->activeReference(self::REFERENCE_REASON_ELIGIBLE);

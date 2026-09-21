@@ -9,7 +9,6 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\TenantProfileType;
 use Belluga\DeepLinks\Application\WebToAppPromotionService;
 use Belluga\Events\Application\Events\EventQueryService;
@@ -109,11 +108,12 @@ class PublicWebMetadataShellTest extends TestCaseTenant
             'type' => 'restaurant',
             'label' => 'Restaurante',
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_discoverable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'has_cover' => ['value' => true, 'parameters' => []],
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -238,11 +238,11 @@ class PublicWebMetadataShellTest extends TestCaseTenant
             'type' => 'restaurant',
             'label' => 'Restaurante',
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_discoverable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -294,10 +294,11 @@ class PublicWebMetadataShellTest extends TestCaseTenant
             'type' => 'artist',
             'label' => 'Artista',
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_discoverable' => true,
-                'is_publicly_navigable' => true,
-                'is_favoritable' => true,
+                'has_cover' => ['value' => true, 'parameters' => []],
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
             ],
         ]);
         $account = Account::create([
@@ -469,36 +470,6 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/agenda/evento/nao-existe">', false);
     }
 
-    public function test_static_asset_public_route_injects_static_asset_metadata(): void
-    {
-        $tenantOrigin = rtrim($this->base_tenant_url, '/');
-        $this->applyPublicWebMetadata([
-            'default_title' => 'Fallback tenant title',
-            'default_description' => 'Fallback tenant description.',
-            'default_image' => 'https://tenant.example/media/fallback-cover.png',
-        ]);
-        $asset = StaticAsset::create([
-            'profile_type' => 'beach',
-            'display_name' => 'Praia das Virtudes',
-            'slug' => 'praia-das-virtudes',
-            'bio' => 'Faixa de areia com vista aberta para o mar.',
-            'content' => '<p>Quiosques, píer e um pôr do sol forte no fim da tarde.</p>',
-            'cover_url' => 'https://tenant.example/media/praia-cover.png',
-            'is_active' => true,
-            'location' => [
-                'type' => 'Point',
-                'coordinates' => [-40.5001, -20.6701],
-            ],
-        ]);
-
-        $response = $this->get("{$this->base_tenant_url}static/{$asset->slug}");
-        $response->assertOk();
-        $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
-        $response->assertSee('<meta property="og:title" content="Praia das Virtudes | '.$this->resolvedSiteName.'">', false);
-        $response->assertSee('<meta property="og:description" content="Quiosques, píer e um pôr do sol forte no fim da tarde.">', false);
-        $response->assertSee('<meta property="og:image" content="https://tenant.example/media/praia-cover.png">', false);
-        $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/static/praia-das-virtudes">', false);
-    }
 
     public function test_invite_public_route_injects_dynamic_share_metadata(): void
     {

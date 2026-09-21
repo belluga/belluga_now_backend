@@ -14,8 +14,6 @@ use App\Http\Api\v1\Controllers\PasswordRegistrationController;
 use App\Http\Api\v1\Controllers\PhoneOtpAuthController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
 use App\Http\Api\v1\Controllers\ProfileProximityPreferencesController;
-use App\Http\Api\v1\Controllers\StaticAssetMediaController;
-use App\Http\Api\v1\Controllers\StaticProfileTypeMediaController;
 use App\Http\Api\v1\Controllers\TenantTelemetrySettingsController;
 use App\Http\Middleware\CheckTenantAccess;
 use App\Http\Middleware\EnsureTenantPublicAuthMethod;
@@ -51,18 +49,6 @@ Route::middleware(NeedsTenant::class)->group(function () {
     Route::get(
         '/media/event-types/{event_type_id}/type_asset',
         [EventTypeMediaController::class, 'typeAsset']
-    );
-    Route::get(
-        '/media/static-assets/{static_asset_id}/avatar',
-        [StaticAssetMediaController::class, 'avatar']
-    );
-    Route::get(
-        '/media/static-assets/{static_asset_id}/cover',
-        [StaticAssetMediaController::class, 'cover']
-    );
-    Route::get(
-        '/media/static-profile-types/{static_profile_type_id}/type_asset',
-        [StaticProfileTypeMediaController::class, 'typeAsset']
     );
     Route::get(
         '/media/events/{event_id}/cover',

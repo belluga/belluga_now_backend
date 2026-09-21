@@ -234,7 +234,7 @@ The package service provider registers fail-fast placeholders if the host forget
 
 The host app provides the concrete adapters for:
 - inviter principal resolution and recipient lookup
-- attendance-confirmation checks
+- attendance-confirmation checks, free-confirmation activation, and its committed notification
 - telemetry emission
 - event/occurrence read access
 
@@ -247,6 +247,12 @@ The host app wires these adapters in:
 
 The host route file is:
 - `routes/api/packages/project_tenant_public_api_v1/invites.php`
+
+For a new `free_confirmation_only` acceptance, the package invokes the host
+attendance activation inside its existing transaction. The host reports only
+whether activation occurred; after a successful transaction the package asks
+the host to emit the existing attendance-confirmed notification. Existing
+active confirmations remain uncredited and do not emit a duplicate notification.
 
 ---
 

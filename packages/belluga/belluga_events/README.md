@@ -133,6 +133,21 @@ Auth and guard expectations are defined by host routes and middleware (`auth:san
 
 ### Read contracts
 
+`EventOccurrenceNestedAccountStore::liveAndNextOccurrencesForMemberProfiles(ids, now)`
+and `lastOccurrencesForMemberProfiles(ids, now)` return Profile-attributed
+`EventOccurrence` winners from canonical tenant-scoped member rows with current
+group heads. The first returns up to one `live_now` and one `next` occurrence
+per Profile; the second returns up to one last occurrence. Both retain winning
+identity, slug and schedule, reduce duplicate group memberships in MongoDB,
+and hydrate only winning states. Callers supply one operation instant. The
+existing Favorites time admission and whole-second/string-ID tie rules are
+preserved. Venue associations are merged by the host consumer.
+
+These queries use membership/current-head access paths and exact occurrence
+identity joins. Returned state is bounded; database work still scales with
+requested Profiles and matched historical memberships. This is not a page-size
+query-cost guarantee and introduces no projection, index or job.
+
 #### `GET /agenda`
 
 Query:
@@ -228,6 +243,19 @@ Location mode rules:
 - `physical`: requires `place_ref`; geographic basis comes from resolved place or `location.geo`.
 - `online`: requires `location.online`; `place_ref` is optional.
 - `hybrid`: requires both `place_ref` and `location.online`.
+
+Account Profile physical-host admission is supplied by the host through
+`EventProfileResolverContract`. The Events write transaction revalidates every
+changed root, occurrence, and programming-item reference against the current
+Profile and Profile-Type state. Eligibility requires a live Profile with a
+valid Point, effective `location_policy=optional|required`, and effective
+`is_physical_host_enabled=true`; neither Profile-Type names nor Map/favorite
+capabilities grant host eligibility. The same transaction participates in the
+host Profile/Profile-Type revision fences. Transient labeled body conflicts
+retry the complete admission plus mutation at most twice after the first
+attempt; exhaustion returns the host's stable `409 event_revision_conflict`,
+while exhausted unknown-commit confirmation returns
+`503 event_commit_outcome_unknown` without replaying the mutation body.
 
 #### Update (`PATCH /events/{event_id}`)
 
