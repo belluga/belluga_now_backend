@@ -288,6 +288,68 @@ final class MapPoiAccountProfileProjectionTest extends TestCase
         $this->assertSame(0, MapPoi::query()->where('ref_type', 'account_profile')->count());
     }
 
+    public function test_delayed_upsert_after_profile_and_event_type_deletion_removes_projection_and_advances_checkpoint(): void
+    {
+        $this->type(mapEnabled: true);
+        $profile = $this->profile('Deleted delayed projection venue');
+        $eventId = app(AccountProfileTransactionRunner::class)->run(
+            fn ($context): string => app(AccountProfileOutboxPublisher::class)->recordUpsert(
+                $context,
+                $profile,
+                'deleted-delayed-projection',
+                hash('sha256', 'deleted-delayed-projection'),
+            ),
+        );
+        MapPoi::query()->create([
+            'ref_type' => 'account_profile',
+            'ref_id' => (string) $profile->getKey(),
+            'projection_key' => 'account_profile:'.(string) $profile->getKey(),
+            'category' => 'place',
+            'source_type' => 'place',
+            'location' => $profile->location,
+        ]);
+        $database = DB::connection('tenant')->getDatabase();
+        $database->selectCollection('account_profiles')->deleteOne(['_id' => new ObjectId((string) $profile->getKey())]);
+        $database->selectCollection('account_profile_types')->deleteOne(['type' => 'place']);
+
+        $this->assertTrue(app(AccountProfileOutboxDispatcher::class)->dispatchEvent($eventId));
+
+        $this->assertNull(MapPoi::query()->where('ref_id', (string) $profile->getKey())->first());
+        $checkpoint = $database->selectCollection('account_profile_projection_checkpoints')->findOne([
+            'consumer_id' => 'map_poi',
+            'profile_id' => (string) $profile->getKey(),
+        ]);
+        $this->assertSame(1, (int) ($checkpoint['aggregate_revision'] ?? 0));
+    }
+
+    public function test_delayed_upsert_after_type_reassignment_fences_only_the_current_type(): void
+    {
+        $this->type(mapEnabled: true);
+        $currentType = $this->type(mapEnabled: true, type: 'current_place');
+        $profile = $this->profile('Reassigned delayed projection venue');
+        $eventId = app(AccountProfileTransactionRunner::class)->run(
+            fn ($context): string => app(AccountProfileOutboxPublisher::class)->recordUpsert(
+                $context,
+                $profile,
+                'reassigned-delayed-projection',
+                hash('sha256', 'reassigned-delayed-projection'),
+            ),
+        );
+        $database = DB::connection('tenant')->getDatabase();
+        $database->selectCollection('account_profiles')->updateOne(
+            ['_id' => new ObjectId((string) $profile->getKey())],
+            ['$set' => ['profile_type' => 'current_place']],
+        );
+        $database->selectCollection('account_profile_types')->deleteOne(['type' => 'place']);
+
+        $this->assertTrue(app(AccountProfileOutboxDispatcher::class)->dispatchEvent($eventId));
+
+        $projection = MapPoi::query()->where('ref_id', (string) $profile->getKey())->first();
+        $this->assertNotNull($projection);
+        $this->assertSame('current_place', $projection->source_type);
+        $this->assertSame(1, (int) $currentType->fresh()?->host_admission_fence_revision);
+    }
+
     public function test_tombstone_removes_projection_without_touching_the_shared_profile_type_fence(): void
     {
         $type = $this->type(mapEnabled: true);
@@ -432,7 +494,7 @@ final class MapPoiAccountProfileProjectionTest extends TestCase
         ];
     }
 
-    private function type(bool $mapEnabled): TenantProfileType
+    private function type(bool $mapEnabled, string $type = 'place'): TenantProfileType
     {
         $capabilities = app(AccountProfileCapabilityRegistry::class)->completeCreationConfiguration([
             'location_policy' => ['value' => 'optional', 'parameters' => []],
@@ -440,8 +502,8 @@ final class MapPoiAccountProfileProjectionTest extends TestCase
         ]);
 
         return TenantProfileType::query()->create([
-            'type' => 'place',
-            'label' => 'Place',
+            'type' => $type,
+            'label' => str($type)->headline()->toString(),
             'allowed_taxonomies' => [],
             'capabilities' => $capabilities,
             'capability_revision' => 0,

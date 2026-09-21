@@ -131,26 +131,37 @@ final class EventHostTransactionRetryTest extends TestCase
         }
     }
 
-    public function test_expired_command_budget_aborts_before_commit_starts(): void
+    public function test_slow_successful_body_commits_after_the_retry_admission_budget(): void
     {
-        $real = DB::connection('tenant');
-        $this->assertInstanceOf(Connection::class, $real);
-        /** @var Connection&\Mockery\MockInterface $connection */
-        $connection = Mockery::mock($real)->makePartial();
-        $connection->shouldNotReceive('commit');
-        DB::shouldReceive('connection')->once()->with('tenant')->andReturn($connection);
+        $event = (new EventTransactionRunner)->run(static function (): Event {
+            $event = Event::query()->create([
+                'title' => 'Slow committed event',
+                'slug' => 'slow-committed-event',
+                'content' => '',
+                'publication' => ['status' => 'draft', 'publish_at' => null],
+                'is_active' => true,
+            ]);
+            usleep(2_010_000);
+
+            return $event;
+        });
+
+        $this->assertSame('Slow committed event', $event->fresh()?->title);
+    }
+
+    public function test_slow_transient_body_failure_cannot_start_a_retry_after_the_command_budget(): void
+    {
+        $attempts = 0;
 
         try {
-            (new EventTransactionRunner)->run(static function (): void {
+            (new EventTransactionRunner)->run(function () use (&$attempts): void {
+                $attempts++;
                 usleep(2_010_000);
+                throw new LabeledEventTransactionFailure('transient', ['TransientTransactionError']);
             });
-            $this->fail('An expired command budget must abort before commit starts.');
+            $this->fail('A transient failure after the command budget must not replay the body.');
         } catch (EventTransactionConflictException) {
-            $this->assertTrue(true);
-        } finally {
-            if ($real->getSession()?->isInTransaction()) {
-                $real->rollBack();
-            }
+            $this->assertSame(1, $attempts);
         }
     }
 

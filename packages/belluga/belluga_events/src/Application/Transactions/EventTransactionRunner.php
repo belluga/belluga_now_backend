@@ -56,11 +56,6 @@ class EventTransactionRunner
                     $connection->getDatabase(),
                     $session,
                 ));
-                if (microtime(true) >= $deadline) {
-                    throw new EventTransactionConflictException(
-                        'Event mutation could not stabilize within the command budget.'
-                    );
-                }
                 $this->commit($connection, $deadline);
 
                 return $result;
