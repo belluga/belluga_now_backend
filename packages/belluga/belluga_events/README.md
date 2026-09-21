@@ -133,6 +133,21 @@ Auth and guard expectations are defined by host routes and middleware (`auth:san
 
 ### Read contracts
 
+`EventOccurrenceNestedAccountStore::liveAndNextOccurrencesForMemberProfiles(ids, now)`
+and `lastOccurrencesForMemberProfiles(ids, now)` return Profile-attributed
+`EventOccurrence` winners from canonical tenant-scoped member rows with current
+group heads. The first returns up to one `live_now` and one `next` occurrence
+per Profile; the second returns up to one last occurrence. Both retain winning
+identity, slug and schedule, reduce duplicate group memberships in MongoDB,
+and hydrate only winning states. Callers supply one operation instant. The
+existing Favorites time admission and whole-second/string-ID tie rules are
+preserved. Venue associations are merged by the host consumer.
+
+These queries use membership/current-head access paths and exact occurrence
+identity joins. Returned state is bounded; database work still scales with
+requested Profiles and matched historical memberships. This is not a page-size
+query-cost guarantee and introduces no projection, index or job.
+
 #### `GET /agenda`
 
 Query:

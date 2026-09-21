@@ -18,6 +18,7 @@ use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
+use App\Models\Tenants\Taxonomy;
 use Belluga\MapPois\Models\Tenants\MapPoi;
 use Closure;
 use Illuminate\Http\UploadedFile;
@@ -172,6 +173,41 @@ class AccountProfileTypesControllerTest extends TestCaseTenant
         $response->assertJsonPath('data.poi_visual.icon', 'place');
         $response->assertJsonPath('data.poi_visual.color', '#FF8800');
         $response->assertJsonPath('data.poi_visual.icon_color', '#101010');
+    }
+
+    public function test_profile_type_create_and_update_preserve_exact_allowed_taxonomy_order_on_readback(): void
+    {
+        Taxonomy::query()->create(['slug' => 'profile-order-genre', 'name' => 'Genre', 'applies_to' => ['account_profile']]);
+        Taxonomy::query()->create(['slug' => 'profile-order-cuisine', 'name' => 'Cuisine', 'applies_to' => ['account_profile']]);
+
+        $create = $this->postJson(
+            "{$this->base_tenant_api_admin}account_profile_types",
+            [
+                'type' => 'ordered-profile-type',
+                'label' => 'Ordered profile type',
+                'allowed_taxonomies' => ['profile-order-cuisine', 'profile-order-genre'],
+            ],
+            $this->getHeaders(),
+        );
+
+        $create->assertStatus(201);
+        $this->assertSame(['profile-order-cuisine', 'profile-order-genre'], $create->json('data.allowed_taxonomies'));
+
+        $update = $this->patchJson(
+            "{$this->base_tenant_api_admin}account_profile_types/ordered-profile-type",
+            ['allowed_taxonomies' => ['profile-order-genre', 'profile-order-cuisine']],
+            $this->getHeaders(),
+        );
+
+        $update->assertStatus(200);
+        $this->assertSame(['profile-order-genre', 'profile-order-cuisine'], $update->json('data.allowed_taxonomies'));
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $stored = TenantProfileType::query()->where('type', 'ordered-profile-type')->firstOrFail();
+        $this->assertSame(['profile-order-genre', 'profile-order-cuisine'], $stored->allowed_taxonomies);
+        $this->getJson("{$this->base_tenant_api_admin}account_profile_types/ordered-profile-type", $this->getHeaders())
+            ->assertOk()
+            ->assertJsonPath('data.allowed_taxonomies.0', 'profile-order-genre')
+            ->assertJsonPath('data.allowed_taxonomies.1', 'profile-order-cuisine');
     }
 
     public function test_profile_type_admin_creation_allows_artist_venue_and_custom_types(): void
