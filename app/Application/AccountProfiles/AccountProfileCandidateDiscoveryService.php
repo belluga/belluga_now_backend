@@ -23,7 +23,6 @@ final class AccountProfileCandidateDiscoveryService
     private const MAX_BROWSE_ROWS = 2500;
 
     public function __construct(
-        private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
         private readonly HomeFavoritesPinnedProfileService $homeFavoritesPinnedProfileService,
         private readonly AccountProfileTypeSetProvider $profileTypeSets,
     ) {}
@@ -252,17 +251,6 @@ final class AccountProfileCandidateDiscoveryService
      */
     private function applyScopeConstraint($query, string $scope): bool
     {
-        if ($scope === self::SCOPE_QUERYABLE) {
-            $policy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
-            if ($policy->catalogTypeKeys() === []) {
-                return false;
-            }
-
-            $policy->applyCatalogConstraint($query);
-
-            return true;
-        }
-
         $eligibleTypes = $this->eligibleTypes($scope);
         if ($eligibleTypes === []) {
             return false;
@@ -283,14 +271,6 @@ final class AccountProfileCandidateDiscoveryService
     /** @return array<string, mixed>|null */
     private function scopeExpression(string $scope): ?array
     {
-        if ($scope === self::SCOPE_QUERYABLE) {
-            $policy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
-
-            return $policy->catalogTypeKeys() === []
-                ? null
-                : $policy->catalogMatchExpression();
-        }
-
         $eligibleTypes = $this->eligibleTypes($scope);
         if ($eligibleTypes === []) {
             return null;

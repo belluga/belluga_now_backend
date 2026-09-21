@@ -349,10 +349,13 @@ class AccountProfileQueryService extends AbstractQueryService
             $profilesById[(string) $profile->getKey()] = $profile;
         }
 
+        $locationEnabledTypeLookup = array_flip($this->typeSetProvider->locationEnabledTypes());
+
         /** @var Collection<int, AccountProfile> $orderedProfiles */
         $orderedProfiles = collect($orderedIds)
             ->map(static fn (string $id): ?AccountProfile => $profilesById[$id] ?? null)
             ->filter(static fn ($item): bool => $item instanceof AccountProfile)
+            ->filter(static fn (AccountProfile $profile): bool => isset($locationEnabledTypeLookup[$profile->profile_type]))
             ->values();
         $accountsById = $this->loadAccountsById($orderedProfiles);
         $userOperatedLookup = $this->ownershipStateService->userOperatedAccountIdLookup(

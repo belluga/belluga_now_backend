@@ -462,6 +462,7 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                     'is_queryable' => ['value' => true, 'parameters' => []],
                     'is_publicly_navigable' => ['value' => true, 'parameters' => []],
                     'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'has_avatar' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -2496,6 +2497,8 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                     'is_queryable' => ['value' => true, 'parameters' => []],
                     'is_publicly_navigable' => ['value' => true, 'parameters' => []],
                     'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'has_cover' => ['value' => true, 'parameters' => []],
+                    'has_avatar' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );

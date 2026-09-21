@@ -3811,7 +3811,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'is_publicly_navigable' => ['value' => true, 'parameters' => []],
                 'is_favoritable' => ['value' => true, 'parameters' => []],
                 'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
-                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'location_policy' => ['value' => 'optional', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
             ],
         ]);
         TenantProfileType::create([

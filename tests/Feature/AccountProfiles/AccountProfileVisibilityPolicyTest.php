@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature\AccountProfiles;
 
+use App\Application\AccountProfiles\AccountProfileCandidateDiscoveryService;
+use App\Application\AccountProfiles\AccountProfileRegistryService;
+use App\Application\AccountProfiles\AccountProfileSearchV1;
+use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
@@ -63,6 +67,105 @@ final class AccountProfileVisibilityPolicyTest extends TestCaseTenant
         $this->assertContains(
             'discoverable-only',
             collect($response->json('data'))->pluck('slug')->all(),
+        );
+    }
+
+    public function test_queryable_candidate_page_and_id_lookup_admit_private_nondiscoverable_profiles_but_reject_nonqueryable_inactive_and_deleted_profiles(): void
+    {
+        $this->createType('queryable-nondiscoverable', [
+            'is_queryable' => true,
+            'is_publicly_discoverable' => false,
+        ]);
+        $this->createType('discoverable-nonqueryable', [
+            'is_queryable' => false,
+            'is_publicly_discoverable' => true,
+        ]);
+        $registry = app(AccountProfileRegistryService::class);
+        [$privateAccount] = $this->seedAccountWithRole();
+        $privateQueryable = AccountProfile::query()->create([
+            'account_id' => (string) $privateAccount->getKey(),
+            'profile_type' => 'queryable-nondiscoverable',
+            'display_name' => 'Private Queryable',
+            'slug' => 'private-queryable',
+            'visibility' => 'private',
+            'is_active' => true,
+            ...AccountProfileSearchV1::fromSources(
+                'Private Queryable',
+                $registry->typeDefinition('queryable-nondiscoverable'),
+                [],
+            ),
+        ]);
+        [$discoverableAccount] = $this->seedAccountWithRole();
+        $discoverableNonqueryable = AccountProfile::query()->create([
+            'account_id' => (string) $discoverableAccount->getKey(),
+            'profile_type' => 'discoverable-nonqueryable',
+            'display_name' => 'Discoverable Nonqueryable',
+            'slug' => 'discoverable-nonqueryable',
+            'visibility' => 'public',
+            'is_active' => true,
+            ...AccountProfileSearchV1::fromSources(
+                'Discoverable Nonqueryable',
+                $registry->typeDefinition('discoverable-nonqueryable'),
+                [],
+            ),
+        ]);
+        [$inactiveAccount] = $this->seedAccountWithRole();
+        $inactiveQueryable = AccountProfile::query()->create([
+            'account_id' => (string) $inactiveAccount->getKey(),
+            'profile_type' => 'queryable-nondiscoverable',
+            'display_name' => 'Inactive Queryable',
+            'slug' => 'inactive-queryable',
+            'visibility' => 'private',
+            'is_active' => false,
+            ...AccountProfileSearchV1::fromSources(
+                'Inactive Queryable',
+                $registry->typeDefinition('queryable-nondiscoverable'),
+                [],
+            ),
+        ]);
+        [$deletedAccount] = $this->seedAccountWithRole();
+        $deletedQueryable = AccountProfile::query()->create([
+            'account_id' => (string) $deletedAccount->getKey(),
+            'profile_type' => 'queryable-nondiscoverable',
+            'display_name' => 'Deleted Queryable',
+            'slug' => 'deleted-queryable',
+            'visibility' => 'private',
+            'is_active' => true,
+            ...AccountProfileSearchV1::fromSources(
+                'Deleted Queryable',
+                $registry->typeDefinition('queryable-nondiscoverable'),
+                [],
+            ),
+        ]);
+        $deletedQueryable->delete();
+
+        $candidateDiscovery = app(AccountProfileCandidateDiscoveryService::class);
+        self::assertContains(
+            'queryable-nondiscoverable',
+            app(AccountProfileTypeSetProvider::class)->queryableTypes(),
+        );
+        $candidatePage = $candidateDiscovery->page(
+            AccountProfileCandidateDiscoveryService::SCOPE_QUERYABLE,
+            '',
+            1,
+            10,
+        );
+        $eligibleProfiles = $candidateDiscovery->eligibleProfilesByIds(
+            AccountProfileCandidateDiscoveryService::SCOPE_QUERYABLE,
+            [
+                (string) $privateQueryable->getKey(),
+                (string) $discoverableNonqueryable->getKey(),
+                (string) $inactiveQueryable->getKey(),
+                (string) $deletedQueryable->getKey(),
+            ],
+        );
+        self::assertSame(
+            [(string) $privateQueryable->getKey()],
+            $eligibleProfiles->pluck('_id')->map(static fn (mixed $id): string => (string) $id)->all(),
+        );
+        self::assertSame(
+            [(string) $privateQueryable->getKey()],
+            collect($candidatePage['data'])->pluck('id')->all(),
         );
     }
 
