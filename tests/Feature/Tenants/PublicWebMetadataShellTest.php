@@ -108,6 +108,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
             'type' => 'restaurant',
             'label' => 'Restaurante',
             'capabilities' => [
+                'has_cover' => ['value' => true, 'parameters' => []],
                 'is_queryable' => ['value' => true, 'parameters' => []],
                 'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
                 'is_publicly_navigable' => ['value' => true, 'parameters' => []],
@@ -293,6 +294,7 @@ class PublicWebMetadataShellTest extends TestCaseTenant
             'type' => 'artist',
             'label' => 'Artista',
             'capabilities' => [
+                'has_cover' => ['value' => true, 'parameters' => []],
                 'is_queryable' => ['value' => true, 'parameters' => []],
                 'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
                 'is_publicly_navigable' => ['value' => true, 'parameters' => []],
