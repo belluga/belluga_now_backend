@@ -222,6 +222,7 @@ final class AccountProfileVisibilityIndexTest extends TestCaseTenant
                 'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
                 'is_publicly_navigable' => ['value' => true, 'parameters' => []],
                 'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'optional', 'parameters' => []],
                 'has_nested_profile_groups' => ['value' => true, 'parameters' => []],
             ],
         ]);
