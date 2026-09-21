@@ -736,7 +736,7 @@ Schedule::call(static function (): void {
 
 Schedule::call(static function (): void {
     app(TenantExecutionContextContract::class)->runForEachTenant(static function (): void {
-        CleanupOrphanedMapPoisJob::dispatch(['account_profile', 'static'], 60);
+        CleanupOrphanedMapPoisJob::dispatch(['account_profile'], 60);
     });
 })
     ->name('map_pois:cleanup_orphaned')

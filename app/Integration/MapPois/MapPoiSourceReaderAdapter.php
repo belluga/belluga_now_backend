@@ -7,7 +7,6 @@ namespace App\Integration\MapPois;
 use App\Application\Accounts\AccountPublicationStateService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\StaticAsset;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Contracts\MapPoiSourceReaderContract;
@@ -58,22 +57,6 @@ class MapPoiSourceReaderAdapter implements MapPoiSourceReaderContract
                 === AccountPublicationStateService::PUBLISHED;
     }
 
-    public function findStaticAssetById(string $assetId): ?object
-    {
-        $asset = StaticAsset::query()->find($assetId);
-        if (! $asset) {
-            return null;
-        }
-
-        // Static asset tags are legacy. Keep projection input aligned to taxonomy.
-        $asset->setAttribute(
-            'tags',
-            $this->deriveTagsFromTaxonomyTerms($asset->taxonomy_terms ?? [])
-        );
-
-        return $asset;
-    }
-
     public function allEventIds(): iterable
     {
         foreach (Event::query()->whereNull('deleted_at')->orderBy('_id')->cursor() as $event) {
@@ -114,63 +97,4 @@ class MapPoiSourceReaderAdapter implements MapPoiSourceReaderContract
         }
     }
 
-    public function allStaticAssetIds(): iterable
-    {
-        foreach (StaticAsset::query()->whereNull('deleted_at')->orderBy('_id')->cursor() as $asset) {
-            if (! isset($asset->_id)) {
-                continue;
-            }
-
-            yield (string) $asset->_id;
-        }
-    }
-
-    public function allTrashedStaticAssetIds(?\DateTimeInterface $deletedSince = null): iterable
-    {
-        $query = StaticAsset::onlyTrashed()
-            ->orderBy('deleted_at')
-            ->orderBy('_id');
-        if ($deletedSince !== null) {
-            $query->where('deleted_at', '>=', $deletedSince);
-        }
-
-        foreach ($query->cursor() as $asset) {
-            if (! isset($asset->_id)) {
-                continue;
-            }
-
-            yield (string) $asset->_id;
-        }
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function deriveTagsFromTaxonomyTerms(mixed $taxonomyTerms): array
-    {
-        if ($taxonomyTerms instanceof \MongoDB\Model\BSONDocument || $taxonomyTerms instanceof \MongoDB\Model\BSONArray) {
-            $taxonomyTerms = $taxonomyTerms->getArrayCopy();
-        }
-
-        if (! is_array($taxonomyTerms)) {
-            return [];
-        }
-
-        $values = [];
-        foreach ($taxonomyTerms as $term) {
-            if ($term instanceof \MongoDB\Model\BSONDocument || $term instanceof \MongoDB\Model\BSONArray) {
-                $term = $term->getArrayCopy();
-            }
-            if (! is_array($term)) {
-                continue;
-            }
-            $value = trim((string) ($term['value'] ?? ''));
-            if ($value === '') {
-                continue;
-            }
-            $values[] = $value;
-        }
-
-        return array_values(array_unique($values));
-    }
 }

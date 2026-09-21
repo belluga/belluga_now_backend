@@ -60,18 +60,6 @@ class TaxonomyValidationService
     /**
      * @param  array<int, array<string, mixed>>  $terms
      */
-    public function assertTermsAllowedForStaticAsset(array $terms): void
-    {
-        if ($terms === []) {
-            return;
-        }
-
-        $this->assertTermsValid($terms, 'static_asset');
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $terms
-     */
     private function assertTermsValid(array $terms, string $appliesTo): void
     {
         $types = $this->extractTypes($terms);

@@ -120,7 +120,6 @@ final class DiscoveryFilterMapUiBackfillService
         return match ($source) {
             'event' => 'event',
             'account_profile', 'account' => 'account_profile',
-            'static', 'static_asset', 'asset' => 'static_asset',
             default => null,
         };
     }

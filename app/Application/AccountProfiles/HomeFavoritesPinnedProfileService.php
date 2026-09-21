@@ -37,12 +37,14 @@ final class HomeFavoritesPinnedProfileService
         }
 
         $profile = AccountProfile::withTrashed()->where('_id', $normalizedId)->first();
-        if (! $profile instanceof AccountProfile || ! $this->profilePolicy()->canOpenPublicDetail($profile)) {
+        $account = $profile instanceof AccountProfile
+            ? Account::withTrashed()->where('_id', trim((string) $profile->account_id))->first()
+            : null;
+        if (! $account instanceof Account || $account->trashed()) {
             return null;
         }
 
-        $account = Account::withTrashed()->where('_id', trim((string) $profile->account_id))->first();
-        if (! $account instanceof Account || $account->trashed()) {
+        if (! $profile instanceof AccountProfile || ! $this->profilePolicy()->canOpenPublicDetail($profile, $account)) {
             return null;
         }
 
@@ -50,9 +52,13 @@ final class HomeFavoritesPinnedProfileService
             return null;
         }
 
-        return $this->publicationStateService->isPublished($account->publication)
-            ? $profile
-            : null;
+        if (! $this->publicationStateService->isPublished($account->publication)) {
+            return null;
+        }
+
+        $profile->setRelation('account', $account);
+
+        return $profile;
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -192,7 +198,7 @@ final class HomeFavoritesPinnedProfileService
         ];
     }
 
-    private function profilePolicy(): AccountProfilePublicCatalogEligibilityPolicy
+    private function profilePolicy(): AccountProfilePublicVisibilityPolicy
     {
         return $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
     }

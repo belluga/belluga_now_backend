@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
-use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -37,7 +37,7 @@ class AccountProfileTypeStoreRequest extends FormRequest
             'poi_visual.image_source' => ['required_if:poi_visual.mode,image', 'string', 'in:avatar,cover,type_asset'],
             'type_asset' => ['sometimes', 'nullable', 'image'],
             'remove_type_asset' => ['sometimes', 'boolean'],
-            ...app(AccountProfileTypeCapabilityCatalog::class)->validationRules(),
+            ...app(AccountProfileCapabilityResolverContract::class)->validationRules(),
         ];
     }
 }

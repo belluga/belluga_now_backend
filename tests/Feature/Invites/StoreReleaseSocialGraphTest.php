@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Invites;
 
 use App\Application\AccountProfiles\AccountProfileBootstrapService;
-use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
 use App\Application\Accounts\AccountManagementService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
@@ -128,7 +128,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $this->assertSame([], $blocked->json('matches'));
     }
 
-    public function test_contact_import_recovers_when_legacy_personal_profile_type_was_not_inviteable(): void
+    public function test_contact_import_reflects_personal_profile_inviteability_changes(): void
     {
         $viewer = $this->createReleaseUser('Legacy Capability Viewer', '+55 27 99999-0051');
         $target = $this->createReleaseUser('Legacy Capability Contact', '+55 27 99886-9803');
@@ -147,8 +147,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $blocked->assertOk();
         $this->assertSame([], $blocked->json('matches'));
 
-        $migration = require base_path('database/migrations/tenants/2026_05_01_000300_backfill_personal_profile_type_inviteability.php');
-        $migration->up();
+        $this->makePersonalProfilesInviteable();
 
         $response = $this->postJson("{$this->base_api_tenant}contacts/import", [
             'contacts' => [
@@ -163,7 +162,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $response->assertJsonPath('matches.0.is_inviteable', true);
     }
 
-    public function test_personal_account_bootstrap_repairs_existing_legacy_personal_profile_type(): void
+    public function test_personal_account_bootstrap_preserves_explicit_personal_profile_capabilities(): void
     {
         $user = $this->createReleaseUser('Legacy Bootstrap User', '+55 27 99999-0061');
         $this->makePersonalProfilesNonInviteable();
@@ -174,9 +173,9 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             ->where('type', 'personal')
             ->firstOrFail();
 
-        $this->assertTrue((bool) data_get($type->capabilities, 'is_favoritable'));
-        $this->assertTrue((bool) data_get($type->capabilities, 'is_inviteable'));
-        $this->assertTrue((bool) data_get($type->capabilities, 'has_bio'));
+        $this->assertSame(false, data_get($type->capabilities, 'is_favoritable.value'));
+        $this->assertSame(false, data_get($type->capabilities, 'is_inviteable.value'));
+        $this->assertSame(true, data_get($type->capabilities, 'has_bio.value'));
     }
 
     public function test_contact_import_matches_phone_user_that_already_has_non_personal_account_role(): void
@@ -354,7 +353,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
     {
         $viewer = $this->createReleaseUser('Page Service Viewer', '+55 27 99999-1221');
 
-        $service = new class(app(AccountProfileTypeCapabilityCatalog::class)) extends InviteablePeopleService
+        $service = new class(app(AccountProfileCapabilityResolverContract::class)) extends InviteablePeopleService
         {
             public int $pageCalls = 0;
 
@@ -556,7 +555,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         $target = $this->createReleaseUser('Bounded Import Target', '+55 27 99999-1162');
         $targetProfile = $this->personalProfileFor($target);
 
-        $this->app->instance(InviteablePeopleService::class, new class(app(AccountProfileTypeCapabilityCatalog::class)) extends InviteablePeopleService
+        $this->app->instance(InviteablePeopleService::class, new class(app(AccountProfileCapabilityResolverContract::class)) extends InviteablePeopleService
         {
             public function sourceInviteableItemsFor(AccountUser $viewer, ?int $sourceRowLimit = null): array
             {
@@ -918,7 +917,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         TenantProfileType::query()
             ->where('type', 'personal')
             ->update([
-                'capabilities.is_inviteable' => false,
+                'capabilities.is_inviteable.value' => false,
             ]);
 
         Sanctum::actingAs($viewer, ['*']);
@@ -1072,7 +1071,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         TenantProfileType::query()
             ->where('type', 'personal')
             ->update([
-                'capabilities.is_inviteable' => false,
+                'capabilities.is_inviteable.value' => false,
             ]);
 
         Sanctum::actingAs($legacyActor, ['*']);
@@ -1166,7 +1165,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         TenantProfileType::query()
             ->where('type', 'personal')
             ->update([
-                'capabilities.is_inviteable' => false,
+                'capabilities.is_inviteable.value' => false,
             ]);
 
         Sanctum::actingAs($receiver, ['*']);
@@ -1226,7 +1225,7 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
         TenantProfileType::query()
             ->where('type', 'personal')
             ->update([
-                'capabilities.is_inviteable' => false,
+                'capabilities.is_inviteable.value' => false,
             ]);
 
         Sanctum::actingAs($sender, ['*']);
@@ -1305,15 +1304,17 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             ->where('type', 'personal')
             ->update([
                 'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_inviteable' => true,
-                    'is_poi_enabled' => false,
-                    'is_reference_location_enabled' => false,
-                    'has_bio' => false,
-                    'has_taxonomies' => false,
-                    'has_avatar' => false,
-                    'has_cover' => false,
-                    'has_events' => false,
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'is_inviteable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []],
+                    'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                    'is_physical_host_enabled' => ['value' => false, 'parameters' => []],
+                    'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                    'has_bio' => ['value' => false, 'parameters' => []],
+                    'has_taxonomies' => ['value' => false, 'parameters' => []],
+                    'has_avatar' => ['value' => false, 'parameters' => []],
+                    'has_cover' => ['value' => false, 'parameters' => []],
+                    'has_events' => ['value' => false, 'parameters' => []],
                 ],
             ]);
     }
@@ -1324,15 +1325,17 @@ class StoreReleaseSocialGraphTest extends TestCaseTenant
             ->where('type', 'personal')
             ->update([
                 'capabilities' => [
-                    'is_favoritable' => false,
-                    'is_inviteable' => false,
-                    'is_poi_enabled' => false,
-                    'is_reference_location_enabled' => false,
-                    'has_bio' => true,
-                    'has_taxonomies' => false,
-                    'has_avatar' => false,
-                    'has_cover' => false,
-                    'has_events' => false,
+                    'is_favoritable' => ['value' => false, 'parameters' => []],
+                    'is_inviteable' => ['value' => false, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []],
+                    'is_map_poi_enabled' => ['value' => false, 'parameters' => []],
+                    'is_physical_host_enabled' => ['value' => false, 'parameters' => []],
+                    'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                    'has_bio' => ['value' => true, 'parameters' => []],
+                    'has_taxonomies' => ['value' => false, 'parameters' => []],
+                    'has_avatar' => ['value' => false, 'parameters' => []],
+                    'has_cover' => ['value' => false, 'parameters' => []],
+                    'has_events' => ['value' => false, 'parameters' => []],
                 ],
             ]);
     }

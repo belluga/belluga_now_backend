@@ -63,6 +63,24 @@ class ApiV1DeferredDeepLinkResolverTest extends TestCaseTenant
         $response->assertJsonPath('data.failure_reason', null);
     }
 
+    public function test_deferred_resolver_rejects_retired_static_target_path(): void
+    {
+        $response = $this->postJson("{$this->base_api_tenant}deep-links/deferred/resolve", [
+            'platform' => 'android',
+            'install_referrer' => http_build_query([
+                'target_path' => '/static/retired-asset',
+                'store_channel' => 'play',
+            ]),
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.status', 'not_captured');
+        $response->assertJsonPath('data.code', null);
+        $response->assertJsonPath('data.target_path', '/');
+        $response->assertJsonPath('data.store_channel', 'play');
+        $response->assertJsonPath('data.failure_reason', 'code_missing');
+    }
+
     public function test_deferred_resolver_captures_ios_deferred_payload(): void
     {
         $response = $this->postJson("{$this->base_api_tenant}deep-links/deferred/resolve", [

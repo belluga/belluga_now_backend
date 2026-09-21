@@ -43,36 +43,36 @@ class AccountProfilePublicDetailNavigabilityCapabilityDecouplingTest extends Tes
         ]);
 
         $this->createType('personal', 'Personal', [
-            'is_queryable' => false,
-            'is_publicly_navigable' => false,
-            'is_publicly_discoverable' => false,
-            'is_favoritable' => false,
-            'is_poi_enabled' => false,
-            'has_events' => false,
+            'is_queryable' => ['value' => false, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
+            'is_favoritable' => ['value' => false, 'parameters' => []],
+            'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+            'has_events' => ['value' => false, 'parameters' => []],
         ]);
         $this->createType('catalog', 'Catalog', [
-            'is_queryable' => true,
-            'is_publicly_navigable' => true,
-            'is_publicly_discoverable' => true,
-            'is_favoritable' => true,
-            'is_poi_enabled' => false,
-            'has_events' => true,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'is_favoritable' => ['value' => true, 'parameters' => []],
+            'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+            'has_events' => ['value' => true, 'parameters' => []],
         ]);
         $this->createType('direct-only', 'Direct Only', [
-            'is_queryable' => false,
-            'is_publicly_navigable' => true,
-            'is_publicly_discoverable' => false,
-            'is_favoritable' => false,
-            'is_poi_enabled' => false,
-            'has_events' => false,
+            'is_queryable' => ['value' => false, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
+            'is_favoritable' => ['value' => false, 'parameters' => []],
+            'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+            'has_events' => ['value' => false, 'parameters' => []],
         ]);
         $this->createType('route-disabled', 'Route Disabled', [
-            'is_queryable' => true,
-            'is_publicly_navigable' => false,
-            'is_publicly_discoverable' => false,
-            'is_favoritable' => false,
-            'is_poi_enabled' => false,
-            'has_events' => false,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
+            'is_favoritable' => ['value' => false, 'parameters' => []],
+            'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+            'has_events' => ['value' => false, 'parameters' => []],
         ]);
     }
 

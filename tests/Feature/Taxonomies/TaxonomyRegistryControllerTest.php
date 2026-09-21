@@ -46,7 +46,7 @@ class TaxonomyRegistryControllerTest extends TestCaseTenant
             [
                 'slug' => 'cuisine',
                 'name' => 'Cuisine',
-                'applies_to' => ['account_profile', 'static_asset', 'event'],
+                'applies_to' => ['account_profile', 'event'],
                 'icon' => 'mode_subscription',
                 'color' => '#FFAA00',
             ],

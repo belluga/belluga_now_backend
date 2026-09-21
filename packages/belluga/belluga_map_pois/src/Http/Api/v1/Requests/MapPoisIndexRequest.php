@@ -31,7 +31,7 @@ class MapPoisIndexRequest extends FormRequest
             'source' => [
                 'sometimes',
                 'string',
-                Rule::in(['event', 'account_profile', 'account', 'static', 'static_asset', 'asset']),
+                Rule::in(['event', 'account_profile', 'account']),
             ],
             'types' => 'sometimes|array|max:'.InputConstraints::METADATA_MAX_ITEMS,
             'types.*' => 'string|max:'.InputConstraints::NAME_MAX,

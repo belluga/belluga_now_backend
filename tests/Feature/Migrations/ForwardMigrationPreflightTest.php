@@ -363,11 +363,11 @@ final class ForwardMigrationPreflightTest extends TestCase
         $accounts = $database->selectCollection('accounts');
         $pois->createIndex(['location' => '2dsphere'], ['name' => 'location_2dsphere']);
 
-        $publishedAccountId = new ObjectId();
-        $draftAccountId = new ObjectId();
-        $activePublishedProfileId = new ObjectId();
-        $activeDraftProfileId = new ObjectId();
-        $inactivePublishedProfileId = new ObjectId();
+        $publishedAccountId = new ObjectId;
+        $draftAccountId = new ObjectId;
+        $activePublishedProfileId = new ObjectId;
+        $activeDraftProfileId = new ObjectId;
+        $inactivePublishedProfileId = new ObjectId;
         $accounts->insertMany([
             ['_id' => $publishedAccountId, 'publication' => ['status' => 'published']],
             ['_id' => $draftAccountId, 'publication' => ['status' => 'draft']],
@@ -381,7 +381,7 @@ final class ForwardMigrationPreflightTest extends TestCase
             [(string) $activePublishedProfileId, false],
             [(string) $activeDraftProfileId, true],
             [(string) $inactivePublishedProfileId, true],
-            [(string) new ObjectId(), true],
+            [(string) new ObjectId, true],
         ] as [$refId, $isActive]) {
             $pois->insertOne([
                 'ref_type' => 'account_profile',
@@ -407,6 +407,169 @@ final class ForwardMigrationPreflightTest extends TestCase
             $indexes['idx_map_pois_location_active_v1']['key'],
         );
         self::assertArrayNotHasKey('location_2dsphere', $indexes);
+    }
+
+    public function test_static_retirement_aborts_before_mutation_for_authored_data_and_is_idempotent_for_zero_data(): void
+    {
+        $database = DB::connection('tenant')->getDatabase();
+        $database->selectCollection('static_assets')->insertOne([
+            'display_name' => 'must remain',
+            'avatar_url' => '/media/static/avatar.jpg',
+            'cover_url' => '/media/static/cover.jpg',
+        ]);
+        $migration = $this->migration('database/migrations/tenants/2026_09_14_000100_retire_static_profile_and_assets.php');
+
+        try {
+            $migration->up();
+            self::fail('Expected Static authored data to abort the hard cut.');
+        } catch (RuntimeException $exception) {
+            self::assertStringContainsString('static_retirement_v1', $exception->getMessage());
+        }
+        self::assertSame(1, $database->selectCollection('static_assets')->countDocuments());
+
+        $database->selectCollection('static_assets')->deleteMany([]);
+        $database->selectCollection('map_pois')->insertOne([
+            'ref_type' => 'static',
+            'ref_id' => 'orphan',
+            'projection_key' => 'static:orphan',
+        ]);
+        $migration->up();
+        $migration->up();
+        self::assertSame(0, $database->selectCollection('map_pois')->countDocuments(['ref_type' => 'static']));
+        self::assertNotContains('static_assets', $database->listCollectionNames());
+        self::assertNotContains('static_profile_types', $database->listCollectionNames());
+    }
+
+    public function test_static_retirement_strips_only_mixed_taxonomy(): void
+    {
+        $database = DB::connection('tenant')->getDatabase();
+        $database->selectCollection('taxonomies')->insertOne([
+            '_id' => 'mixed', 'applies_to' => ['event', 'account_profile', 'static_asset', 'event'],
+        ]);
+
+        $this->migration('database/migrations/tenants/2026_09_14_000100_retire_static_profile_and_assets.php')->up();
+
+        self::assertSame(
+            ['event', 'account_profile', 'event'],
+            iterator_to_array($database->selectCollection('taxonomies')->findOne(['_id' => 'mixed'])['applies_to']),
+        );
+    }
+
+    public function test_static_retirement_cleans_known_filter_shapes_and_invalidates_snapshot(): void
+    {
+        $database = DB::connection('tenant')->getDatabase();
+        $database->selectCollection('settings')->replaceOne(
+            ['_id' => 'settings_root'],
+            [
+                '_id' => 'settings_root',
+                'unrelated' => ['must' => 'remain'],
+                'map_ui' => ['filters' => [
+                    ['key' => 'legacy-static', 'query' => ['source' => 'static_asset']],
+                    ['key' => 'legacy-event', 'query' => ['source' => 'event']],
+                ]],
+                'discovery_filters' => ['surfaces' => ['public_map.primary' => ['filters' => [
+                    ['key' => 'canonical-static', 'query' => ['entities' => ['static_asset'], 'types_by_entity' => ['static_asset' => ['poi']]]],
+                    ['key' => 'canonical-mixed', 'query' => ['entities' => ['event', 'static_asset'], 'types_by_entity' => ['event' => ['show'], 'static_asset' => ['poi']]]],
+                ]]]],
+            ],
+            ['upsert' => true],
+        );
+        $database->selectCollection('environment_snapshots')->updateOne(
+            ['_id' => 'settings_root'],
+            ['$set' => ['schema_version' => 4, 'snapshot' => ['settings' => ['map_ui' => ['filters' => [['query' => ['source' => 'static_asset']]]]]]]],
+            ['upsert' => true],
+        );
+
+        $this->migration('database/migrations/tenants/2026_09_14_000100_retire_static_profile_and_assets.php')->up();
+
+        $settings = json_decode(json_encode(
+            $database->selectCollection('settings')->findOne(['_id' => 'settings_root']),
+            JSON_THROW_ON_ERROR,
+        ), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(['legacy-event'], array_column($settings['map_ui']['filters'], 'key'));
+        self::assertSame(['must' => 'remain'], $settings['unrelated']);
+        self::assertSame(['canonical-mixed'], array_column($settings['discovery_filters']['surfaces']['public_map.primary']['filters'], 'key'));
+        self::assertSame(
+            ['entities' => ['event'], 'types_by_entity' => ['event' => ['show']]],
+            $settings['discovery_filters']['surfaces']['public_map.primary']['filters'][0]['query'],
+        );
+        self::assertNull($database->selectCollection('environment_snapshots')->findOne(['_id' => 'settings_root']));
+    }
+
+    public function test_static_retirement_rejects_malformed_mixed_taxonomy_without_normalizing_it(): void
+    {
+        $database = DB::connection('tenant')->getDatabase();
+        $original = ['event', 'static_asset', 7, 'event'];
+        $database->selectCollection('taxonomies')->insertOne([
+            '_id' => 'malformed-mixed', 'applies_to' => $original,
+        ]);
+
+        try {
+            $this->migration('database/migrations/tenants/2026_09_14_000100_retire_static_profile_and_assets.php')->up();
+            self::fail('Expected malformed mixed taxonomy to fail closed.');
+        } catch (RuntimeException $exception) {
+            self::assertStringContainsString('malformed taxonomy applies_to', $exception->getMessage());
+        }
+
+        self::assertSame(
+            $original,
+            iterator_to_array($database->selectCollection('taxonomies')->findOne(['_id' => 'malformed-mixed'])['applies_to']),
+        );
+    }
+
+    public function test_static_retirement_rejects_static_only_taxonomy_and_malformed_projection_before_mutation(): void
+    {
+        $database = DB::connection('tenant')->getDatabase();
+        $database->selectCollection('taxonomies')->insertOne(['_id' => 'static-only', 'applies_to' => ['static_asset']]);
+        $migration = $this->migration('database/migrations/tenants/2026_09_14_000100_retire_static_profile_and_assets.php');
+        $beforeCollections = iterator_to_array($database->listCollectionNames());
+        sort($beforeCollections);
+
+        try {
+            $migration->up();
+            self::fail('Expected static-only taxonomy to abort before cleanup.');
+        } catch (RuntimeException $exception) {
+            self::assertStringContainsString('static-only taxonomy', $exception->getMessage());
+        }
+        $afterCollections = iterator_to_array($database->listCollectionNames());
+        sort($afterCollections);
+        self::assertSame($beforeCollections, $afterCollections);
+
+        $database->selectCollection('taxonomies')->deleteMany([]);
+        $database->selectCollection('map_pois')->insertOne(['ref_type' => 'static', 'ref_id' => 'bad']);
+        try {
+            $migration->up();
+            self::fail('Expected malformed Static map projection to abort.');
+        } catch (RuntimeException $exception) {
+            self::assertStringContainsString('malformed or unresolved', $exception->getMessage());
+        }
+        self::assertSame(1, $database->selectCollection('map_pois')->countDocuments(['ref_type' => 'static']));
+    }
+
+    public function test_static_retirement_accepts_each_historical_seed_and_rejects_any_extra_field(): void
+    {
+        $base = ['type' => 'poi', 'label' => 'POI', 'allowed_taxonomies' => [], 'capabilities' => ['is_poi_enabled' => true, 'has_bio' => true, 'has_taxonomies' => true, 'has_avatar' => true, 'has_cover' => true, 'has_content' => true]];
+        $permuted = [
+            'capabilities' => ['has_content' => true, 'has_cover' => true, 'has_avatar' => true, 'has_taxonomies' => true, 'has_bio' => true, 'is_poi_enabled' => true],
+            'allowed_taxonomies' => [],
+            'label' => 'POI',
+            'type' => 'poi',
+        ];
+        foreach ([$base, $base + ['map_category' => 'poi'], $base + ['map_category' => 'poi', 'poi_visual' => ['mode' => 'icon', 'icon' => 'place', 'color' => '#1E88E5']], $permuted] as $seed) {
+            $database = DB::connection('tenant')->getDatabase();
+            $database->selectCollection('static_profile_types')->deleteMany([]);
+            $database->selectCollection('static_profile_types')->insertOne($seed);
+            $this->migration('database/migrations/tenants/2026_09_14_000100_retire_static_profile_and_assets.php')->up();
+            self::assertNotContains('static_profile_types', $database->listCollectionNames());
+            $database->createCollection('static_profile_types');
+        }
+        $database->selectCollection('static_profile_types')->insertOne($base + ['unexpected' => true]);
+        try {
+            $this->migration('database/migrations/tenants/2026_09_14_000100_retire_static_profile_and_assets.php')->up();
+            self::fail('Expected custom Static seed to abort.');
+        } catch (RuntimeException $exception) {
+            self::assertStringContainsString('authored static_profile_types', $exception->getMessage());
+        }
     }
 
     private function migration(string $path): Migration

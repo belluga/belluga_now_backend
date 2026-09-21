@@ -25,7 +25,7 @@ class MapPoiLookupRequest extends FormRequest
                 'required',
                 'string',
                 'max:'.InputConstraints::NAME_MAX,
-                Rule::in(['event', 'account_profile', 'account', 'static', 'static_asset', 'asset']),
+                Rule::in(['event', 'account_profile', 'account']),
             ],
             'ref_id' => 'required|string|max:'.InputConstraints::NAME_MAX,
         ];

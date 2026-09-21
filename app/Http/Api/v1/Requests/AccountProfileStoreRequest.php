@@ -28,7 +28,7 @@ class AccountProfileStoreRequest extends FormRequest
             'account_id' => 'required|string|size:'.InputConstraints::OBJECT_ID_LENGTH,
             'profile_type' => 'required|string|max:'.InputConstraints::NAME_MAX,
             'display_name' => 'required|string|max:'.InputConstraints::NAME_MAX,
-            'location' => 'sometimes|array',
+            'location' => 'sometimes|nullable|array',
             'location.lat' => 'required_with:location.lng|numeric',
             'location.lng' => 'required_with:location.lat|numeric',
             'taxonomy_terms' => 'sometimes|array|max:'.InputConstraints::METADATA_MAX_ITEMS,

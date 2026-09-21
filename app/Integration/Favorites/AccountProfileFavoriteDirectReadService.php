@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Integration\Favorites;
 
-use App\Application\AccountProfiles\AccountProfilePublicCatalogEligibilityPolicy;
 use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
+use App\Application\AccountProfiles\AccountProfilePublicVisibilityPolicy;
 use App\Application\AccountProfiles\HomeFavoritesPinnedProfileService;
-use App\Application\Accounts\AccountPublicationStateService;
+use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
+use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Favorites\Contracts\AccountProfileFavoriteDirectReadContract;
 use Belluga\Favorites\Models\Tenants\FavoriteEdge;
@@ -24,8 +25,8 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
 
     public function __construct(
         private readonly AccountProfilePublicCatalogSnapshotReader $publicCatalogSnapshotReader,
-        private readonly AccountPublicationStateService $accountPublicationStateService,
         private readonly HomeFavoritesPinnedProfileService $pinnedProfileService,
+        private readonly EventOccurrenceNestedAccountStore $nestedAccountStore,
     ) {}
 
     /** @return array<string, mixed>|null */
@@ -41,11 +42,14 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
             return null;
         }
 
-        $state = $this->loadLiveAndNextOccurrenceStates([$profileId])[$profileId] ?? [];
-        $last = $this->loadLastOccurrenceStates([$profileId])[$profileId] ?? null;
+        $now = Carbon::now();
+        $state = $this->loadLiveAndNextOccurrenceStates([$profileId], $now)[$profileId] ?? [];
+        $last = $this->loadLastOccurrenceStates([$profileId], $now)[$profileId] ?? null;
+        $account = $profile->getRelation('account');
 
         return $this->buildPreviewPayload(
             profile: $profile,
+            account: $account instanceof Account ? $account : null,
             publicCatalogPolicy: $this->publicCatalogSnapshotReader->catalogSnapshot()->policy(),
             liveNowOccurrence: $state['live_now'] ?? null,
             nextOccurrence: $state['next'] ?? null,
@@ -61,6 +65,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
         int $page,
         int $pageSize,
     ): array {
+        $now = Carbon::now();
         $resolvedPage = max(1, $page);
         $resolvedPageSize = $pageSize > 0
             ? min($pageSize, self::DEFAULT_PAGE_SIZE)
@@ -85,7 +90,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
             ];
         }
 
-        $profiles = $this->loadActiveProfiles($edges);
+        $profiles = $this->loadProfiles($edges);
         if ($profiles === []) {
             return [
                 'items' => [],
@@ -93,7 +98,28 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
             ];
         }
 
-        $occurrenceStates = $this->loadLiveAndNextOccurrenceStates(array_keys($profiles));
+        $accountsById = Account::query()
+            ->whereIn('_id', array_values(array_unique(array_map(
+                static fn (AccountProfile $profile): string => (string) $profile->account_id,
+                $profiles,
+            ))))
+            ->get()
+            ->keyBy(static fn (Account $account): string => (string) $account->getKey());
+        $profiles = array_filter(
+            $profiles,
+            fn (AccountProfile $profile): bool => $publicCatalogPolicy->canShowInFavorites(
+                $profile,
+                $accountsById->get((string) $profile->account_id),
+            ),
+        );
+        if ($profiles === []) {
+            return [
+                'items' => [],
+                'has_more' => false,
+            ];
+        }
+
+        $occurrenceStates = $this->loadLiveAndNextOccurrenceStates(array_keys($profiles), $now);
         $rows = [];
 
         foreach ($edges as $edge) {
@@ -116,6 +142,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
             $rows[] = $this->buildRow(
                 edge: $edge,
                 profile: $profile,
+                account: $accountsById->get((string) $profile->account_id),
                 publicCatalogPolicy: $publicCatalogPolicy,
                 liveNowOccurrence: $state['live_now'] ?? null,
                 nextOccurrence: $state['next'] ?? null,
@@ -129,7 +156,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
         $lastOccurrenceStates = $this->loadLastOccurrenceStates(array_values(array_unique(array_map(
             static fn (array $row): string => (string) ($row['profile_id'] ?? ''),
             $pagedRows,
-        ))));
+        ))), $now);
 
         return [
             'items' => array_map(
@@ -147,7 +174,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
      * @param  iterable<int, FavoriteEdge>  $edges
      * @return array<string, AccountProfile>
      */
-    private function loadActiveProfiles(iterable $edges): array
+    private function loadProfiles(iterable $edges): array
     {
         $targetIds = [];
         foreach ($edges as $edge) {
@@ -176,44 +203,19 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                 'visibility',
             ]);
 
-        $activeProfiles = [];
+        $profilesById = [];
         foreach ($profiles as $profile) {
-            if ($profile->trashed() || (bool) ($profile->is_active ?? true) === false) {
-                continue;
-            }
-
-            $activeProfiles[(string) $profile->getAttribute('_id')] = $profile;
+            $profilesById[(string) $profile->getAttribute('_id')] = $profile;
         }
 
-        if ($activeProfiles === []) {
-            return [];
-        }
-
-        $publishedAccountIds = $this->accountPublicationStateService->publishedAccountIds(
-            array_values(array_unique(array_map(
-                static fn (AccountProfile $profile): string => trim((string) $profile->account_id),
-                array_values($activeProfiles),
-            )))
-        );
-        if ($publishedAccountIds === []) {
-            return [];
-        }
-
-        return array_filter(
-            $activeProfiles,
-            static fn (AccountProfile $profile): bool => in_array(
-                trim((string) $profile->account_id),
-                $publishedAccountIds,
-                true,
-            ),
-        );
+        return $profilesById;
     }
 
     /**
      * @param  array<int, string>  $profileIds
      * @return array<string, array{live_now:?EventOccurrence,next:?EventOccurrence,last:?EventOccurrence}>
      */
-    private function loadLiveAndNextOccurrenceStates(array $profileIds): array
+    private function loadLiveAndNextOccurrenceStates(array $profileIds, Carbon $now): array
     {
         $normalizedProfileIds = array_values(array_unique(array_filter(array_map(
             static fn (string $value): string => trim($value),
@@ -231,8 +233,6 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
             }
         }
 
-        $now = Carbon::now();
-
         $occurrences = EventOccurrence::query()
             ->where('deleted_at', null)
             ->where('is_event_published', true)
@@ -240,20 +240,10 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                 $query->where('effective_ends_at', '>', $now)
                     ->orWhere('starts_at', '>=', $now);
             })
+            ->where('place_ref.type', 'account_profile')
             ->where(static function ($query) use ($profileIdCandidates): void {
-                $query->where(static function ($query) use ($profileIdCandidates): void {
-                    $query->where('place_ref.type', 'account_profile')
-                        ->where(static function ($query) use ($profileIdCandidates): void {
-                            $query->whereIn('place_ref.id', $profileIdCandidates)
-                                ->orWhereIn('place_ref._id', $profileIdCandidates);
-                        });
-                })->orWhereRaw([
-                    'event_parties' => [
-                        '$elemMatch' => [
-                            'party_ref_id' => ['$in' => $profileIdCandidates],
-                        ],
-                    ],
-                ]);
+                $query->whereIn('place_ref.id', $profileIdCandidates)
+                    ->orWhereIn('place_ref._id', $profileIdCandidates);
             })
             ->orderBy('starts_at')
             ->orderBy('_id')
@@ -264,14 +254,13 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                 'effective_ends_at',
                 'ends_at',
                 'place_ref',
-                'event_parties',
             ]);
 
-        $states = [];
+        $states = $this->nestedAccountStore->liveAndNextOccurrencesForMemberProfiles($normalizedProfileIds, $now);
         $favoriteProfileIdSet = array_fill_keys($normalizedProfileIds, true);
 
         foreach ($occurrences as $occurrence) {
-            $associatedProfileIds = $this->extractAssociatedProfileIds(
+            $associatedProfileIds = $this->extractVenueProfileIds(
                 $occurrence,
                 $favoriteProfileIdSet,
             );
@@ -315,7 +304,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
      * @param  array<int, string>  $profileIds
      * @return array<string, EventOccurrence>
      */
-    private function loadLastOccurrenceStates(array $profileIds): array
+    private function loadLastOccurrenceStates(array $profileIds, Carbon $now): array
     {
         $normalizedProfileIds = array_values(array_unique(array_filter(array_map(
             static fn (string $value): string => trim($value),
@@ -333,7 +322,6 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
             }
         }
 
-        $now = Carbon::now();
         $occurrences = EventOccurrence::query()
             ->where('deleted_at', null)
             ->where('is_event_published', true)
@@ -349,20 +337,10 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                             ->where('starts_at', '<', $now);
                     });
             })
+            ->where('place_ref.type', 'account_profile')
             ->where(static function ($query) use ($profileIdCandidates): void {
-                $query->where(static function ($query) use ($profileIdCandidates): void {
-                    $query->where('place_ref.type', 'account_profile')
-                        ->where(static function ($query) use ($profileIdCandidates): void {
-                            $query->whereIn('place_ref.id', $profileIdCandidates)
-                                ->orWhereIn('place_ref._id', $profileIdCandidates);
-                        });
-                })->orWhereRaw([
-                    'event_parties' => [
-                        '$elemMatch' => [
-                            'party_ref_id' => ['$in' => $profileIdCandidates],
-                        ],
-                    ],
-                ]);
+                $query->whereIn('place_ref.id', $profileIdCandidates)
+                    ->orWhereIn('place_ref._id', $profileIdCandidates);
             })
             ->orderBy('starts_at', 'desc')
             ->orderBy('_id', 'desc')
@@ -370,14 +348,13 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                 '_id',
                 'starts_at',
                 'place_ref',
-                'event_parties',
             ]);
 
-        $states = [];
+        $states = $this->nestedAccountStore->lastOccurrencesForMemberProfiles($normalizedProfileIds, $now);
         $favoriteProfileIdSet = array_fill_keys($normalizedProfileIds, true);
 
         foreach ($occurrences as $occurrence) {
-            $associatedProfileIds = $this->extractAssociatedProfileIds(
+            $associatedProfileIds = $this->extractVenueProfileIds(
                 $occurrence,
                 $favoriteProfileIdSet,
             );
@@ -400,7 +377,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
      * @param  array<string, bool>  $favoriteProfileIdSet
      * @return array<int, string>
      */
-    private function extractAssociatedProfileIds(
+    private function extractVenueProfileIds(
         EventOccurrence $occurrence,
         array $favoriteProfileIdSet,
     ): array {
@@ -414,13 +391,6 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
             }
         }
 
-        foreach ($this->normalizeList($occurrence->getAttribute('event_parties')) as $eventParty) {
-            $partyRefId = trim((string) ($eventParty['party_ref_id'] ?? ''));
-            if ($partyRefId !== '' && isset($favoriteProfileIdSet[$partyRefId])) {
-                $profileIds[$partyRefId] = $partyRefId;
-            }
-        }
-
         return array_values($profileIds);
     }
 
@@ -430,7 +400,8 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
     private function buildRow(
         FavoriteEdge $edge,
         AccountProfile $profile,
-        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
+        ?\App\Models\Tenants\Account $account,
+        AccountProfilePublicVisibilityPolicy $publicCatalogPolicy,
         ?EventOccurrence $liveNowOccurrence,
         ?EventOccurrence $nextOccurrence,
         ?EventOccurrence $lastOccurrence,
@@ -451,6 +422,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
             'sort_upcoming_occurrence_at' => $sortBlock === 1 ? $nextOccurrenceAt : null,
             'payload' => $this->buildPreviewPayload(
                 profile: $profile,
+                account: $account,
                 publicCatalogPolicy: $publicCatalogPolicy,
                 liveNowOccurrence: $liveNowOccurrence,
                 nextOccurrence: $nextOccurrence,
@@ -464,7 +436,8 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
     /** @return array<string, mixed> */
     private function buildPreviewPayload(
         AccountProfile $profile,
-        AccountProfilePublicCatalogEligibilityPolicy $publicCatalogPolicy,
+        ?\App\Models\Tenants\Account $account,
+        AccountProfilePublicVisibilityPolicy $publicCatalogPolicy,
         ?EventOccurrence $liveNowOccurrence,
         ?EventOccurrence $nextOccurrence,
         ?EventOccurrence $lastOccurrence,
@@ -473,7 +446,7 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
     ): array {
         $profileId = (string) $profile->getAttribute('_id');
         $profileSlug = trim((string) ($profile->slug ?? ''));
-        $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile);
+        $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($profile, $account);
         $publicDetailPath = $canOpenPublicDetail ? '/parceiro/'.$profileSlug : null;
         $liveNowOccurrenceId = $liveNowOccurrence ? (string) $liveNowOccurrence->getAttribute('_id') : null;
         $liveNowOccurrenceAt = $liveNowOccurrence?->starts_at;
@@ -497,8 +470,12 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                 'id' => $profileId,
                 'slug' => $profileSlug,
                 'display_name' => (string) ($profile->display_name ?? ''),
-                'avatar_url' => $profile->avatar_url ?? null,
-                'cover_url' => $profile->cover_url ?? null,
+                'avatar_url' => $publicCatalogPolicy->canExposePublicMedia($profile, $account, 'avatar')
+                    ? $profile->avatar_url ?? null
+                    : null,
+                'cover_url' => $publicCatalogPolicy->canExposePublicMedia($profile, $account, 'cover')
+                    ? $profile->cover_url ?? null
+                    : null,
                 'profile_type' => $profile->profile_type ? (string) $profile->profile_type : null,
                 'can_open_public_detail' => $canOpenPublicDetail,
                 'public_detail_path' => $publicDetailPath,
@@ -688,27 +665,6 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
         }
 
         return is_array($value) ? $value : [];
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function normalizeList(mixed $value): array
-    {
-        if ($value instanceof BSONDocument || $value instanceof BSONArray) {
-            $value = $value->getArrayCopy();
-        }
-
-        if (! is_array($value)) {
-            return [];
-        }
-
-        $normalized = [];
-        foreach ($value as $item) {
-            $normalized[] = $this->normalizeArray($item);
-        }
-
-        return $normalized;
     }
 
     /**

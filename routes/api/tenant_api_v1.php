@@ -2,6 +2,7 @@
 
 use App\Http\Api\v1\Controllers\AccountController;
 use App\Http\Api\v1\Controllers\AccountProfileGalleryController;
+use App\Http\Api\v1\Controllers\AccountProfileMediaController;
 use App\Http\Api\v1\Controllers\AccountProfilesController;
 use App\Http\Api\v1\Controllers\AccountProfileTypesController;
 use App\Http\Api\v1\Controllers\AuthControllerLandlord;
@@ -12,8 +13,6 @@ use App\Http\Api\v1\Controllers\MapFilterImageController;
 use App\Http\Api\v1\Controllers\MeController;
 use App\Http\Api\v1\Controllers\OrganizationsController;
 use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
-use App\Http\Api\v1\Controllers\StaticAssetsController;
-use App\Http\Api\v1\Controllers\StaticProfileTypesController;
 use App\Http\Api\v1\Controllers\TaxonomiesController;
 use App\Http\Api\v1\Controllers\TaxonomyTermsController;
 use App\Http\Api\v1\Controllers\TenantAppDomainController;
@@ -209,6 +208,10 @@ Route::prefix('account_profiles')
 
         Route::prefix('{account_profile_id}')
             ->group(function () {
+                Route::get('/media/{kind}', [AccountProfileMediaController::class, 'adminMedia'])
+                    ->whereIn('kind', ['avatar', 'cover'])
+                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
                 Route::post('/nested_profile_groups', [AccountProfilesController::class, 'storeNestedGroup'])
                     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
                 Route::delete('/nested_profile_groups/{group_id}', [AccountProfilesController::class, 'deleteNestedGroup'])
@@ -269,25 +272,10 @@ Route::post('/account_profile_types', [AccountProfileTypesController::class, 'st
 Route::patch('/account_profile_types/{profile_type}', [AccountProfileTypesController::class, 'update'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
 
-Route::get('/account_profile_types/{profile_type}/map_poi_projection_impact', [AccountProfileTypesController::class, 'mapPoiProjectionImpact'])
-    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
-
-Route::delete('/account_profile_types/{profile_type}', [AccountProfileTypesController::class, 'destroy'])
-    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
-
-Route::get('/static_profile_types', [StaticProfileTypesController::class, 'index'])
-    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
-
-Route::post('/static_profile_types', [StaticProfileTypesController::class, 'store'])
-    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
-
-Route::patch('/static_profile_types/{profile_type}', [StaticProfileTypesController::class, 'update'])
+Route::post('/account_profile_types/{profile_type}/change_impact', [AccountProfileTypesController::class, 'changeImpact'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
 
-Route::get('/static_profile_types/{profile_type}/map_poi_projection_impact', [StaticProfileTypesController::class, 'mapPoiProjectionImpact'])
-    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
-
-Route::delete('/static_profile_types/{profile_type}', [StaticProfileTypesController::class, 'destroy'])
+Route::delete('/account_profile_types/{profile_type}', [AccountProfileTypesController::class, 'destroy'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
 
 Route::get('/taxonomies', [TaxonomiesController::class, 'index'])
@@ -316,33 +304,6 @@ Route::patch('/taxonomies/{taxonomy_id}/terms/{term_id}', [TaxonomyTermsControll
 
 Route::delete('/taxonomies/{taxonomy_id}/terms/{term_id}', [TaxonomyTermsController::class, 'destroy'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
-
-Route::prefix('static_assets')
-    ->group(function () {
-        Route::get('/', [StaticAssetsController::class, 'index'])
-            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
-
-        Route::post('/', [StaticAssetsController::class, 'store'])
-            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
-
-        Route::prefix('{asset_id}')
-            ->group(function () {
-                Route::get('/', [StaticAssetsController::class, 'show'])
-                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
-
-                Route::patch('/', [StaticAssetsController::class, 'update'])
-                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
-
-                Route::delete('/', [StaticAssetsController::class, 'destroy'])
-                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
-
-                Route::post('/restore', [StaticAssetsController::class, 'restore'])
-                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
-
-                Route::delete('/force_delete', [StaticAssetsController::class, 'forceDestroy'])
-                    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
-            });
-    });
 
 Route::post('/media/external-image', [ExternalImageProxyController::class, 'store'])
     ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create,account-users:update']);

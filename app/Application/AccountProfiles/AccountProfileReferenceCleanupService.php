@@ -169,6 +169,12 @@ final class AccountProfileReferenceCleanupService
         );
         $profile->save();
 
+        if ($profile->deleted_at !== null) {
+            $this->outboxPublisher->recordReceiptOnly($context, $profile, $commandId, $fingerprint);
+
+            return null;
+        }
+
         return $this->outboxPublisher->recordUpsert($context, $profile, $commandId, $fingerprint);
     }
 

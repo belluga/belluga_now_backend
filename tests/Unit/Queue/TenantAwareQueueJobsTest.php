@@ -11,7 +11,6 @@ use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
 use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromAccountProfileJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
-use Belluga\MapPois\Jobs\UpsertMapPoiFromStaticAssetJob;
 use Belluga\PushHandler\Jobs\SendPushMessageJob;
 use Spatie\Multitenancy\Jobs\TenantAware;
 use Tests\TestCase;
@@ -60,7 +59,6 @@ class TenantAwareQueueJobsTest extends TestCase
             RefreshExpiredEventMapPoisJob::class,
             UpsertMapPoiFromAccountProfileJob::class,
             UpsertMapPoiFromEventJob::class,
-            UpsertMapPoiFromStaticAssetJob::class,
             SendPushMessageJob::class,
         ];
     }

@@ -4,21 +4,22 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
 use App\Application\Shared\MapPois\PoiVisualNormalizer;
 use App\Models\Tenants\TenantProfileType;
 use Illuminate\Support\Str;
-use MongoDB\Model\BSONArray;
-use MongoDB\Model\BSONDocument;
 
 class AccountProfileRegistryService
 {
     /** @var array<string, array<string, mixed>|null> */
     private array $typeDefinitionCache = [];
 
+    private int $typeDefinitionCacheRevision = -1;
+
     public function __construct(
         private readonly PoiVisualNormalizer $poiVisualNormalizer,
         private readonly AccountProfileTypeMediaService $mediaService,
-        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
+        private readonly AccountProfileCapabilityResolverContract $capabilityResolver,
     ) {}
 
     /**
@@ -32,9 +33,7 @@ class AccountProfileRegistryService
             ->map(function (TenantProfileType $type) use ($baseUrl): array {
                 $visual = $this->resolveVisualPayload($type, $baseUrl);
                 $labels = $this->resolveLabels($type);
-                $capabilities = $this->resolveCapabilitiesPayload(
-                    $this->arrayFrom($type->capabilities ?? [])
-                );
+                $capabilities = $this->resolveCapabilitiesPayload($type);
 
                 return [
                     'type' => $type->type,
@@ -49,6 +48,7 @@ class AccountProfileRegistryService
                     'visual' => $visual,
                     'poi_visual' => $visual,
                     'capabilities' => $capabilities,
+                    'capability_revision' => max(0, (int) ($type->capability_revision ?? 0)),
                 ];
             })
             ->values()
@@ -60,6 +60,7 @@ class AccountProfileRegistryService
      */
     public function typeDefinition(string $profileType, ?string $baseUrl = null): ?array
     {
+        $this->refreshTypeDefinitionCacheIfStale();
         $normalizedType = trim($profileType);
         if ($normalizedType === '') {
             return null;
@@ -80,9 +81,7 @@ class AccountProfileRegistryService
 
         $visual = $this->resolveVisualPayload($type, $baseUrl);
         $labels = $this->resolveLabels($type);
-        $capabilities = $this->resolveCapabilitiesPayload(
-            $this->arrayFrom($type->capabilities ?? [])
-        );
+        $capabilities = $this->resolveCapabilitiesPayload($type);
 
         return $this->typeDefinitionCache[$cacheKey] = [
             'type' => $type->type,
@@ -97,84 +96,65 @@ class AccountProfileRegistryService
             'visual' => $visual,
             'poi_visual' => $visual,
             'capabilities' => $capabilities,
+            'capability_revision' => max(0, (int) ($type->capability_revision ?? 0)),
         ];
     }
 
-    public function isPoiEnabled(string $profileType): bool
+    /** @return array<int, array<string, mixed>> */
+    public function capabilityDefinitions(): array
     {
-        $definition = $this->typeDefinition($profileType);
-        $capabilities = $definition['capabilities'] ?? [];
+        return array_values($this->capabilityResolver->definitions());
+    }
 
-        return $this->capabilityCatalog->isExplicitlyEnabled(
-            AccountProfileTypeCapabilityCatalog::IS_POI_ENABLED,
-            is_array($capabilities) ? $capabilities : [],
-        );
+    /** @return array<string, array{value:mixed,parameters:array<string,int>}> */
+    public function capabilityCreationConfiguration(): array
+    {
+        return $this->capabilityResolver->materializeConfigurationForCreation();
+    }
+
+    public function locationPolicy(string $profileType): string
+    {
+        return (string) $this->valueForType($profileType, 'location_policy', 'disabled');
+    }
+
+    public function isMapPoiEnabled(string $profileType): bool
+    {
+        return $this->valueForType($profileType, 'is_map_poi_enabled', false) === true;
+    }
+
+    public function isPhysicalHostEnabled(string $profileType): bool
+    {
+        return $this->valueForType($profileType, 'is_physical_host_enabled', false) === true;
     }
 
     public function isReferenceLocationEnabled(string $profileType): bool
     {
-        $definition = $this->typeDefinition($profileType);
-        $capabilities = $definition['capabilities'] ?? [];
-
-        return $this->capabilityCatalog->isExplicitlyEnabled(
-            AccountProfileTypeCapabilityCatalog::IS_REFERENCE_LOCATION_ENABLED,
-            is_array($capabilities) ? $capabilities : [],
-        );
+        return $this->valueForType($profileType, 'is_reference_location_enabled', false) === true;
     }
 
     public function hasEvents(string $profileType): bool
     {
-        $definition = $this->typeDefinition($profileType);
-        $capabilities = $definition['capabilities'] ?? [];
-
-        return $this->capabilityCatalog->isExplicitlyEnabled(
-            AccountProfileTypeCapabilityCatalog::HAS_EVENTS,
-            is_array($capabilities) ? $capabilities : [],
-        );
+        return $this->valueForType($profileType, 'has_events', false) === true;
     }
 
     public function hasGallery(string $profileType): bool
     {
-        $definition = $this->typeDefinition($profileType);
-        $capabilities = $definition['capabilities'] ?? [];
-
-        return $this->capabilityCatalog->isExplicitlyEnabled(
-            AccountProfileTypeCapabilityCatalog::HAS_GALLERY,
-            is_array($capabilities) ? $capabilities : [],
-        );
+        return $this->valueForType($profileType, 'has_gallery', false) === true;
     }
 
     public function hasNestedProfileGroups(string $profileType): bool
     {
-        $definition = $this->typeDefinition($profileType);
-        $capabilities = $definition['capabilities'] ?? [];
-
-        return $this->capabilityCatalog->isExplicitlyEnabled(
-            AccountProfileTypeCapabilityCatalog::HAS_NESTED_PROFILE_GROUPS,
-            is_array($capabilities) ? $capabilities : [],
-        );
+        return $this->valueForType($profileType, 'has_nested_profile_groups', false) === true;
     }
 
     public function hasContactChannels(string $profileType): bool
     {
-        $definition = $this->typeDefinition($profileType);
-        $capabilities = $definition['capabilities'] ?? [];
-
-        return $this->capabilityCatalog->isExplicitlyEnabled(
-            AccountProfileTypeCapabilityCatalog::HAS_CONTACT_CHANNELS,
-            is_array($capabilities) ? $capabilities : [],
-        );
+        return $this->valueForType($profileType, 'has_contact_channels', false) === true;
     }
 
     public function hasExternalLinks(string $profileType): bool
     {
-        $definition = $this->typeDefinition($profileType);
-        $capabilities = $definition['capabilities'] ?? [];
-
-        return $this->capabilityCatalog->isExplicitlyEnabled(
-            AccountProfileTypeCapabilityCatalog::HAS_EXTERNAL_LINKS,
-            is_array($capabilities) ? $capabilities : [],
-        );
+        return $this->valueForType($profileType, 'has_external_links', false) === true;
     }
 
     public function hasExternalLinksAuthoritatively(string $profileType): bool
@@ -187,10 +167,7 @@ class AccountProfileRegistryService
             return false;
         }
 
-        return $this->capabilityCatalog->isExplicitlyEnabled(
-            AccountProfileTypeCapabilityCatalog::HAS_EXTERNAL_LINKS,
-            $this->arrayFrom($type->capabilities ?? []),
-        );
+        return $this->capabilityResolver->resolveForProfileType($type, 'has_external_links')['effective']['value'] === true;
     }
 
     /**
@@ -254,31 +231,31 @@ class AccountProfileRegistryService
     }
 
     /**
-     * @param  array<string, mixed>  $capabilities
-     * @return array<string, bool>
+     * @return array<string, array<string, mixed>>
      */
-    private function resolveCapabilitiesPayload(array $capabilities): array
+    private function resolveCapabilitiesPayload(TenantProfileType $type): array
     {
-        return $this->capabilityCatalog->runtimeCapabilities($capabilities);
+        return $this->capabilityResolver->resolveAllForProfileType($type);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function arrayFrom(mixed $value): array
+    private function valueForType(string $profileType, string $key, mixed $fallback): mixed
     {
-        if (is_array($value)) {
-            return $value;
+        $typeDefinition = $this->typeDefinition($profileType);
+        if ($typeDefinition === null) {
+            return $fallback;
         }
 
-        if ($value instanceof BSONDocument || $value instanceof BSONArray) {
-            return $value->getArrayCopy();
+        return data_get($typeDefinition, "capabilities.{$key}.effective.value", $fallback);
+    }
+
+    private function refreshTypeDefinitionCacheIfStale(): void
+    {
+        $revision = AccountProfileTypeSetProvider::currentRevision();
+        if ($this->typeDefinitionCacheRevision === $revision) {
+            return;
         }
 
-        if ($value instanceof \Traversable) {
-            return iterator_to_array($value);
-        }
-
-        return [];
+        $this->typeDefinitionCache = [];
+        $this->typeDefinitionCacheRevision = $revision;
     }
 }

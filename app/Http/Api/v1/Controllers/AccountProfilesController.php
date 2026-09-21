@@ -220,14 +220,15 @@ class AccountProfilesController extends Controller
 
     public function show(string $tenant_domain, string $account_profile_id): JsonResponse
     {
-        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+        $profile = $this->profileQueryService->findWithTrashedOrFail($account_profile_id);
 
         $data = $this->formatter->format(
             $profile,
             includeExternalLinks: true,
             includeExternalLinksLimit: true,
+            includeAdminVisibility: true,
         );
-        $data['gallery_capabilities'] = $this->galleryMutations->capabilities();
+        $data['gallery_capabilities'] = $this->galleryMutations->capabilities($profile);
 
         return response()->json(['data' => $data]);
     }
@@ -344,7 +345,7 @@ class AccountProfilesController extends Controller
         if ($request->exists('gallery_groups')) {
             throw ValidationException::withMessages(['gallery_groups' => ['Gallery must be changed through its granular endpoints.']]);
         }
-        $profile = $this->profileQueryService->findOrFail($account_profile_id);
+        $profile = $this->profileQueryService->findWithTrashedOrFail($account_profile_id);
 
         $validated = $request->validated();
         unset($validated['avatar'], $validated['cover']);
@@ -375,6 +376,7 @@ class AccountProfilesController extends Controller
                 $updated,
                 includeExternalLinks: true,
                 includeExternalLinksLimit: true,
+                includeAdminVisibility: true,
             ),
         ]);
     }

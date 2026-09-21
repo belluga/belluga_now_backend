@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace Belluga\Events\Contracts;
 
+use Belluga\Events\Application\Transactions\EventTransactionContext;
 use Illuminate\Pagination\LengthAwarePaginator;
 
 interface EventProfileResolverContract
 {
+    /** @param array<int, string> $profileIds */
+    public function admitPhysicalHosts(EventTransactionContext $context, array $profileIds): void;
+
     /**
      * @return array{
      *   venue: array<string, mixed>,
@@ -72,17 +76,6 @@ interface EventProfileResolverContract
      * @return array<string, array<string, mixed>>
      */
     public function resolveExistingPublicEventPartyProfilesByIds(array $profileIds): array;
-
-    /**
-     * Public member-tab helper: return the current card projection for every
-     * still-existing selected related profile, keyed by profile id, without
-     * reapplying catalog/discovery admission rules. Navigation remains governed
-     * only by `can_open_public_detail` / `public_detail_path`.
-     *
-     * @param  array<int, string>  $profileIds
-     * @return array<string, array<string, mixed>>
-     */
-    public function resolveExistingEventPartyDisplayProfilesByIds(array $profileIds): array;
 
     /**
      * @param  array<int, string>  $profileIds

@@ -32,7 +32,7 @@ class AccountProfileUpdateRequest extends FormRequest
             'display_name' => $this->publicVisibleNameRules(required: false),
             'slug' => 'sometimes|string|max:'.InputConstraints::NAME_MAX.'|regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/',
             'aggregate_revision' => 'sometimes|integer|min:1',
-            'location' => 'sometimes|array',
+            'location' => 'sometimes|nullable|array',
             'location.lat' => 'required_with:location.lng|numeric',
             'location.lng' => 'required_with:location.lat|numeric',
             'taxonomy_terms' => 'sometimes|array|max:'.InputConstraints::METADATA_MAX_ITEMS,

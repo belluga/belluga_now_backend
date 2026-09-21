@@ -51,7 +51,7 @@ final class AccountProfileGalleryControllerTest extends TestCaseTenant
         AccountProfile::query()->delete();
         TenantProfileType::query()->delete();
         [$this->account] = $this->seedAccountWithRole(['account-users:view', 'account-users:create', 'account-users:update', 'account-users:delete']);
-        TenantProfileType::query()->create(['type' => 'venue', 'label' => 'Venue', 'allowed_taxonomies' => [], 'capabilities' => ['is_queryable' => true, 'is_publicly_navigable' => true, 'is_favoritable' => true, 'is_publicly_discoverable' => true, 'is_poi_enabled' => false, 'has_events' => true, 'has_gallery' => true]]);
+        TenantProfileType::query()->create(['type' => 'venue', 'label' => 'Venue', 'allowed_taxonomies' => [], 'capabilities' => ['is_queryable' => ['value' => true, 'parameters' => []], 'is_publicly_navigable' => ['value' => true, 'parameters' => []], 'is_favoritable' => ['value' => true, 'parameters' => []], 'is_publicly_discoverable' => ['value' => true, 'parameters' => []], 'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []], 'has_events' => ['value' => true, 'parameters' => []], 'has_gallery' => ['value' => true, 'parameters' => ['max_groups' => 6, 'max_items_per_group' => 12]]]]);
     }
 
     public function test_granular_photo_create_public_readback_variants_and_cleanup(): void

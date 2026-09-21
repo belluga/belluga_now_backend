@@ -10,13 +10,13 @@ use App\Models\Tenants\AttendanceCommitment;
 use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Invites\Application\Mutations\InviteMutationService;
 use Illuminate\Support\Carbon;
-use RuntimeException;
 
 class AttendanceCommitmentService
 {
     public function __construct(
         private readonly InviteMutationService $inviteMutationService,
         private readonly EventTransactionRunner $transactions,
+        private readonly AttendanceCommitmentWriter $writer,
     ) {}
 
     /**
@@ -73,28 +73,9 @@ class AttendanceCommitmentService
     {
         $receiverAccountProfileId = $this->inviteMutationService->prepareReceiverForDirectConfirmation($userId);
 
-        /** @var AttendanceCommitment $commitment */
-        $commitment = $this->transactions->run(function () use ($userId, $eventId, $occurrenceId, $receiverAccountProfileId): AttendanceCommitment {
-            $now = Carbon::now();
-
-            $commitment = $this->findByScope($userId, $eventId, $occurrenceId)
-                ?? new AttendanceCommitment([
-                    'user_id' => $userId,
-                    'event_id' => $eventId,
-                    'occurrence_id' => $occurrenceId,
-                ]);
-            $commitment->fill([
-                'kind' => 'free_confirmation',
-                'status' => 'active',
-                'source' => 'direct',
-                'confirmed_at' => $now,
-                'canceled_at' => null,
-            ]);
-            $commitment->save();
-            $commitment = $commitment->fresh();
-            if (! $commitment instanceof AttendanceCommitment) {
-                throw new RuntimeException('Attendance confirmation could not be reloaded after write.');
-            }
+        /** @var array{commitment: AttendanceCommitment, activated: bool} $result */
+        $result = $this->transactions->run(function () use ($userId, $eventId, $occurrenceId, $receiverAccountProfileId): array {
+            $result = $this->writer->activateFreeConfirmation($userId, $eventId, $occurrenceId, 'direct');
 
             $this->inviteMutationService->supersedePendingInvitesForDirectConfirmation(
                 userId: $userId,
@@ -103,12 +84,14 @@ class AttendanceCommitmentService
                 receiverAccountProfileId: $receiverAccountProfileId,
             );
 
-            return $commitment;
+            return $result;
         });
 
-        event(new OccurrenceAttendanceConfirmed($userId, $eventId, $occurrenceId));
+        if ($result['activated']) {
+            event(new OccurrenceAttendanceConfirmed($userId, $eventId, $occurrenceId));
+        }
 
-        return $commitment->fresh() ?? $commitment;
+        return $result['commitment']->fresh() ?? $result['commitment'];
     }
 
     public function unconfirm(string $userId, string $eventId, string $occurrenceId): ?AttendanceCommitment

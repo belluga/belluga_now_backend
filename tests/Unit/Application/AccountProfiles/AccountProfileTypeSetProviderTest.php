@@ -41,7 +41,7 @@ class AccountProfileTypeSetProviderTest extends TestCase
 
     public function test_remember_scopes_cached_type_sets_by_current_tenant(): void
     {
-        $provider = new AccountProfileTypeSetProvider;
+        $provider = app(AccountProfileTypeSetProvider::class);
         $remember = new ReflectionMethod(AccountProfileTypeSetProvider::class, 'remember');
         $remember->setAccessible(true);
 
@@ -85,22 +85,24 @@ class AccountProfileTypeSetProviderTest extends TestCase
             'label' => 'Venue',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
-        $provider = new AccountProfileTypeSetProvider;
+        $provider = app(AccountProfileTypeSetProvider::class);
         $this->assertTrue($provider->isPubliclyNavigable('venue'));
 
         $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $venueType->capabilities = [
-            'is_queryable' => true,
-            'is_publicly_navigable' => false,
-            'is_publicly_discoverable' => true,
-            'is_poi_enabled' => true,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'location_policy' => ['value' => 'required', 'parameters' => []],
+            'is_map_poi_enabled' => ['value' => true, 'parameters' => []],
         ];
         $venueType->save();
 
@@ -115,14 +117,15 @@ class AccountProfileTypeSetProviderTest extends TestCase
             'label' => 'Venue',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'is_poi_enabled' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []],
+                'is_map_poi_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
-        $provider = new AccountProfileTypeSetProvider;
+        $provider = app(AccountProfileTypeSetProvider::class);
         $this->assertTrue($provider->isPubliclyNavigable('venue'));
 
         TenantProfileType::query()->where('type', 'venue')->firstOrFail()->delete();
@@ -138,22 +141,22 @@ class AccountProfileTypeSetProviderTest extends TestCase
             'label' => 'Venue',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'has_gallery' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'has_gallery' => ['value' => true, 'parameters' => ['max_groups' => 6, 'max_items_per_group' => 12]],
             ],
         ]);
 
-        $provider = new AccountProfileTypeSetProvider;
+        $provider = app(AccountProfileTypeSetProvider::class);
         $this->assertTrue($provider->hasGalleryEnabled('venue'));
 
         $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $venueType->capabilities = [
-            'is_queryable' => true,
-            'is_publicly_navigable' => true,
-            'is_publicly_discoverable' => true,
-            'has_gallery' => false,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'has_gallery' => ['value' => false, 'parameters' => ['max_groups' => 6, 'max_items_per_group' => 12]],
         ];
         $venueType->save();
 
@@ -168,14 +171,14 @@ class AccountProfileTypeSetProviderTest extends TestCase
             'label' => 'Venue',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'has_gallery' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'has_gallery' => ['value' => true, 'parameters' => ['max_groups' => 6, 'max_items_per_group' => 12]],
             ],
         ]);
 
-        $provider = new AccountProfileTypeSetProvider;
+        $provider = app(AccountProfileTypeSetProvider::class);
         $this->assertTrue($provider->hasGalleryEnabled('venue'));
 
         TenantProfileType::query()->where('type', 'venue')->firstOrFail()->delete();

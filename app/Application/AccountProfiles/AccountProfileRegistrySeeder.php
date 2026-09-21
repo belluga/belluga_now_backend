@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Models\Tenants\TenantProfileType;
+use Illuminate\Support\Facades\DB;
 use MongoDB\BSON\UTCDateTime;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
@@ -13,6 +16,7 @@ class AccountProfileRegistrySeeder
 {
     public function __construct(
         private readonly ?AccountProfileRegistryDefaultUpserter $defaultUpserter = null,
+        private readonly ?AccountProfileCapabilityResolverContract $capabilityResolver = null,
     ) {}
 
     /**
@@ -20,36 +24,42 @@ class AccountProfileRegistrySeeder
      */
     public function defaults(): array
     {
+        $resolver = $this->capabilityResolver ?? app(AccountProfileCapabilityResolverContract::class);
+
         return [
             [
                 'type' => 'personal',
                 'label' => 'Personal',
                 'allowed_taxonomies' => [],
                 'poi_visual' => null,
-                'capabilities' => [
+                'capability_revision' => 0,
+                'host_admission_fence_revision' => 0,
+                'capabilities' => $resolver->materializeConfigurationForCreation($this->configuration([
                     'is_queryable' => false,
                     'is_publicly_navigable' => false,
                     'is_favoritable' => true,
                     'is_inviteable' => true,
                     'is_publicly_discoverable' => false,
-                    'is_poi_enabled' => false,
+                    'location_policy' => 'disabled',
                     'has_gallery' => false,
-                ],
+                ])),
             ],
             [
                 'type' => 'artist',
                 'label' => 'Artist',
                 'allowed_taxonomies' => [],
                 'poi_visual' => null,
-                'capabilities' => [
+                'capability_revision' => 0,
+                'host_admission_fence_revision' => 0,
+                'capabilities' => $resolver->materializeConfigurationForCreation($this->configuration([
                     'is_queryable' => true,
                     'is_publicly_navigable' => true,
                     'is_favoritable' => true,
                     'is_inviteable' => false,
                     'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
+                    'location_policy' => 'disabled',
                     'has_gallery' => true,
-                ],
+                ])),
             ],
             [
                 'type' => 'venue',
@@ -60,34 +70,40 @@ class AccountProfileRegistrySeeder
                     'icon' => 'place',
                     'color' => '#E53935',
                 ],
-                'capabilities' => [
+                'capability_revision' => 0,
+                'host_admission_fence_revision' => 0,
+                'capabilities' => $resolver->materializeConfigurationForCreation($this->configuration([
                     'is_queryable' => true,
                     'is_publicly_navigable' => true,
                     'is_favoritable' => true,
                     'is_inviteable' => false,
                     'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => true,
+                    'location_policy' => 'required',
+                    'is_map_poi_enabled' => true,
+                    'is_physical_host_enabled' => true,
                     'has_gallery' => true,
-                ],
+                ])),
             ],
         ];
     }
 
     public function ensureDefaults(): void
     {
-        $this->ensureDefaultTypes(['personal', 'artist', 'venue']);
+        $this->synchronizeCapabilityDefinitions();
+        $this->ensureDefaultTypes(['personal', 'artist', 'venue'], repairExisting: true);
     }
 
     public function ensurePersonalDefault(): void
     {
-        $this->ensureDefaultTypes(['personal']);
+        $this->ensureDefaultTypes(['personal'], repairExisting: false);
     }
 
     /**
      * @param  array<int, string>  $types
      */
-    private function ensureDefaultTypes(array $types): void
+    private function ensureDefaultTypes(array $types, bool $repairExisting): void
     {
+        $resolver = $this->capabilityResolver ?? app(AccountProfileCapabilityResolverContract::class);
         $upserter = $this->defaultUpserter ?? new AccountProfileRegistryDefaultUpserter;
         $now = new UTCDateTime((int) (microtime(true) * 1000));
         $requestedTypes = array_values(array_filter(array_map(
@@ -106,13 +122,45 @@ class AccountProfileRegistrySeeder
                 ->first();
 
             if (! $existing instanceof TenantProfileType) {
+                $entry['capabilities'] = $resolver->configurationForPersistence(
+                    $this->arrayFrom($entry['capabilities'] ?? []),
+                );
                 $upserter->ensureDefault($entry, $now);
 
                 continue;
             }
 
-            $this->repairDefaultCapabilities($existing, $entry);
+            if ($repairExisting) {
+                $this->repairDefaultCapabilities($existing, $entry);
+            }
         }
+    }
+
+    private function synchronizeCapabilityDefinitions(): void
+    {
+        $resolver = $this->capabilityResolver ?? app(AccountProfileCapabilityResolverContract::class);
+        $collection = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_capability_definitions');
+        $definitions = array_values($resolver->definitions());
+
+        foreach ($definitions as $definition) {
+            $collection->replaceOne(
+                ['key' => $definition['key']],
+                $resolver->definitionForPersistence($definition),
+                ['upsert' => true],
+            );
+        }
+        $collection->deleteMany([
+            'key' => ['$nin' => array_column($definitions, 'key')],
+        ]);
+        $collection->createIndex(
+            ['key' => 1],
+            [
+                'name' => 'uq_account_profile_capability_definitions_key_v1',
+                'unique' => true,
+            ],
+        );
     }
 
     /**
@@ -124,22 +172,42 @@ class AccountProfileRegistrySeeder
     ): void {
         $current = $this->arrayFrom($type->capabilities ?? []);
         $defaults = $this->arrayFrom($entry['capabilities'] ?? []);
-        $next = $current + $defaults;
-
-        if ((string) $type->type === 'personal') {
-            $next['is_queryable'] = false;
-            $next['is_publicly_navigable'] = false;
-            $next['is_favoritable'] = true;
-            $next['is_inviteable'] = true;
-            $next['is_publicly_discoverable'] = false;
-        }
+        $resolver = $this->capabilityResolver ?? app(AccountProfileCapabilityResolverContract::class);
+        $next = $resolver->repairConfiguration($current, $defaults);
 
         if ($next === $current) {
             return;
         }
 
-        $type->capabilities = $next;
-        $type->save();
+        $expectedRevision = max(0, (int) ($type->capability_revision ?? 0));
+        $filter = ['type' => (string) $type->type];
+        $filter += $expectedRevision === 0
+            ? ['$or' => [
+                ['capability_revision' => 0],
+                ['capability_revision' => ['$exists' => false]],
+            ]]
+            : ['capability_revision' => $expectedRevision];
+        $result = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('account_profile_types')
+            ->updateOne($filter, [
+                '$set' => [
+                    'capabilities' => $resolver->configurationForPersistence($next),
+                    'updated_at' => new UTCDateTime((int) (microtime(true) * 1000)),
+                ],
+                '$inc' => [
+                    'capability_revision' => 1,
+                    'host_admission_fence_revision' => 1,
+                ],
+            ]);
+
+        if ($result->getMatchedCount() !== 1) {
+            throw new ConcurrencyConflictException(
+                "Account Profile Type [{$type->type}] changed during registry repair."
+            );
+        }
+
+        AccountProfileTypeSetProvider::bumpRevision();
     }
 
     /**
@@ -152,5 +220,19 @@ class AccountProfileRegistrySeeder
         }
 
         return is_array($value) ? $value : [];
+    }
+
+    /**
+     * @param  array<string, bool|string>  $values
+     * @return array<string, array{value:bool|string,parameters:array<string,int>}>
+     */
+    private function configuration(array $values): array
+    {
+        $configuration = [];
+        foreach ($values as $key => $value) {
+            $configuration[$key] = ['value' => $value, 'parameters' => []];
+        }
+
+        return $configuration;
     }
 }

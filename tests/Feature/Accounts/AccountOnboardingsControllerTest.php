@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Accounts;
 
-use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
@@ -58,8 +58,8 @@ class AccountOnboardingsControllerTest extends TestCase
             'label' => 'Personal',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_favoritable' => false,
-                'is_poi_enabled' => false,
+                'is_favoritable' => ['value' => false, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
             ],
         ]);
         TenantProfileType::query()->create([
@@ -67,8 +67,8 @@ class AccountOnboardingsControllerTest extends TestCase
             'label' => 'Venue',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_favoritable' => true,
-                'is_poi_enabled' => true,
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -278,11 +278,11 @@ class AccountOnboardingsControllerTest extends TestCase
             ->where('type', 'venue')
             ->update([
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => true,
-                    'has_nested_profile_groups' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+                    'has_nested_profile_groups' => ['value' => true, 'parameters' => []],
                 ],
             ]);
         $accountsBefore = Account::query()->count();
@@ -318,11 +318,11 @@ class AccountOnboardingsControllerTest extends TestCase
             ->where('type', 'venue')
             ->update([
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => true,
-                    'has_nested_profile_groups' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+                    'has_nested_profile_groups' => ['value' => true, 'parameters' => []],
                 ],
             ]);
 

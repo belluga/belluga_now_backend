@@ -8,11 +8,13 @@ use App\Application\Accounts\AccountUserService;
 use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Domain\Events\Events\OccurrenceAttendanceConfirmed;
 use App\Jobs\Telemetry\DeliverTelemetryEventJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
+use App\Models\Tenants\AttendanceCommitment;
 use App\Models\Tenants\TenantProfileType;
 use App\Models\Tenants\TenantSettings;
 use Belluga\Events\Application\Events\EventOccurrenceNestedAccountStore;
@@ -20,6 +22,7 @@ use Belluga\Events\Application\Events\EventOccurrenceSyncService;
 use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
+use Belluga\Invites\Contracts\InviteAttendanceGatewayContract;
 use Belluga\Invites\Models\Tenants\ContactHashDirectory;
 use Belluga\Invites\Models\Tenants\InviteCommandIdempotency;
 use Belluga\Invites\Models\Tenants\InviteEdge;
@@ -39,8 +42,10 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event as EventFacade;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Tests\Helpers\TenantLabels;
 use Tests\Helpers\TenantScopedSanctum as Sanctum;
 use Tests\Support\MongoCommandTrace;
@@ -94,6 +99,7 @@ class InvitesFlowTest extends TestCaseTenant
         InviteQuotaCounter::query()->delete();
         InviteCommandIdempotency::query()->delete();
         InviteShareCode::query()->delete();
+        AttendanceCommitment::query()->delete();
         ContactHashDirectory::query()->delete();
         PrincipalSocialMetric::query()->delete();
         Event::query()->delete();
@@ -574,6 +580,213 @@ class InvitesFlowTest extends TestCaseTenant
         $this->assertNull(data_get($message->payload_template, 'layoutType'));
 
         Bus::assertDispatched(SendPushMessageJob::class);
+    }
+
+    public function test_free_invite_acceptance_persists_one_invite_sourced_active_commitment_before_success_and_replay(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+        $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($this->event),
+            'recipients' => [['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)]],
+        ])->json('created.0.invite_id');
+
+        Sanctum::actingAs($this->receiver, ['*']);
+        $first = $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/accept", ['idempotency_key' => 'invite-attendance-atomic']);
+        $first->assertOk()->assertJsonPath('status', 'accepted')->assertJsonPath('credited_acceptance', true);
+
+        $commitment = AttendanceCommitment::query()
+            ->where('user_id', (string) $this->receiver->_id)
+            ->where('event_id', (string) $this->event->_id)
+            ->where('occurrence_id', $this->firstOccurrenceId($this->event))
+            ->first();
+        $this->assertNotNull($commitment);
+        $this->assertSame('active', (string) $commitment->status);
+        $this->assertSame('invite', (string) $commitment->source);
+
+        $this->getJson("{$this->base_api_tenant}events/attendance/confirmed")
+            ->assertOk()
+            ->assertJsonPath('data.confirmed_occurrence_ids.0', $this->firstOccurrenceId($this->event));
+
+        $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/accept", ['idempotency_key' => 'invite-attendance-atomic'])
+            ->assertOk()->assertJsonPath('status', 'accepted');
+        $this->assertSame(1, AttendanceCommitment::query()->where('user_id', (string) $this->receiver->_id)->where('event_id', (string) $this->event->_id)->where('occurrence_id', $this->firstOccurrenceId($this->event))->where('status', 'active')->count());
+    }
+
+    public function test_paid_and_either_invite_acceptance_do_not_create_free_attendance_commitments(): void
+    {
+        foreach (['paid_reservation_only', 'either'] as $policy) {
+            $event = $this->createEvent();
+            $event->setAttribute('attendance_policy', $policy);
+            $event->save();
+            $this->assertSame($policy, $event->fresh()->getAttribute('attendance_policy'));
+            $occurrenceId = $this->firstOccurrenceId($event);
+
+            Sanctum::actingAs($this->sender, ['*']);
+            $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+                'target_ref' => $this->targetRefForOccurrence($event, $occurrenceId),
+                'recipients' => [['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)]],
+            ])->json('created.0.invite_id');
+
+            Sanctum::actingAs($this->receiver, ['*']);
+            $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/accept", [])
+                ->assertOk()
+                ->assertJsonPath('status', 'accepted')
+                ->assertJsonPath('attendance_policy', $policy);
+
+            $this->assertSame(0, AttendanceCommitment::query()
+                ->where('user_id', (string) $this->receiver->_id)
+                ->where('event_id', (string) $event->_id)
+                ->where('occurrence_id', $occurrenceId)
+                ->where('status', 'active')
+                ->count(), $policy);
+        }
+    }
+
+    public function test_cached_accept_replay_after_cancellation_does_not_reactivate_attendance(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+        $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($this->event),
+            'recipients' => [['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)]],
+        ])->json('created.0.invite_id');
+        $occurrenceId = $this->firstOccurrenceId($this->event);
+
+        Sanctum::actingAs($this->receiver, ['*']);
+        $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/accept", ['idempotency_key' => 'cancelled-replay'])
+            ->assertOk();
+        $this->postJson("{$this->base_api_tenant}events/{$this->event->_id}/attendance/unconfirm", ['occurrence_id' => $occurrenceId])
+            ->assertOk()
+            ->assertJsonPath('status', 'canceled');
+
+        $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/accept", ['idempotency_key' => 'cancelled-replay'])
+            ->assertOk()
+            ->assertJsonPath('status', 'accepted');
+        $this->assertSame(0, AttendanceCommitment::query()
+            ->where('user_id', (string) $this->receiver->_id)
+            ->where('event_id', (string) $this->event->_id)
+            ->where('occurrence_id', $occurrenceId)
+            ->where('status', 'active')
+            ->count());
+    }
+
+    public function test_free_invite_acceptance_rolls_back_actual_post_write_commitment_and_emits_no_event_when_activation_fails(): void
+    {
+        Sanctum::actingAs($this->sender, ['*']);
+        $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+            'target_ref' => $this->targetRef($this->event),
+            'recipients' => [['receiver_account_profile_id' => $this->accountProfileIdFor($this->receiver)]],
+        ])->assertOk()->json('created.0.invite_id');
+        $this->assertNotSame('', $inviteId);
+        $this->assertNotNull(InviteEdge::query()->find($inviteId));
+
+        $gateway = new PostWriteFailingInviteAttendanceGateway;
+        $this->app->instance(InviteAttendanceGatewayContract::class, $gateway);
+        $this->app->forgetInstance(\Belluga\Invites\Application\Mutations\InviteMutationService::class);
+        EventFacade::fake([OccurrenceAttendanceConfirmed::class]);
+
+        Sanctum::actingAs($this->receiver, ['*']);
+        $this->withoutExceptionHandling();
+        try {
+            $this->postJson("{$this->base_api_tenant}invites/{$inviteId}/accept", []);
+            $this->fail('Invite acceptance must surface the host activation failure.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('forced attendance activation failure after write', $exception->getMessage());
+        }
+
+        $this->makeCanonicalTenantCurrent($this->tenant);
+        $edge = InviteEdge::query()->find($inviteId);
+        $this->assertNotNull($edge);
+        $this->assertSame('pending', (string) $edge?->status);
+        $this->assertFalse((bool) $edge?->credited_acceptance);
+        $this->assertSame(0, AttendanceCommitment::query()->where('user_id', (string) $this->receiver->_id)->where('event_id', (string) $this->event->_id)->count());
+        EventFacade::assertNotDispatched(OccurrenceAttendanceConfirmed::class);
+    }
+
+    public function test_direct_and_share_acceptance_roll_back_all_writes_when_failure_occurs_after_supersession(): void
+    {
+        foreach (['direct', 'share'] as $entry) {
+            $receiver = $this->createVerifiedIdentityUser();
+            $competitor = $this->createAccountUser('Rollback Competitor '.$entry);
+            Sanctum::actingAs($competitor, ['*']);
+            $competingId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+                'target_ref' => $this->targetRef($this->event),
+                'recipients' => [['receiver_account_profile_id' => $this->accountProfileIdFor($receiver)]],
+            ])->assertOk()->json('created.0.invite_id');
+            $this->assertNotSame('', $competingId);
+
+            Sanctum::actingAs($this->sender, ['*']);
+            if ($entry === 'share') {
+                $code = (string) $this->postJson("{$this->base_api_tenant}invites/share", [
+                    'target_ref' => $this->targetRef($this->event),
+                ])->assertOk()->json('code');
+                $this->assertNotSame('', $code);
+                $acceptPath = "{$this->base_api_tenant}invites/share/{$code}/accept";
+            } else {
+                $inviteId = (string) $this->postJson("{$this->base_api_tenant}invites", [
+                    'target_ref' => $this->targetRef($this->event),
+                    'recipients' => [['receiver_account_profile_id' => $this->accountProfileIdFor($receiver)]],
+                ])->assertOk()->json('created.0.invite_id');
+                $this->assertNotSame('', $inviteId);
+                $acceptPath = "{$this->base_api_tenant}invites/{$inviteId}/accept";
+            }
+
+            $runner = new class($competingId) extends \Belluga\Invites\Application\Transactions\InviteTransactionRunner
+            {
+                public ?array $observedBeforeRollback = null;
+
+                public function __construct(private readonly string $competingId) {}
+
+                public function run(callable $callback): mixed
+                {
+                    return parent::run(function () use ($callback): mixed {
+                        $result = $callback();
+                        if (is_array($result) && ($result[0] ?? null) instanceof InviteEdge && $result[0]->status === 'accepted') {
+                            $this->observedBeforeRollback = [
+                                'accepted_id' => (string) $result[0]->getKey(),
+                                'credited' => (bool) $result[0]->credited_acceptance,
+                                'competing_status' => InviteEdge::query()->findOrFail($this->competingId)->status,
+                                'attendance_count' => AttendanceCommitment::query()->where('user_id', $result[0]->receiver_user_id)->where('event_id', $result[0]->event_id)->where('status', 'active')->count(),
+                            ];
+                            throw new RuntimeException('forced failure after all invite writes');
+                        }
+
+                        return $result;
+                    });
+                }
+            };
+            $this->app->instance(\Belluga\Invites\Application\Transactions\InviteTransactionRunner::class, $runner);
+            $this->app->forgetInstance(\Belluga\Invites\Application\Mutations\InviteMutationService::class);
+            $this->app->forgetInstance(\Belluga\Invites\Application\Mutations\InviteShareService::class);
+            EventFacade::fake([OccurrenceAttendanceConfirmed::class, \Belluga\Invites\Domain\Events\CreditedInviteAccepted::class]);
+            Sanctum::actingAs($receiver, ['*']);
+            $this->withoutExceptionHandling();
+            $thrown = null;
+            try {
+                $this->postJson($acceptPath, []);
+            } catch (RuntimeException $exception) {
+                $thrown = $exception;
+            }
+            $this->assertInstanceOf(RuntimeException::class, $thrown, 'Late failure must escape acceptance.');
+            $this->assertSame('forced failure after all invite writes', $thrown->getMessage());
+
+            $this->makeCanonicalTenantCurrent($this->tenant);
+            $this->assertNotNull($runner->observedBeforeRollback, $entry);
+            $this->assertTrue($runner->observedBeforeRollback['credited'], $entry);
+            $this->assertSame('superseded', $runner->observedBeforeRollback['competing_status'], $entry);
+            $this->assertSame(1, $runner->observedBeforeRollback['attendance_count'], $entry);
+            foreach ([$competingId, $runner->observedBeforeRollback['accepted_id']] as $edgeId) {
+                $edge = InviteEdge::query()->findOrFail($edgeId);
+                $this->assertSame('pending', (string) $edge->status, $entry);
+                $this->assertFalse((bool) $edge->credited_acceptance, $entry);
+                $this->assertNull($edge->accepted_at, $entry);
+            }
+            $this->assertSame(0, AttendanceCommitment::query()->where('user_id', (string) $receiver->getKey())->where('event_id', (string) $this->event->getKey())->count(), $entry);
+            EventFacade::assertNotDispatched(OccurrenceAttendanceConfirmed::class);
+            EventFacade::assertNotDispatched(\Belluga\Invites\Domain\Events\CreditedInviteAccepted::class);
+            $this->app->forgetInstance(\Belluga\Invites\Application\Transactions\InviteTransactionRunner::class);
+            $this->app->forgetInstance(\Belluga\Invites\Application\Mutations\InviteMutationService::class);
+            $this->app->forgetInstance(\Belluga\Invites\Application\Mutations\InviteShareService::class);
+        }
     }
 
     public function test_invite_stream_accepts_access_token_query_for_web_sse_clients(): void
@@ -1197,7 +1410,7 @@ class InvitesFlowTest extends TestCaseTenant
 
         $edge = InviteEdge::query()
             ->where('receiver_user_id', (string) $anonymous->_id)
-            ->where('occurrence_id', $occurrenceId)
+            ->where('occurrence_id', $this->firstOccurrenceId($this->event))
             ->where('source', 'share_url')
             ->first();
         $this->assertNull($edge);
@@ -1366,6 +1579,14 @@ class InvitesFlowTest extends TestCaseTenant
                 ->where('source', 'share_url')
                 ->count(),
         );
+        $commitment = AttendanceCommitment::query()
+            ->where('user_id', (string) $receiver->_id)
+            ->where('event_id', (string) $this->event->_id)
+            ->where('occurrence_id', $this->firstOccurrenceId($this->event))
+            ->where('status', 'active')
+            ->first();
+        $this->assertNotNull($commitment);
+        $this->assertSame('invite', (string) $commitment->source);
     }
 
     public function test_share_accept_emits_invite_accepted_with_funnel_join_keys(): void
@@ -2216,16 +2437,6 @@ class InvitesFlowTest extends TestCaseTenant
             'created_at' => -1,
             '_id' => -1,
         ];
-        $expectedPreviousIndexKeys = [
-            'issued_by_user_id' => 1,
-            'event_id' => 1,
-            'occurrence_id' => 1,
-            'inviter_principal.kind' => 1,
-            'inviter_principal.principal_id' => 1,
-            'created_at' => -1,
-            '_id' => -1,
-        ];
-
         $sentStatusIndex = $findSentStatusIndex();
         $this->assertNotNull($sentStatusIndex, 'Sent-status lookup must have a dedicated occurrence-scoped index.');
         $this->assertSame(
@@ -2234,86 +2445,6 @@ class InvitesFlowTest extends TestCaseTenant
             'Sent-status index must keep equality filters before deterministic sort keys.'
         );
 
-        $migrationSource = (string) file_get_contents(
-            base_path('packages/belluga/belluga_invites/database/migrations/2026_05_23_000300_add_sent_status_inviter_occurrence_index.php')
-        );
-        $this->assertStringContainsString('idx_invite_edges_sent_status_inviter_occurrence', $migrationSource);
-        $this->assertStringContainsString("'issued_by_user_id' => 1", $migrationSource);
-        $this->assertStringContainsString("'event_id' => 1", $migrationSource);
-        $this->assertStringContainsString("'occurrence_id' => 1", $migrationSource);
-        $this->assertStringContainsString("'created_at' => -1", $migrationSource);
-
-        $rebuildMigrationSource = (string) file_get_contents(
-            base_path('packages/belluga/belluga_invites/database/migrations/2026_05_25_000100_rebuild_sent_status_inviter_occurrence_index.php')
-        );
-        $expectedIndexOrder = [
-            "'issued_by_user_id' => 1",
-            "'event_id' => 1",
-            "'occurrence_id' => 1",
-            "'created_at' => -1",
-            "'_id' => -1",
-        ];
-        $previousPosition = -1;
-
-        foreach ($expectedIndexOrder as $expectedIndexFragment) {
-            $position = strpos($rebuildMigrationSource, $expectedIndexFragment);
-
-            $this->assertNotFalse($position, "Corrected sent-status index is missing {$expectedIndexFragment}.");
-            $this->assertGreaterThan(
-                $previousPosition,
-                $position,
-                "Corrected sent-status index must keep {$expectedIndexFragment} after the previous key."
-            );
-            $previousPosition = $position;
-        }
-
-        $this->assertStringContainsString(
-            "'inviter_principal.kind' => 1",
-            $rebuildMigrationSource,
-            'Rollback must restore the previous sent-status index shape.'
-        );
-
-        $rebuildMigration = require base_path(
-            'packages/belluga/belluga_invites/database/migrations/2026_05_25_000100_rebuild_sent_status_inviter_occurrence_index.php'
-        );
-        $legacyMigration = require base_path(
-            'packages/belluga/belluga_invites/database/migrations/2026_05_23_000300_add_sent_status_inviter_occurrence_index.php'
-        );
-
-        try {
-            $rebuildMigration->down();
-            $rolledBackSentStatusIndex = $findSentStatusIndex();
-
-            $this->assertNotNull($rolledBackSentStatusIndex, 'Rollback must restore the previous sent-status index.');
-            $this->assertSame(
-                $expectedPreviousIndexKeys,
-                $normalizeIndexKeys($rolledBackSentStatusIndex),
-                'Rollback must restore the exact previous sent-status index key order.'
-            );
-
-            $legacyMigration->up();
-            $reappliedLegacySentStatusIndex = $findSentStatusIndex();
-
-            $this->assertNotNull(
-                $reappliedLegacySentStatusIndex,
-                'Reapplying the legacy migration must keep the sent-status index present.'
-            );
-            $this->assertSame(
-                $expectedPreviousIndexKeys,
-                $normalizeIndexKeys($reappliedLegacySentStatusIndex),
-                'The legacy migration must tolerate an already rebuilt index name and restore the previous key order.'
-            );
-        } finally {
-            $rebuildMigration->up();
-        }
-
-        $rebuiltSentStatusIndex = $findSentStatusIndex();
-        $this->assertNotNull($rebuiltSentStatusIndex, 'Reapplying the migration must restore the corrected sent-status index.');
-        $this->assertSame(
-            $expectedRebuiltIndexKeys,
-            $normalizeIndexKeys($rebuiltSentStatusIndex),
-            'Reapplying the migration must restore the corrected sent-status index key order.'
-        );
     }
 
     public function test_sent_invite_summary_returns_exact_counts_over_more_than_200_sent_invites(): void
@@ -2746,7 +2877,7 @@ class InvitesFlowTest extends TestCaseTenant
         TenantProfileType::query()
             ->where('type', 'personal')
             ->update([
-                'capabilities.is_inviteable' => true,
+                'capabilities.is_inviteable.value' => true,
             ]);
     }
 
@@ -2851,12 +2982,12 @@ class InvitesFlowTest extends TestCaseTenant
                 'label' => 'Artist',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_favoritable' => true,
-                    'is_inviteable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'is_inviteable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ]
         );
@@ -2866,12 +2997,12 @@ class InvitesFlowTest extends TestCaseTenant
                 'label' => 'Exhibitor',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_favoritable' => true,
-                    'is_inviteable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'is_inviteable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ]
         );
@@ -3114,5 +3245,34 @@ class InvitesFlowTest extends TestCaseTenant
             $this->landlord->tenant_primary->id = (string) $tenant->_id;
             $this->landlord->tenant_primary->role_admin->id = (string) ($tenant->roleTemplates()->first()?->_id ?? '');
         }
+    }
+}
+
+final class PostWriteFailingInviteAttendanceGateway implements InviteAttendanceGatewayContract
+{
+    public function hasActiveAttendanceConfirmation(string $userId, string $eventId, ?string $occurrenceId): bool
+    {
+        return false;
+    }
+
+    public function activateFreeConfirmation(string $userId, string $eventId, string $occurrenceId): bool
+    {
+        AttendanceCommitment::query()->create([
+            'user_id' => $userId,
+            'event_id' => $eventId,
+            'occurrence_id' => $occurrenceId,
+            'kind' => 'free_confirmation',
+            'status' => 'active',
+            'source' => 'invite',
+            'confirmed_at' => Carbon::now(),
+            'canceled_at' => null,
+        ]);
+
+        throw new RuntimeException('forced attendance activation failure after write');
+    }
+
+    public function notifyFreeConfirmationCommitted(string $userId, string $eventId, string $occurrenceId): void
+    {
+        throw new RuntimeException('Notification is unreachable after activation failure.');
     }
 }

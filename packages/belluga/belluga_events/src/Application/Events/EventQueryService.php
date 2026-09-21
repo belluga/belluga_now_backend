@@ -814,7 +814,7 @@ class EventQueryService
             'created_at' => $event->created_at?->toJSON(),
             'updated_at' => $event->updated_at?->toJSON(),
             'deleted_at' => $event->deleted_at?->toJSON(),
-        ], $managementCounterpart['profiles'], $managementCounterpart['counterpart_count']);
+        ], $this->normalizeManagementLinkedAccountProfiles($managementCounterpart['profiles']), $managementCounterpart['counterpart_count']);
     }
 
     /**
@@ -1129,7 +1129,7 @@ class EventQueryService
 
         return $this->withPublicCounterpartContract(
             $payload,
-            $counterpart['profiles'],
+            $this->normalizeManagementLinkedAccountProfiles($counterpart['profiles']),
             $counterpart['counterpart_count'],
         );
     }
@@ -2339,12 +2339,16 @@ class EventQueryService
         array $candidateIds,
         bool $publicOnly,
     ): array {
+        if ($publicOnly) {
+            return $this->resolveCurrentRelatedProfilesByIds($candidateIds, true);
+        }
+
         $profilesById = $this->counterpartProfilesById($summaries);
         $missingIds = array_values(array_diff($candidateIds, array_keys($profilesById)));
 
         return [
             ...$profilesById,
-            ...$this->resolveCurrentRelatedProfilesByIds($missingIds, $publicOnly),
+            ...$this->resolveCurrentRelatedProfilesByIds($missingIds, false),
         ];
     }
 
@@ -2446,9 +2450,7 @@ class EventQueryService
         array $linkedAccountProfiles,
         ?int $counterpartCount = null,
     ): array {
-        $counterpartPreview = $this->normalizeManagementLinkedAccountProfiles(
-            $linkedAccountProfiles,
-        );
+        $counterpartPreview = $this->normalizeLinkedAccountProfileSummaries($linkedAccountProfiles);
         $payload['counterpart_preview'] = $counterpartPreview;
         $payload['counterpart_count'] = $counterpartCount ?? count($counterpartPreview);
         $payload = $this->withCanonicalHeroImage($payload);
@@ -3539,6 +3541,13 @@ class EventQueryService
             $this->collectRelatedProfileIdsForProgrammingPayload($document, $relatedProfileIds);
         }
 
+        if ($publicOnly) {
+            return $this->resolveCurrentRelatedProfilesByIds([
+                ...array_keys($seedProfilesById),
+                ...array_keys($relatedProfileIds),
+            ], true);
+        }
+
         $missingIds = array_values(array_diff(
             array_keys($relatedProfileIds),
             array_keys($seedProfilesById),
@@ -3546,7 +3555,7 @@ class EventQueryService
 
         return [
             ...$seedProfilesById,
-            ...$this->resolveCurrentRelatedProfilesByIds($missingIds, $publicOnly),
+            ...$this->resolveCurrentRelatedProfilesByIds($missingIds, false),
         ];
     }
 
@@ -3732,7 +3741,7 @@ class EventQueryService
         }
 
         return $publicOnly
-            ? $this->eventProfileResolver->resolveExistingEventPartyDisplayProfilesByIds($ids)
+            ? $this->eventProfileResolver->resolveExistingPublicEventPartyProfilesByIds($ids)
             : $this->eventProfileResolver->resolveExistingEventPartyProfilesByIds($ids);
     }
 

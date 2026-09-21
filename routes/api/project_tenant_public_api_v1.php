@@ -3,7 +3,6 @@
 use App\Http\Api\v1\Controllers\AccountProfilesController;
 use App\Http\Api\v1\Controllers\DiscoveryFiltersController;
 use App\Http\Api\v1\Controllers\EventAttendanceController;
-use App\Http\Api\v1\Controllers\StaticAssetsController;
 use App\Http\Middleware\CheckTenantAccess;
 use Belluga\Events\Http\Api\v1\Controllers\AgendaController;
 use Belluga\Events\Http\Api\v1\Controllers\EventsController;
@@ -38,5 +37,4 @@ Route::middleware(['auth:sanctum', CheckTenantAccess::class])
             [AccountProfilesController::class, 'publicNestedGroupMembers']
         );
         Route::get('/account_profiles/{account_profile_slug}', [AccountProfilesController::class, 'publicShowBySlug']);
-        Route::get('/static_assets/{asset_ref}', [StaticAssetsController::class, 'showPublic']);
     });

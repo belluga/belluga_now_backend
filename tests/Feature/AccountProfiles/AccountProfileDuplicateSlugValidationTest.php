@@ -51,12 +51,12 @@ class AccountProfileDuplicateSlugValidationTest extends TestCaseTenant
             'label' => 'Personal',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => false,
-                'is_publicly_navigable' => false,
-                'is_favoritable' => true,
-                'is_publicly_discoverable' => false,
-                'is_poi_enabled' => false,
-                'has_events' => false,
+                'is_queryable' => ['value' => false, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+                'is_favoritable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
+                'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_events' => ['value' => false, 'parameters' => []],
             ],
         ]);
     }

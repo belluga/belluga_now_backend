@@ -340,6 +340,129 @@ final class EventOccurrenceNestedAccountStore
         ));
     }
 
+    /** @param array<int, string> $profileIds @return array<string, array<string, EventOccurrence>> */
+    public function liveAndNextOccurrencesForMemberProfiles(array $profileIds, Carbon $now): array
+    {
+        return $this->memberOccurrenceStates($profileIds, $now, false);
+    }
+
+    /** @param array<int, string> $profileIds @return array<string, EventOccurrence> */
+    public function lastOccurrencesForMemberProfiles(array $profileIds, Carbon $now): array
+    {
+        return array_map(
+            static fn (array $states): EventOccurrence => $states['last'],
+            $this->memberOccurrenceStates($profileIds, $now, true),
+        );
+    }
+
+    /** @return array<string, array<string, EventOccurrence>> */
+    private function memberOccurrenceStates(array $profileIds, Carbon $now, bool $pastOnly): array
+    {
+        $profileIds = $this->normalizedStrings($profileIds);
+        if ($profileIds === []) {
+            return [];
+        }
+
+        $states = [];
+        foreach ($this->collection()->aggregate($this->memberOccurrenceStatePipeline($profileIds, $now, $pastOnly)) as $row) {
+            $document = $this->documentToArray($row);
+            $identity = $this->normalizeArray($document['_id']);
+            $states[(string) $identity['profile_id']][(string) $identity['state']] = (new EventOccurrence)->newFromBuilder(
+                $this->normalizeArray($document['occurrence']),
+            );
+        }
+
+        return $states;
+    }
+
+    /**
+     * Reduce in MongoDB before hydration. Work still scales with matched membership history.
+     * @param array<int, string> $profileIds
+     * @return array<int, array<string, mixed>>
+     */
+    private function memberOccurrenceStatePipeline(array $profileIds, Carbon $now, bool $pastOnly): array
+    {
+        $instant = new UTCDateTime($now);
+        $end = ['$ifNull' => ['$occurrence.effective_ends_at', '$occurrence.ends_at']];
+        $validStart = ['$eq' => [['$type' => '$occurrence.starts_at'], 'date']];
+        $timeMatch = $pastOnly ? ['$or' => [
+            ['effective_ends_at' => ['$lte' => $instant]],
+            ['effective_ends_at' => null, 'ends_at' => ['$lte' => $instant]],
+            ['effective_ends_at' => null, 'ends_at' => null, 'starts_at' => ['$lt' => $instant]],
+        ]] : ['$or' => [
+            ['effective_ends_at' => ['$gt' => $instant]],
+            ['starts_at' => ['$gte' => $instant]],
+        ]];
+
+        return [
+            ['$match' => [
+                'tenant_id' => $this->tenantId(),
+                'parent_type' => self::PARENT_TYPE,
+                'doc_type' => self::DOC_TYPE_MEMBER,
+                'nested_profile.id' => ['$in' => $profileIds],
+                'parent_id' => ['$type' => 'string', '$ne' => ''],
+            ]],
+            ['$lookup' => [
+                'from' => self::COLLECTION,
+                'let' => ['parent_id' => '$parent_id', 'group_key' => '$group_key'],
+                'pipeline' => [
+                    ['$match' => [
+                        'tenant_id' => $this->tenantId(),
+                        'parent_type' => self::PARENT_TYPE,
+                        'doc_type' => self::DOC_TYPE_HEAD,
+                        '$expr' => ['$and' => [
+                            ['$eq' => ['$parent_id', '$$parent_id']],
+                            ['$eq' => ['$group_key', '$$group_key']],
+                        ]],
+                    ]],
+                    ['$limit' => 1],
+                    ['$project' => ['_id' => 1]],
+                ],
+                'as' => 'head',
+            ]],
+            ['$match' => ['head.0' => ['$exists' => true]]],
+            ['$group' => ['_id' => ['profile_id' => '$nested_profile.id', 'occurrence_id' => '$parent_id']]],
+            ['$set' => ['occurrence_keys' => ['$filter' => [
+                'input' => [
+                    '$_id.occurrence_id',
+                    ['$convert' => ['input' => '$_id.occurrence_id', 'to' => 'objectId', 'onError' => null, 'onNull' => null]],
+                ],
+                'as' => 'key',
+                'cond' => ['$ne' => ['$$key', null]],
+            ]]]],
+            ['$lookup' => [
+                'from' => (new EventOccurrence)->getTable(),
+                'localField' => 'occurrence_keys',
+                'foreignField' => '_id',
+                'pipeline' => [
+                    ['$match' => ['deleted_at' => null, 'is_event_published' => true, ...$timeMatch]],
+                    ['$project' => ['_id' => 1, 'slug' => 1, 'starts_at' => 1, 'effective_ends_at' => 1, 'ends_at' => 1]],
+                ],
+                'as' => 'occurrence',
+            ]],
+            ['$unwind' => '$occurrence'],
+            ['$match' => ['$expr' => $validStart]],
+            ['$set' => [
+                'states' => $pastOnly ? ['last'] : ['$concatArrays' => [
+                    ['$cond' => [['$and' => [
+                        ['$lte' => ['$occurrence.starts_at', $instant]],
+                        ['$eq' => [['$type' => $end], 'date']],
+                        ['$gt' => [$end, $instant]],
+                    ]], ['live_now'], []]],
+                    ['$cond' => [['$gte' => ['$occurrence.starts_at', $instant]], ['next'], []]],
+                ]],
+                'start_second' => ['$floor' => ['$divide' => [['$toLong' => '$occurrence.starts_at'], 1000]]],
+                'occurrence_id' => ['$toString' => '$occurrence._id'],
+            ]],
+            ['$unwind' => '$states'],
+            ['$sort' => ['_id.profile_id' => 1, 'states' => 1, 'start_second' => $pastOnly ? -1 : 1, 'occurrence_id' => $pastOnly ? -1 : 1]],
+            ['$group' => [
+                '_id' => ['profile_id' => '$_id.profile_id', 'state' => '$states'],
+                'occurrence' => ['$first' => '$occurrence'],
+            ]],
+        ];
+    }
+
     /**
      * @param  array<int, string>  $profileIds
      * @return array<int, string>

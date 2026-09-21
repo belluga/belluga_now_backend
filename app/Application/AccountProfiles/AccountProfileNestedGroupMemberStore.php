@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
-use App\Application\Accounts\AccountPublicationStateService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
 use Illuminate\Support\Carbon;
@@ -478,7 +477,10 @@ final class AccountProfileNestedGroupMemberStore
 
         return [
             'data' => array_values(array_map(
-                fn (array $row): array => $this->formatPublicProfile((array) ($row['profile'] ?? [])),
+                fn (array $row): array => $this->formatPublicProfile(
+                    (array) ($row['profile'] ?? []),
+                    (array) (($row['published_account'][0] ?? [])),
+                ),
                 $pageRows,
             )),
             'next_cursor' => $nextCursor,
@@ -987,8 +989,8 @@ final class AccountProfileNestedGroupMemberStore
                             ],
                         ],
                     ]],
-                    ['$match' => ['publication.status' => AccountPublicationStateService::PUBLISHED]],
-                    ['$project' => ['_id' => 1]],
+                    ['$match' => $policy->publishedParentAccountMatchExpression()],
+                    ['$project' => ['_id' => 1, 'publication' => 1, 'deleted_at' => 1]],
                 ],
                 'as' => 'published_account',
             ]],
@@ -1034,9 +1036,13 @@ final class AccountProfileNestedGroupMemberStore
         ]];
     }
 
-    /** @param array<string, mixed> $profile */
-    private function formatPublicProfile(array $profile): array
+    /** @param array<string, mixed> $profile @param array<string, mixed> $account */
+    private function formatPublicProfile(array $profile, array $account): array
     {
+        $resolvedProfile = (new AccountProfile)->newFromBuilder($profile);
+        $resolvedAccount = $account === [] ? null : (new \App\Models\Tenants\Account)->newFromBuilder($account);
+        $publicCatalogPolicy = $this->publicCatalogSnapshotReader->catalogSnapshot()->policy();
+        $canOpenPublicDetail = $publicCatalogPolicy->canOpenPublicDetail($resolvedProfile, $resolvedAccount);
         $slug = trim((string) ($profile['slug'] ?? ''));
 
         return [
@@ -1044,11 +1050,17 @@ final class AccountProfileNestedGroupMemberStore
             'profile_type' => (string) ($profile['profile_type'] ?? ''),
             'display_name' => (string) ($profile['display_name'] ?? ''),
             'slug' => $slug === '' ? null : $slug,
-            'avatar_url' => is_string($profile['avatar_url'] ?? null) ? $profile['avatar_url'] : null,
-            'cover_url' => is_string($profile['cover_url'] ?? null) ? $profile['cover_url'] : null,
+            'avatar_url' => $publicCatalogPolicy->canExposePublicMedia($resolvedProfile, $resolvedAccount, 'avatar')
+                && is_string($profile['avatar_url'] ?? null)
+                ? $profile['avatar_url']
+                : null,
+            'cover_url' => $publicCatalogPolicy->canExposePublicMedia($resolvedProfile, $resolvedAccount, 'cover')
+                && is_string($profile['cover_url'] ?? null)
+                ? $profile['cover_url']
+                : null,
             'taxonomy_terms' => is_array($profile['taxonomy_terms'] ?? null) ? $profile['taxonomy_terms'] : [],
-            'can_open_public_detail' => $slug !== '',
-            'public_detail_path' => $slug === '' ? null : '/parceiro/'.$slug,
+            'can_open_public_detail' => $canOpenPublicDetail,
+            'public_detail_path' => $canOpenPublicDetail ? '/parceiro/'.$slug : null,
         ];
     }
 
