@@ -313,6 +313,8 @@ class PublicWebMetadataShellTest extends TestCaseTenant
             'avatar_url' => 'https://tenant.example/media/ananda-avatar.png',
             'is_active' => true,
         ]);
+        $profile->cover_url = '/api/v1/media/account-profiles/'.(string) $profile->_id.'/cover';
+        $profile->save();
         $event = Event::create([
             'slug' => 'festival-na-orla',
             'title' => 'Festival na Orla',
@@ -348,7 +350,10 @@ class PublicWebMetadataShellTest extends TestCaseTenant
         $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
         $response->assertSee('<meta property="og:title" content="Festival na Orla | '.$this->resolvedSiteName.'">', false);
         $response->assertSee('<meta property="og:description" content="Show ao pôr do sol em Guarapari.">', false);
-        $response->assertSee('<meta property="og:image" content="https://tenant.example/media/ananda-cover.png">', false);
+        $response->assertSee(
+            '<meta property="og:image" content="'.$tenantOrigin.'/api/v1/media/account-profiles/'.(string) $profile->_id.'/cover">',
+            false
+        );
         $response->assertSee('<link rel="canonical" href="'.$tenantOrigin.'/agenda/evento/festival-na-orla">', false);
     }
 
