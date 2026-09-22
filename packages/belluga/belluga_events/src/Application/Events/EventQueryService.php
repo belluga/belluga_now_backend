@@ -770,7 +770,7 @@ class EventQueryService
         }
         $createdBy = $this->normalizeArray($event->created_by ?? []);
 
-        return $this->withPublicCounterpartContract([
+        return $this->withCounterpartContractCommon([
             'event_id' => isset($event->_id) ? (string) $event->_id : '',
             'occurrence_id' => null,
             'slug' => $this->scalarString($event->slug ?? null) ?? '',
@@ -1127,7 +1127,7 @@ class EventQueryService
             );
         }
 
-        return $this->withPublicCounterpartContract(
+        return $this->withCounterpartContractCommon(
             $payload,
             $this->normalizeManagementLinkedAccountProfiles($counterpart['profiles']),
             $counterpart['counterpart_count'],
@@ -2450,11 +2450,11 @@ class EventQueryService
         array $linkedAccountProfiles,
         ?int $counterpartCount = null,
     ): array {
-        $counterpartPreview = $this->normalizeLinkedAccountProfileSummaries($linkedAccountProfiles);
-        $payload['counterpart_preview'] = $counterpartPreview;
-        $payload['counterpart_count'] = $counterpartCount ?? count($counterpartPreview);
-        $payload = $this->withCanonicalHeroImage($payload);
-        $payload['counterpart_preview'] = array_slice($counterpartPreview, 0, 1);
+        $payload = $this->withCounterpartContractCommon(
+            $payload,
+            $linkedAccountProfiles,
+            $counterpartCount,
+        );
         if (isset($payload['counterpart_preview'][0]) && is_array($payload['counterpart_preview'][0])) {
             $profile = $payload['counterpart_preview'][0];
             $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
@@ -2483,6 +2483,25 @@ class EventQueryService
 
             $payload['counterpart_preview'][0] = $profile;
         }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  array<int, array<string, mixed>>  $linkedAccountProfiles
+     * @return array<string, mixed>
+     */
+    private function withCounterpartContractCommon(
+        array $payload,
+        array $linkedAccountProfiles,
+        ?int $counterpartCount = null,
+    ): array {
+        $counterpartPreview = $this->normalizeLinkedAccountProfileSummaries($linkedAccountProfiles);
+        $payload['counterpart_preview'] = $counterpartPreview;
+        $payload['counterpart_count'] = $counterpartCount ?? count($counterpartPreview);
+        $payload = $this->withCanonicalHeroImage($payload);
+        $payload['counterpart_preview'] = array_slice($counterpartPreview, 0, 1);
 
         return $payload;
     }
@@ -4312,11 +4331,6 @@ class EventQueryService
 
     private function accountProfileMediaUrlString(mixed $value, ?string $profileId, string $kind): ?string
     {
-        $absolute = $this->absoluteUrlString($value);
-        if ($absolute !== null) {
-            return $absolute;
-        }
-
         $normalized = $this->scalarString($value);
         $resolvedProfileId = trim((string) ($profileId ?? ''));
         $resolvedKind = trim($kind);
