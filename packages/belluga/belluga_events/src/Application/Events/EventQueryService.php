@@ -2455,6 +2455,34 @@ class EventQueryService
         $payload['counterpart_count'] = $counterpartCount ?? count($counterpartPreview);
         $payload = $this->withCanonicalHeroImage($payload);
         $payload['counterpart_preview'] = array_slice($counterpartPreview, 0, 1);
+        if (isset($payload['counterpart_preview'][0]) && is_array($payload['counterpart_preview'][0])) {
+            $profile = $payload['counterpart_preview'][0];
+            $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+            $avatarUrl = $this->accountProfileMediaUrlString(
+                $profile['avatar_url'] ?? null,
+                $profileId,
+                'avatar'
+            );
+            $coverUrl = $this->accountProfileMediaUrlString(
+                $profile['cover_url'] ?? null,
+                $profileId,
+                'cover'
+            );
+
+            if ($avatarUrl === null) {
+                unset($profile['avatar_url']);
+            } else {
+                $profile['avatar_url'] = $avatarUrl;
+            }
+
+            if ($coverUrl === null) {
+                unset($profile['cover_url']);
+            } else {
+                $profile['cover_url'] = $coverUrl;
+            }
+
+            $payload['counterpart_preview'][0] = $profile;
+        }
 
         return $payload;
     }
