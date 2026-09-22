@@ -394,7 +394,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
         $bandType->capabilities = $capabilities;
         $bandType->save();
-        $this->band->avatar_url = 'https://example.org/public-band-avatar.jpg';
+        $this->band->avatar_url = '/api/v1/media/account-profiles/'.(string) $this->band->_id.'/avatar?version=1';
         $this->band->save();
         $this->venue->cover_url = 'https://example.org/public-venue-cover.jpg';
         $this->venue->save();
@@ -444,7 +444,10 @@ class EventCrudControllerTest extends TestCaseTenant
         $publicResponse->assertJsonPath('data.counterpart_preview.0.profile_type', (string) $this->band->profile_type);
         $publicResponse->assertJsonPath('data.counterpart_preview.0.slug', (string) $this->band->slug);
         $publicResponse->assertJsonPath('data.counterpart_count', 1);
-        $publicResponse->assertJsonPath('data.hero_image_url', 'https://example.org/public-band-avatar.jpg');
+        $publicResponse->assertJsonPath(
+            'data.hero_image_url',
+            rtrim($this->base_tenant_url, '/').'/api/v1/media/account-profiles/'.(string) $this->band->_id.'/avatar?version=1'
+        );
         $publicResponse->assertJsonMissingPath('data.linked_account_profiles');
         $publicResponse->assertJsonMissingPath('data.event_parties');
 
@@ -457,7 +460,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
         $bandType->capabilities = $capabilities;
         $bandType->save();
-        $this->band->avatar_url = 'https://example.org/update-band-avatar.jpg';
+        $this->band->avatar_url = '/api/v1/media/account-profiles/'.(string) $this->band->_id.'/avatar?version=2';
         $this->band->save();
         $this->venue->cover_url = 'https://example.org/update-venue-cover.jpg';
         $this->venue->save();
@@ -507,7 +510,10 @@ class EventCrudControllerTest extends TestCaseTenant
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$storedOccurrence->_id}");
         $public->assertStatus(200);
         $public->assertJsonPath('data.counterpart_preview.0.id', (string) $this->band->_id);
-        $public->assertJsonPath('data.hero_image_url', 'https://example.org/update-band-avatar.jpg');
+        $public->assertJsonPath(
+            'data.hero_image_url',
+            rtrim($this->base_tenant_url, '/').'/api/v1/media/account-profiles/'.(string) $this->band->_id.'/avatar?version=2'
+        );
         $public->assertJsonMissingPath('data.linked_account_profiles');
         $public->assertJsonMissingPath('data.event_parties');
     }
