@@ -251,11 +251,13 @@ Profile and Profile-Type state. Eligibility requires a live Profile with a
 valid Point, effective `location_policy=optional|required`, and effective
 `is_physical_host_enabled=true`; neither Profile-Type names nor Map/favorite
 capabilities grant host eligibility. The same transaction participates in the
-host Profile/Profile-Type revision fences. Transient labeled body conflicts
-retry the complete admission plus mutation at most twice after the first
-attempt; exhaustion returns the host's stable `409 event_revision_conflict`,
-while exhausted unknown-commit confirmation returns
-`503 event_commit_outcome_unknown` without replaying the mutation body.
+host Profile/Profile-Type revision fences. The Event transaction runner
+performs one explicit transaction attempt on the tenant MongoDB connection so
+Eloquent and raw operations share the same active session. A transient/write
+conflict returns the host's stable `409 event_revision_conflict`; an unknown
+commit outcome returns `503 event_commit_outcome_unknown`. The runner never
+replays the mutation body and owns no retry count, deadline, jitter, or reread
+policy.
 
 #### Update (`PATCH /events/{event_id}`)
 

@@ -59,6 +59,7 @@ final class ArchitectureGuardrailRunner
         $this->checkAccountUserTokenIssuerGuardrails();
         $this->checkAccountRouteAbilityBindingGuardrails();
         $this->checkAccountProfileQueryabilityGuardrails();
+        $this->checkMongoDbTransactionGuardrails();
         $this->checkPublicTaxonomyCutoverGuardrails();
         $this->checkNestedMemberPaginationGuardrails();
 
@@ -2000,6 +2001,56 @@ final class ArchitectureGuardrailRunner
                 'scripts/account_profile_queryability_guardrails.php',
                 1,
                 'AccountProfile queryability guardrails reported violations. Review the emitted findings above.'
+            );
+        }
+    }
+
+    private function checkMongoDbTransactionGuardrails(): void
+    {
+        $scriptPath = $this->repoRoot.'/scripts/mongodb_transaction_guardrails.php';
+        if (! is_file($scriptPath)) {
+            $this->addViolation(
+                'LAR-MDB-TXN-GUARD',
+                'scripts/mongodb_transaction_guardrails.php',
+                1,
+                'Missing MongoDB transaction architecture guardrail script.'
+            );
+
+            return;
+        }
+
+        require_once $scriptPath;
+
+        if (! class_exists('MongoDbTransactionGuard')
+            || ! function_exists('loadMongoDbTransactionGuardBaseline')) {
+            $this->addViolation(
+                'LAR-MDB-TXN-GUARD',
+                'scripts/mongodb_transaction_guardrails.php',
+                1,
+                'MongoDB transaction guardrail script did not expose the expected runtime symbols.'
+            );
+
+            return;
+        }
+
+        ob_start();
+        $exitCode = (new \MongoDbTransactionGuard(
+            $this->repoRoot,
+            loadMongoDbTransactionGuardBaseline(null),
+            \MongoDbTransactionGuard::DEFAULT_SCAN_DIRS,
+        ))->run();
+        $guardOutput = (string) ob_get_clean();
+
+        if ($guardOutput !== '') {
+            fwrite($exitCode === 0 ? STDOUT : STDERR, $guardOutput);
+        }
+
+        if ($exitCode !== 0) {
+            $this->addViolation(
+                'LAR-MDB-TXN-GUARD',
+                'scripts/mongodb_transaction_guardrails.php',
+                1,
+                'MongoDB transaction architecture guardrails reported violations. Review the emitted findings above.'
             );
         }
     }
