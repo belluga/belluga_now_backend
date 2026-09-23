@@ -251,11 +251,12 @@ Profile and Profile-Type state. Eligibility requires a live Profile with a
 valid Point, effective `location_policy=optional|required`, and effective
 `is_physical_host_enabled=true`; neither Profile-Type names nor Map/favorite
 capabilities grant host eligibility. The same transaction participates in the
-host Profile/Profile-Type revision fences. Transient labeled body conflicts
-retry the complete admission plus mutation at most twice after the first
-attempt; exhaustion returns the host's stable `409 event_revision_conflict`,
-while exhausted unknown-commit confirmation returns
-`503 event_commit_outcome_unknown` without replaying the mutation body.
+host Profile/Profile-Type revision fences. The Event transaction runner
+delegates transaction and retry mechanics to the installed MongoDB Laravel
+connection. A terminal transient/write conflict returns the host's stable
+`409 event_revision_conflict`; a commit outcome still unknown after canonical
+driver handling returns `503 event_commit_outcome_unknown` without an
+application-level replay loop.
 
 #### Update (`PATCH /events/{event_id}`)
 

@@ -7,6 +7,7 @@ namespace Belluga\Events\Application\Transactions;
 use Belluga\Events\Exceptions\EventCommitOutcomeUnknownException;
 use Belluga\Events\Exceptions\EventTransactionConflictException;
 use Illuminate\Support\Facades\DB;
+use MongoDB\Driver\Exception\Exception as MongoDriverException;
 use MongoDB\Driver\Session;
 use MongoDB\Laravel\Connection;
 use RuntimeException;
@@ -14,12 +15,6 @@ use Throwable;
 
 class EventTransactionRunner
 {
-    public const MAX_BODY_ATTEMPTS = 3;
-
-    public const MAX_COMMIT_ATTEMPTS = 3;
-
-    private const COMMAND_BUDGET_SECONDS = 2.0;
-
     /**
      * @template T
      *
@@ -35,101 +30,42 @@ class EventTransactionRunner
             );
         }
 
-        $deadline = microtime(true) + self::COMMAND_BUDGET_SECONDS;
-        for ($bodyAttempt = 1; $bodyAttempt <= self::MAX_BODY_ATTEMPTS; $bodyAttempt++) {
-            if (microtime(true) >= $deadline) {
-                throw new EventTransactionConflictException(
-                    'Event mutation could not stabilize within the command budget.'
-                );
-            }
-
-            $session = null;
-            try {
-                $connection->beginTransaction();
+        try {
+            return $connection->transaction(function (Connection $connection) use ($callback): mixed {
                 $session = $connection->getSession();
                 if (! $session instanceof Session) {
                     throw new RuntimeException('Event transaction session is unavailable.');
                 }
 
-                /** @var T $result */
-                $result = $callback(new EventTransactionContext(
+                return $callback(new EventTransactionContext(
                     $connection->getDatabase(),
                     $session,
                 ));
-                $this->commit($connection, $deadline);
-
-                return $result;
-            } catch (EventCommitOutcomeUnknownException $exception) {
-                throw $exception;
-            } catch (Throwable $throwable) {
-                $this->abortIfActive($connection, $session);
-
-                if ($this->isTransactionSupportError($throwable)) {
-                    throw new RuntimeException(
-                        'Tenant MongoDB transaction support is required for events writes. Configure replica set / transaction-capable runtime.',
-                        0,
-                        $throwable,
-                    );
-                }
-
-                if ($this->hasErrorLabel($throwable, 'TransientTransactionError')) {
-                    if ($bodyAttempt >= self::MAX_BODY_ATTEMPTS || microtime(true) >= $deadline) {
-                        throw new EventTransactionConflictException(
-                            'Event mutation could not stabilize under concurrent writes.',
-                            previous: $throwable,
-                        );
-                    }
-
-                    usleep(random_int(10_000, 50_000));
-
-                    continue;
-                }
-
-                if ($this->isWriteConflict($throwable)) {
-                    throw new EventTransactionConflictException(
-                        'Event mutation conflicted with a concurrent write.',
-                        previous: $throwable,
-                    );
-                }
-
-                throw $throwable;
+            });
+        } catch (Throwable $throwable) {
+            if ($this->hasErrorLabel($throwable, 'UnknownTransactionCommitResult')) {
+                throw new EventCommitOutcomeUnknownException(
+                    'The Event commit outcome is unknown.',
+                    previous: $throwable,
+                );
             }
-        }
 
-        throw new EventTransactionConflictException('Event transaction attempts were exhausted.');
-    }
-
-    private function commit(Connection $connection, float $deadline): void
-    {
-        for ($attempt = 1; $attempt <= self::MAX_COMMIT_ATTEMPTS; $attempt++) {
-            try {
-                $connection->commit();
-
-                return;
-            } catch (Throwable $throwable) {
-                if (! $this->hasErrorLabel($throwable, 'UnknownTransactionCommitResult')) {
-                    throw $throwable;
-                }
-                if ($attempt >= self::MAX_COMMIT_ATTEMPTS || microtime(true) >= $deadline) {
-                    throw new EventCommitOutcomeUnknownException(
-                        'The Event commit outcome is unknown.',
-                        previous: $throwable,
-                    );
-                }
+            if ($this->hasErrorLabel($throwable, 'TransientTransactionError') || $this->isWriteConflict($throwable)) {
+                throw new EventTransactionConflictException(
+                    'Event mutation conflicted with a concurrent write.',
+                    previous: $throwable,
+                );
             }
-        }
-    }
 
-    private function abortIfActive(Connection $connection, ?Session $session): void
-    {
-        if (! $session instanceof Session || ! $session->isInTransaction()) {
-            return;
-        }
+            if ($this->isTransactionSupportError($throwable)) {
+                throw new RuntimeException(
+                    'Tenant MongoDB transaction support is required for events writes. Configure replica set / transaction-capable runtime.',
+                    0,
+                    $throwable,
+                );
+            }
 
-        try {
-            $connection->rollBack();
-        } catch (Throwable) {
-            // Preserve the original transaction failure.
+            throw $throwable;
         }
     }
 
@@ -147,6 +83,10 @@ class EventTransactionRunner
 
     private function isTransactionSupportError(Throwable $throwable): bool
     {
+        if (! $throwable instanceof MongoDriverException) {
+            return false;
+        }
+
         $message = strtolower($throwable->getMessage());
 
         return str_contains($message, 'transaction numbers are only allowed')

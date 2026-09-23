@@ -4,54 +4,129 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Events;
 
-use Belluga\Events\Application\Events\EventAggregateWriteService;
-use Belluga\Events\Application\Events\EventOccurrenceSyncService;
+use Belluga\Events\Application\Transactions\EventTransactionContext;
 use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Exceptions\EventCommitOutcomeUnknownException;
 use Belluga\Events\Exceptions\EventTransactionConflictException;
-use Belluga\Events\Models\Tenants\Event;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Mockery;
+use MongoDB\BSON\ObjectId;
 use MongoDB\Laravel\Connection;
 use RuntimeException;
 use Tests\TestCase;
 
 final class EventHostTransactionRetryTest extends TestCase
 {
-    public function test_transient_body_failures_retry_the_complete_body_at_most_three_times(): void
+    public function test_runner_delegates_transaction_choreography_to_the_canonical_connection_once(): void
     {
-        $attempts = 0;
-        $runner = new EventTransactionRunner;
+        $real = DB::connection('tenant');
+        $this->assertInstanceOf(Connection::class, $real);
+        $session = $real->getClient()?->startSession();
+        $this->assertNotNull($session);
 
-        $result = $runner->run(function () use (&$attempts): string {
-            $attempts++;
-            if ($attempts < 3) {
-                throw new LabeledEventTransactionFailure('transient', ['TransientTransactionError']);
-            }
+        /** @var Connection&\Mockery\MockInterface $connection */
+        $connection = Mockery::mock(Connection::class);
+        $connection->shouldReceive('transaction')
+            ->once()
+            ->with(Mockery::type('callable'))
+            ->andReturnUsing(fn (callable $callback): mixed => $callback($connection));
+        $connection->shouldReceive('getSession')->once()->andReturn($session);
+        $connection->shouldReceive('getDatabase')->once()->andReturn($real->getDatabase());
+        DB::shouldReceive('connection')
+            ->once()
+            ->with('tenant')
+            ->andReturn($connection);
+        $bodyCalls = 0;
+
+        try {
+            $result = (new EventTransactionRunner)->run(function (EventTransactionContext $context) use (&$bodyCalls, $real, $session): string {
+                $bodyCalls++;
+                $this->assertSame($session, $context->session());
+                $this->assertSame($real->getDatabase(), $context->database());
+
+                return 'body result';
+            });
+        } finally {
+            $session->endSession();
+        }
+
+        $this->assertSame('body result', $result);
+        $this->assertSame(1, $bodyCalls);
+    }
+
+    public function test_transaction_context_commits_raw_operations_atomically(): void
+    {
+        $id = new ObjectId;
+
+        $result = (new EventTransactionRunner)->run(function (EventTransactionContext $context) use ($id): string {
+            $context->collection('events')->insertOne(
+                ['_id' => $id, 'title' => 'Atomic event'],
+                $context->rawOptions(),
+            );
 
             return 'committed';
         });
 
         $this->assertSame('committed', $result);
-        $this->assertSame(3, $attempts);
+        $this->assertSame(
+            'Atomic event',
+            DB::connection('tenant')->getDatabase()->selectCollection('events')->findOne(['_id' => $id])?->title,
+        );
     }
 
-    public function test_third_transient_body_failure_becomes_stable_conflict(): void
+    public function test_callback_failure_rolls_back_and_propagates_the_original_error(): void
     {
-        $attempts = 0;
-        $runner = new EventTransactionRunner;
+        $id = new ObjectId;
+        $failure = new RuntimeException('callback failed');
 
         try {
-            $runner->run(function () use (&$attempts): void {
-                $attempts++;
-                throw new LabeledEventTransactionFailure('transient', ['TransientTransactionError']);
+            (new EventTransactionRunner)->run(function (EventTransactionContext $context) use ($failure, $id): void {
+                $context->collection('events')->insertOne(
+                    ['_id' => $id, 'title' => 'Rolled back event'],
+                    $context->rawOptions(),
+                );
+
+                throw $failure;
             });
-            $this->fail('The third transient failure must exhaust the body budget.');
-        } catch (EventTransactionConflictException) {
-            $this->assertSame(3, $attempts);
+            $this->fail('The callback error must escape the transaction boundary.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame($failure, $exception);
         }
+
+        $this->assertNull(
+            DB::connection('tenant')->getDatabase()->selectCollection('events')->findOne(['_id' => $id]),
+        );
+    }
+
+    public function test_callback_error_that_mentions_transaction_infrastructure_is_not_reclassified(): void
+    {
+        $failure = new RuntimeException('Domain input mentions replica set requirements.');
+
+        try {
+            (new EventTransactionRunner)->run(static fn (): never => throw $failure);
+            $this->fail('A callback error must not be reclassified from message text.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame($failure, $exception);
+        }
+    }
+
+    public function test_terminal_transient_failure_becomes_stable_conflict(): void
+    {
+        /** @var Connection&\Mockery\MockInterface $connection */
+        $connection = Mockery::mock(Connection::class);
+        $connection->shouldReceive('transaction')
+            ->once()
+            ->andThrow(new LabeledEventTransactionFailure('transient', ['TransientTransactionError']));
+        DB::shouldReceive('connection')
+            ->once()
+            ->with('tenant')
+            ->andReturn($connection);
+
+        $this->expectException(EventTransactionConflictException::class);
+
+        (new EventTransactionRunner)->run(static fn (): never => throw new RuntimeException('must not run'));
     }
 
     public function test_unlabelled_write_conflict_is_not_replayed(): void
@@ -70,98 +145,38 @@ final class EventHostTransactionRetryTest extends TestCase
         }
     }
 
-    public function test_aggregate_update_reloads_persisted_event_state_for_a_complete_body_retry(): void
-    {
-        $event = Event::query()->create([
-            'title' => 'Original title',
-            'slug' => 'event-retry-aggregate',
-            'content' => '',
-            'publication' => ['status' => 'draft', 'publish_at' => null],
-            'is_active' => true,
-        ]);
-        $syncAttempts = 0;
-        $occurrenceSync = Mockery::mock(EventOccurrenceSyncService::class);
-        $occurrenceSync->shouldReceive('syncFromEvent')
-            ->twice()
-            ->andReturnUsing(function () use (&$syncAttempts): void {
-                $syncAttempts++;
-                if ($syncAttempts === 1) {
-                    throw new LabeledEventTransactionFailure('transient', ['TransientTransactionError']);
-                }
-            });
-        $this->app->instance(EventOccurrenceSyncService::class, $occurrenceSync);
-
-        $updated = $this->app->make(EventAggregateWriteService::class)->update(
-            $event,
-            ['title' => 'Updated title'],
-            [],
-        );
-
-        $this->assertSame(2, $syncAttempts);
-        $this->assertSame('Updated title', $updated->fresh()?->title);
-    }
-
-    public function test_unknown_commit_result_retries_only_commit_and_exhausts_as_outcome_unknown(): void
+    public function test_unknown_commit_result_maps_to_outcome_unknown_without_application_callback_replay(): void
     {
         $real = DB::connection('tenant');
         $this->assertInstanceOf(Connection::class, $real);
+        $session = $real->getClient()?->startSession();
+        $this->assertNotNull($session);
+
         /** @var Connection&\Mockery\MockInterface $connection */
-        $connection = Mockery::mock($real)->makePartial();
-        $connection->shouldReceive('commit')
-            ->times(EventTransactionRunner::MAX_COMMIT_ATTEMPTS)
-            ->andThrow(new LabeledEventTransactionFailure('unknown commit', ['UnknownTransactionCommitResult']));
+        $connection = Mockery::mock(Connection::class);
+        $connection->shouldReceive('transaction')
+            ->once()
+            ->andReturnUsing(function (callable $callback) use ($connection): never {
+                $callback($connection);
+                throw new LabeledEventTransactionFailure('unknown commit', ['UnknownTransactionCommitResult']);
+            });
+        $connection->shouldReceive('getSession')->once()->andReturn($session);
+        $connection->shouldReceive('getDatabase')->once()->andReturn($real->getDatabase());
         DB::shouldReceive('connection')
             ->once()
             ->with('tenant')
             ->andReturn($connection);
         $attempts = 0;
-        $runner = new EventTransactionRunner;
-
-        try {
-            $runner->run(function () use (&$attempts): void {
-                $attempts++;
-            });
-            $this->fail('Unknown commit exhaustion must have a distinct outcome.');
-        } catch (EventCommitOutcomeUnknownException) {
-            $this->assertSame(1, $attempts);
-        } finally {
-            if ($real instanceof Connection && $real->getSession()?->isInTransaction()) {
-                $real->rollBack();
-            }
-        }
-    }
-
-    public function test_slow_successful_body_commits_after_the_retry_admission_budget(): void
-    {
-        $event = (new EventTransactionRunner)->run(static function (): Event {
-            $event = Event::query()->create([
-                'title' => 'Slow committed event',
-                'slug' => 'slow-committed-event',
-                'content' => '',
-                'publication' => ['status' => 'draft', 'publish_at' => null],
-                'is_active' => true,
-            ]);
-            usleep(2_010_000);
-
-            return $event;
-        });
-
-        $this->assertSame('Slow committed event', $event->fresh()?->title);
-    }
-
-    public function test_slow_transient_body_failure_cannot_start_a_retry_after_the_command_budget(): void
-    {
-        $attempts = 0;
 
         try {
             (new EventTransactionRunner)->run(function () use (&$attempts): void {
                 $attempts++;
-                usleep(2_010_000);
-                throw new LabeledEventTransactionFailure('transient', ['TransientTransactionError']);
             });
-            $this->fail('A transient failure after the command budget must not replay the body.');
-        } catch (EventTransactionConflictException) {
+            $this->fail('A terminal unknown commit result must keep its distinct outcome.');
+        } catch (EventCommitOutcomeUnknownException) {
             $this->assertSame(1, $attempts);
+        } finally {
+            $session->endSession();
         }
     }
 
