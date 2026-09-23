@@ -30,18 +30,22 @@ class EventTransactionRunner
             );
         }
 
+        $session = null;
         try {
-            return $connection->transaction(function (Connection $connection) use ($callback): mixed {
-                $session = $connection->getSession();
-                if (! $session instanceof Session) {
-                    throw new RuntimeException('Event transaction session is unavailable.');
-                }
+            $connection->beginTransaction();
+            $session = $connection->getSession();
+            if (! $session instanceof Session) {
+                throw new RuntimeException('Event transaction session is unavailable.');
+            }
 
-                return $callback(new EventTransactionContext(
-                    $connection->getDatabase(),
-                    $session,
-                ));
-            });
+            /** @var T $result */
+            $result = $callback(new EventTransactionContext(
+                $connection->getDatabase(),
+                $session,
+            ));
+            $connection->commit();
+
+            return $result;
         } catch (Throwable $throwable) {
             if ($this->hasErrorLabel($throwable, 'UnknownTransactionCommitResult')) {
                 throw new EventCommitOutcomeUnknownException(
@@ -49,6 +53,8 @@ class EventTransactionRunner
                     previous: $throwable,
                 );
             }
+
+            $this->abortIfActive($connection, $session);
 
             if ($this->hasErrorLabel($throwable, 'TransientTransactionError') || $this->isWriteConflict($throwable)) {
                 throw new EventTransactionConflictException(
@@ -66,6 +72,19 @@ class EventTransactionRunner
             }
 
             throw $throwable;
+        }
+    }
+
+    private function abortIfActive(Connection $connection, ?Session $session): void
+    {
+        if (! $session instanceof Session || ! $session->isInTransaction()) {
+            return;
+        }
+
+        try {
+            $connection->rollBack();
+        } catch (Throwable) {
+            // Preserve the original transaction failure.
         }
     }
 

@@ -19,7 +19,7 @@ use Tests\TestCase;
 
 final class EventHostTransactionRetryTest extends TestCase
 {
-    public function test_runner_delegates_transaction_choreography_to_the_canonical_connection_once(): void
+    public function test_runner_executes_one_explicit_transaction_attempt_on_the_active_connection(): void
     {
         $real = DB::connection('tenant');
         $this->assertInstanceOf(Connection::class, $real);
@@ -28,12 +28,10 @@ final class EventHostTransactionRetryTest extends TestCase
 
         /** @var Connection&\Mockery\MockInterface $connection */
         $connection = Mockery::mock(Connection::class);
-        $connection->shouldReceive('transaction')
-            ->once()
-            ->with(Mockery::type('callable'))
-            ->andReturnUsing(fn (callable $callback): mixed => $callback($connection));
+        $connection->shouldReceive('beginTransaction')->once();
         $connection->shouldReceive('getSession')->once()->andReturn($session);
         $connection->shouldReceive('getDatabase')->once()->andReturn($real->getDatabase());
+        $connection->shouldReceive('commit')->once();
         DB::shouldReceive('connection')
             ->once()
             ->with('tenant')
@@ -114,19 +112,18 @@ final class EventHostTransactionRetryTest extends TestCase
 
     public function test_terminal_transient_failure_becomes_stable_conflict(): void
     {
-        /** @var Connection&\Mockery\MockInterface $connection */
-        $connection = Mockery::mock(Connection::class);
-        $connection->shouldReceive('transaction')
-            ->once()
-            ->andThrow(new LabeledEventTransactionFailure('transient', ['TransientTransactionError']));
-        DB::shouldReceive('connection')
-            ->once()
-            ->with('tenant')
-            ->andReturn($connection);
+        $bodyCalls = 0;
 
-        $this->expectException(EventTransactionConflictException::class);
+        try {
+            (new EventTransactionRunner)->run(function () use (&$bodyCalls): never {
+                $bodyCalls++;
 
-        (new EventTransactionRunner)->run(static fn (): never => throw new RuntimeException('must not run'));
+                throw new LabeledEventTransactionFailure('transient', ['TransientTransactionError']);
+            });
+            $this->fail('A transient transaction failure must become a stable conflict.');
+        } catch (EventTransactionConflictException) {
+            $this->assertSame(1, $bodyCalls);
+        }
     }
 
     public function test_unlabelled_write_conflict_is_not_replayed(): void
@@ -154,14 +151,13 @@ final class EventHostTransactionRetryTest extends TestCase
 
         /** @var Connection&\Mockery\MockInterface $connection */
         $connection = Mockery::mock(Connection::class);
-        $connection->shouldReceive('transaction')
-            ->once()
-            ->andReturnUsing(function (callable $callback) use ($connection): never {
-                $callback($connection);
-                throw new LabeledEventTransactionFailure('unknown commit', ['UnknownTransactionCommitResult']);
-            });
+        $connection->shouldReceive('beginTransaction')->once();
         $connection->shouldReceive('getSession')->once()->andReturn($session);
         $connection->shouldReceive('getDatabase')->once()->andReturn($real->getDatabase());
+        $connection->shouldReceive('commit')
+            ->once()
+            ->andThrow(new LabeledEventTransactionFailure('unknown commit', ['UnknownTransactionCommitResult']));
+        $connection->shouldNotReceive('rollBack');
         DB::shouldReceive('connection')
             ->once()
             ->with('tenant')

@@ -252,11 +252,12 @@ valid Point, effective `location_policy=optional|required`, and effective
 `is_physical_host_enabled=true`; neither Profile-Type names nor Map/favorite
 capabilities grant host eligibility. The same transaction participates in the
 host Profile/Profile-Type revision fences. The Event transaction runner
-delegates transaction and retry mechanics to the installed MongoDB Laravel
-connection. A terminal transient/write conflict returns the host's stable
-`409 event_revision_conflict`; a commit outcome still unknown after canonical
-driver handling returns `503 event_commit_outcome_unknown` without an
-application-level replay loop.
+performs one explicit transaction attempt on the tenant MongoDB connection so
+Eloquent and raw operations share the same active session. A transient/write
+conflict returns the host's stable `409 event_revision_conflict`; an unknown
+commit outcome returns `503 event_commit_outcome_unknown`. The runner never
+replays the mutation body and owns no retry count, deadline, jitter, or reread
+policy.
 
 #### Update (`PATCH /events/{event_id}`)
 
