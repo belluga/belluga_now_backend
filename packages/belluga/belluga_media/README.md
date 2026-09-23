@@ -40,7 +40,6 @@ No package HTTP routes or controllers are exposed.
 - Targeted package/core tests:
   - `php artisan test tests/Unit/Media/ModelMediaServiceTest.php`
 - Host regression gates:
-  - `php artisan test tests/Feature/StaticAssets/StaticAssetsControllerTest.php`
   - `php artisan test tests/Feature/AccountProfiles/AccountProfilesControllerTest.php`
 - Package architecture guardrail:
   - `composer run architecture:guardrails`
@@ -49,4 +48,3 @@ No package HTTP routes or controllers are exposed.
 - Does not perform image transforms, transcoding, or CDN integration.
 - Does not manage media route registration.
 - Does not replace model-specific response payload formatting.
-

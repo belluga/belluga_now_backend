@@ -6,24 +6,30 @@ namespace App\Application\AccountProfiles;
 
 final class AccountProfilePublicCatalogSnapshot
 {
-    private readonly AccountProfilePublicCatalogEligibilityPolicy $policy;
+    private readonly AccountProfilePublicVisibilityPolicy $policy;
 
     /**
-     * @param  array<int, array{id:string,type:string,label:string,visual:array<string, mixed>|null,poi_visual:array<string, mixed>|null,allowed_taxonomies:array<int, string>,type_asset_url:?string,is_poi_enabled:bool,has_nested_profile_groups:bool}>  $typeRecords
+     * @param  array<int, array{id:string,type:string,label:string,visual:array<string, mixed>|null,poi_visual:array<string, mixed>|null,allowed_taxonomies:array<int, string>,type_asset_url:?string,has_nested_profile_groups:bool}>  $typeRecords
      * @param  array<int, string>  $catalogTypeKeys
      * @param  array<int, string>  $publicDetailTypeKeys
      * @param  array<int, string>  $nestedParentTypeKeys
+     * @param  array<int, string>  $avatarEnabledTypeKeys
+     * @param  array<int, string>  $coverEnabledTypeKeys
      */
     public function __construct(
         private readonly array $typeRecords,
         private readonly array $catalogTypeKeys,
         private readonly array $publicDetailTypeKeys,
         private readonly array $nestedParentTypeKeys,
+        private readonly array $avatarEnabledTypeKeys,
+        private readonly array $coverEnabledTypeKeys,
     ) {
-        $this->policy = new AccountProfilePublicCatalogEligibilityPolicy(
+        $this->policy = new AccountProfilePublicVisibilityPolicy(
             $this->catalogTypeKeys,
             $this->publicDetailTypeKeys,
             $this->nestedParentTypeKeys,
+            $this->avatarEnabledTypeKeys,
+            $this->coverEnabledTypeKeys,
         );
     }
 
@@ -43,13 +49,13 @@ final class AccountProfilePublicCatalogSnapshot
         return $this->nestedParentTypeKeys;
     }
 
-    public function policy(): AccountProfilePublicCatalogEligibilityPolicy
+    public function policy(): AccountProfilePublicVisibilityPolicy
     {
         return $this->policy;
     }
 
     /**
-     * @return array<int, array{id:string,type:string,label:string,visual:array<string, mixed>|null,poi_visual:array<string, mixed>|null,allowed_taxonomies:array<int, string>,type_asset_url:?string,is_poi_enabled:bool,has_nested_profile_groups:bool}>
+     * @return array<int, array{id:string,type:string,label:string,visual:array<string, mixed>|null,poi_visual:array<string, mixed>|null,allowed_taxonomies:array<int, string>,type_asset_url:?string,has_nested_profile_groups:bool}>
      */
     public function typeRecords(): array
     {

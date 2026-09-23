@@ -22,7 +22,6 @@ final class AccountProfileContactChannelsService
     public function __construct(
         private readonly AccountProfileRegistryService $registryService,
         private readonly AccountProfileTypeSetProvider $profileTypeSetProvider,
-        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
         private readonly AccountProfileCandidateDiscoveryService $candidateDiscoveryService,
         private readonly ContactChannelDefinitionRegistry $definitionRegistry,
         private readonly ContactChannelCollectionNormalizer $collectionNormalizer,
@@ -485,15 +484,7 @@ final class AccountProfileContactChannelsService
 
     private function hasContactChannelsCapability(string $profileType): bool
     {
-        $definition = $this->registryService->typeDefinition($profileType);
-        $capabilities = is_array($definition['capabilities'] ?? null)
-            ? $definition['capabilities']
-            : [];
-
-        return $this->capabilityCatalog->isExplicitlyEnabled(
-            AccountProfileTypeCapabilityCatalog::HAS_CONTACT_CHANNELS,
-            $capabilities,
-        );
+        return $this->registryService->hasContactChannels($profileType);
     }
 
     /** @return array<string, mixed>|null */

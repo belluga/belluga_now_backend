@@ -9,6 +9,7 @@ use App\Application\AccountProfiles\AccountProfileGalleryService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
 use App\Application\AccountProfiles\YoutubeVideoMetadataResolver;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
@@ -77,7 +78,7 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
             );
         });
         [$this->account] = $this->seedAccountWithRole(['account-users:view', 'account-users:create', 'account-users:update', 'account-users:delete']);
-        TenantProfileType::query()->create(['type' => 'venue', 'label' => 'Venue', 'allowed_taxonomies' => [], 'capabilities' => ['is_queryable' => true, 'is_publicly_navigable' => true, 'is_favoritable' => true, 'is_publicly_discoverable' => true, 'is_poi_enabled' => false, 'has_events' => true, 'has_gallery' => true]]);
+        TenantProfileType::query()->create(['type' => 'venue', 'label' => 'Venue', 'allowed_taxonomies' => [], 'capabilities' => ['is_queryable' => ['value' => true, 'parameters' => []], 'is_publicly_navigable' => ['value' => true, 'parameters' => []], 'is_favoritable' => ['value' => true, 'parameters' => []], 'is_publicly_discoverable' => ['value' => true, 'parameters' => []], 'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []], 'has_events' => ['value' => true, 'parameters' => []], 'has_gallery' => ['value' => true, 'parameters' => ['max_groups' => 6, 'max_items_per_group' => 12]]]]);
     }
 
     public function test_granular_group_and_youtube_item_return_authoritative_envelope_and_canonical_identity(): void
@@ -172,7 +173,7 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         $profile = $this->profile();
         $profile->gallery_groups = [['group_id' => 'dormant', 'subtitle' => 'Dormant', 'order' => 0, 'items' => []]];
         $profile->save();
-        TenantProfileType::query()->where('type', 'venue')->update(['capabilities' => ['has_gallery' => false]]);
+        TenantProfileType::query()->where('type', 'venue')->update(['capabilities' => ['has_gallery' => ['value' => false, 'parameters' => ['max_groups' => 6, 'max_items_per_group' => 12]]]]);
         $this->postJson($this->url($profile).'/gallery/groups', ['subtitle' => 'Blocked'])->assertStatus(422)->assertJsonValidationErrors(['gallery_groups']);
         $this->patchJson($this->url($profile).'/gallery/groups/dormant', ['subtitle' => 'Blocked'])->assertStatus(422);
         $this->deleteJson($this->url($profile).'/gallery/groups/dormant')->assertStatus(422);
@@ -200,7 +201,8 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
 
     public function test_capacity_blocks_only_the_corresponding_create_with_stable_field_keys(): void
     {
-        config(['gallery.max_galleries' => 1, 'gallery.max_items_per_gallery' => 1]);
+        config(['gallery.max_galleries' => 99, 'gallery.max_items_per_gallery' => 99]);
+        $this->setGalleryCapabilityLimits(1, 1);
         $profile = $this->profile();
         $group = $this->postJson($this->url($profile).'/gallery/groups', ['subtitle' => 'Only'])->json('data.gallery_groups.0.group_id');
         $this->postJson($this->url($profile).'/gallery/groups', ['subtitle' => 'Blocked'])->assertStatus(422)->assertJsonValidationErrors(['gallery_capabilities.max_galleries']);
@@ -358,7 +360,7 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
             new AccountProfileGalleryService($media, app(AccountProfileTypeSetProvider::class)),
             $profiles,
             $media,
-            app(AccountProfileTypeSetProvider::class),
+            app(AccountProfileCapabilityResolverContract::class),
             app(YoutubeVideoMetadataResolver::class),
         );
 
@@ -393,7 +395,7 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
 
     public function test_admin_keeps_empty_groups_public_omits_them_and_reduced_limits_do_not_hide_retained_content(): void
     {
-        config(['gallery.max_galleries' => 2, 'gallery.max_items_per_gallery' => 2]);
+        $this->setGalleryCapabilityLimits(2, 2);
         $profile = $this->profile();
         $empty = $this->postJson($this->url($profile).'/gallery/groups', ['subtitle' => 'Empty'])->assertOk();
         $populated = $this->postJson($this->url($profile).'/gallery/groups', ['subtitle' => 'Published'])->assertOk();
@@ -401,7 +403,7 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         $this->postJson($this->url($profile)."/gallery/groups/{$group}/items", ['type' => 'youtube', 'youtube_url' => 'https://youtu.be/dQw4w9WgXcQ'])->assertOk();
         $this->getJson($this->url($profile))->assertOk()->assertJsonCount(2, 'data.gallery_groups');
         $this->getJson($this->base_api_tenant.'account_profiles/'.$profile->slug, $this->getHeaders())->assertOk()->assertJsonCount(1, 'data.gallery_groups');
-        config(['gallery.max_galleries' => 1, 'gallery.max_items_per_gallery' => 0]);
+        $this->setGalleryCapabilityLimits(1, 0);
         $this->getJson($this->base_api_tenant.'account_profiles/'.$profile->slug, $this->getHeaders())->assertOk()->assertJsonPath('data.gallery_groups.0.items.0.type', 'youtube');
         $this->postJson($this->url($profile).'/gallery/groups', ['subtitle' => 'Blocked'])->assertStatus(422)->assertJsonValidationErrors(['gallery_capabilities.max_galleries']);
         $this->deleteJson($this->url($profile).'/gallery/groups/'.$empty->json('data.gallery_groups.0.group_id'))->assertOk();
@@ -419,13 +421,13 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
     public function test_event_profile_projection_keeps_mixed_items_in_order_and_honors_gallery_capability(): void
     {
         $capabilities = [
-            'is_queryable' => true,
-            'is_publicly_navigable' => true,
-            'is_favoritable' => true,
-            'is_publicly_discoverable' => true,
-            'is_poi_enabled' => true,
-            'has_events' => true,
-            'has_gallery' => true,
+            'is_queryable' => ['value' => true, 'parameters' => []],
+            'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+            'is_favoritable' => ['value' => true, 'parameters' => []],
+            'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+            'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+            'has_events' => ['value' => true, 'parameters' => []],
+            'has_gallery' => ['value' => true, 'parameters' => ['max_groups' => 6, 'max_items_per_group' => 12]],
         ];
         TenantProfileType::query()->where('type', 'venue')->update(['capabilities' => $capabilities]);
         $profile = $this->profile();
@@ -451,7 +453,7 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
         $this->assertArrayNotHasKey('version', data_get($resolved, 'venue.gallery_groups.0.items.0', []));
         $this->assertArrayNotHasKey('youtube_url', data_get($resolved, 'venue.gallery_groups.0.items.1', []));
 
-        TenantProfileType::query()->where('type', 'venue')->update(['capabilities' => [...$capabilities, 'has_gallery' => false]]);
+        TenantProfileType::query()->where('type', 'venue')->update(['capabilities' => [...$capabilities, 'has_gallery' => ['value' => false, 'parameters' => ['max_groups' => 6, 'max_items_per_group' => 12]]]]);
         AccountProfileTypeSetProvider::bumpRevision();
         $resolved = $resolver->resolvePhysicalHostByProfileId((string) $profile->getKey());
         $this->assertSame([], data_get($resolved, 'venue.gallery_groups'));
@@ -460,6 +462,23 @@ final class AccountProfileGalleryGranularContractTest extends TestCaseTenant
     private function profile(): AccountProfile
     {
         return AccountProfile::query()->create(['account_id' => (string) $this->account->getKey(), 'profile_type' => 'venue', 'display_name' => 'Gallery Contract', 'slug' => 'gallery-contract', 'visibility' => 'public', 'is_active' => true])->fresh();
+    }
+
+    private function setGalleryCapabilityLimits(int $maxGroups, int $maxItemsPerGroup): void
+    {
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $profileType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $capabilities = (array) ($profileType->capabilities ?? []);
+        $capabilities['has_gallery'] = [
+            'value' => true,
+            'parameters' => [
+                'max_groups' => $maxGroups,
+                'max_items_per_group' => $maxItemsPerGroup,
+            ],
+        ];
+        $profileType->capabilities = $capabilities;
+        $profileType->save();
+        AccountProfileTypeSetProvider::bumpRevision();
     }
 
     private function url(AccountProfile $profile): string

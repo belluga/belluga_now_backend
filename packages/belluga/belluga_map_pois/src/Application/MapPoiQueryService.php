@@ -299,7 +299,6 @@ class MapPoiQueryService
         return match ($refType) {
             'event' => 1,
             'account_profile' => 2,
-            'static' => 3,
             default => 9,
         };
     }
@@ -356,7 +355,6 @@ class MapPoiQueryService
                         'branches' => [
                             ['case' => ['$eq' => ['$ref_type', 'event']], 'then' => 1],
                             ['case' => ['$eq' => ['$ref_type', 'account_profile']], 'then' => 2],
-                            ['case' => ['$eq' => ['$ref_type', 'static']], 'then' => 3],
                         ],
                         'default' => 9,
                     ],
@@ -688,7 +686,6 @@ class MapPoiQueryService
         return match (strtolower(trim($source))) {
             'event' => 'event',
             'account_profile', 'account' => 'account_profile',
-            'static', 'static_asset', 'asset' => 'static',
             default => null,
         };
     }

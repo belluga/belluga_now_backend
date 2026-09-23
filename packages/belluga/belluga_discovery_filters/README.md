@@ -10,7 +10,7 @@ Local Laravel package for Belluga discovery filter grammar, entity registries, a
 
 ## Non-Scope
 
-- Does not execute Map POI, Agenda/EventOccurrence, Account Profile Discovery, or Static Asset queries.
+- Does not execute Map POI, Agenda/EventOccurrence, or Account Profile Discovery queries.
 - Does not own tenant-admin pages or public result rendering.
 - Does not replace read-model-specific adapters.
 

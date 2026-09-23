@@ -2,6 +2,8 @@
 
 use App\Exceptions\AccountProfileExternalLinksCapabilityDisabledException;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use Belluga\Events\Exceptions\EventCommitOutcomeUnknownException;
+use Belluga\Events\Exceptions\EventTransactionConflictException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -198,8 +200,7 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions) use ($isApiRequest) {
         $exceptions->shouldRenderJsonWhen(
-            static fn (Request $request): bool =>
-                $isApiRequest($request) || $request->expectsJson()
+            static fn (Request $request): bool => $isApiRequest($request) || $request->expectsJson()
         );
 
         $exceptions->renderable(function (AuthenticationException $e, Request $request) use ($isApiRequest) {
@@ -217,6 +218,26 @@ return Application::configure(basePath: dirname(__DIR__))
             return response()->json([
                 'message' => 'A concurrency conflict occurred. Please try again.',
             ], 409);
+        });
+        $exceptions->renderable(function (EventTransactionConflictException $e, Request $request) use ($isApiRequest) {
+            if (! $isApiRequest($request)) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'The event changed concurrently. Please retry the command.',
+                'code' => 'event_revision_conflict',
+            ], 409);
+        });
+        $exceptions->renderable(function (EventCommitOutcomeUnknownException $e, Request $request) use ($isApiRequest) {
+            if (! $isApiRequest($request)) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'The event commit outcome is unknown. Reload before retrying.',
+                'code' => 'event_commit_outcome_unknown',
+            ], 503);
         });
         $exceptions->renderable(function (AccountProfileExternalLinksCapabilityDisabledException $e, Request $request) use ($isApiRequest) {
             if (! $isApiRequest($request)) {

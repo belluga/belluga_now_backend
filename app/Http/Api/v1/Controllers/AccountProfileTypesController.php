@@ -26,6 +26,8 @@ class AccountProfileTypesController extends Controller
     {
         return response()->json([
             'data' => $this->registryService->registry($request->getSchemeAndHttpHost()),
+            'capability_definitions' => $this->registryService->capabilityDefinitions(),
+            'capability_creation_configuration' => $this->registryService->capabilityCreationConfiguration(),
         ]);
     }
 
@@ -41,7 +43,11 @@ class AccountProfileTypesController extends Controller
             abort(404, 'Account profile type not found.');
         }
 
-        return response()->json(['data' => $entry]);
+        return response()->json([
+            'data' => $entry,
+            'capability_definitions' => $this->registryService->capabilityDefinitions(),
+            'capability_creation_configuration' => $this->registryService->capabilityCreationConfiguration(),
+        ]);
     }
 
     public function store(AccountProfileTypeStoreRequest $request): JsonResponse
@@ -55,7 +61,11 @@ class AccountProfileTypesController extends Controller
             ],
         );
 
-        return response()->json(['data' => $entry], 201);
+        return response()->json([
+            'data' => $entry,
+            'capability_definitions' => $this->registryService->capabilityDefinitions(),
+            'capability_creation_configuration' => $this->registryService->capabilityCreationConfiguration(),
+        ], 201);
     }
 
     public function update(
@@ -72,19 +82,24 @@ class AccountProfileTypesController extends Controller
             ],
         );
 
-        return response()->json(['data' => $entry]);
+        return response()->json([
+            'data' => $entry,
+            'capability_definitions' => $this->registryService->capabilityDefinitions(),
+            'capability_creation_configuration' => $this->registryService->capabilityCreationConfiguration(),
+        ]);
     }
 
-    public function mapPoiProjectionImpact(Request $request): JsonResponse
+    public function changeImpact(AccountProfileTypeUpdateRequest $request): JsonResponse
     {
         $profileType = (string) $request->route('profile_type', '');
-        $count = $this->managementService->previewDisableProjectionCount($profileType);
 
         return response()->json([
-            'data' => [
-                'profile_type' => $profileType,
-                'projection_count' => $count,
-            ],
+            'data' => $this->managementService->previewChangeImpact(
+                $profileType,
+                is_array($request->validated('capabilities'))
+                    ? $request->validated('capabilities')
+                    : [],
+            ),
         ]);
     }
 

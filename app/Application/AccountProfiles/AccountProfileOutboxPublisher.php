@@ -56,6 +56,50 @@ final class AccountProfileOutboxPublisher
         ], JSON_THROW_ON_ERROR));
     }
 
+    public function recordMapPoiTypeReconcile(
+        AccountProfileTransactionContext $context,
+        string $profileType,
+        ?int $capabilityRevision,
+        int $sourceCheckpoint,
+        ?string $visualRefreshId = null,
+    ): string {
+        $normalizedType = trim($profileType);
+        if ($normalizedType === ''
+            || ($capabilityRevision !== null && $capabilityRevision < 0)
+            || (($capabilityRevision === null) !== ($visualRefreshId !== null))
+            || ($visualRefreshId !== null && trim($visualRefreshId) === '')) {
+            throw new RuntimeException('Map POI type reconciliation requires a type and capability revision or visual refresh id.');
+        }
+
+        $eventId = $visualRefreshId === null
+            ? "profile-type:{$normalizedType}:{$capabilityRevision}:map-poi-reconcile"
+            : "profile-type:{$normalizedType}:visual:{$visualRefreshId}:map-poi-reconcile";
+        $timestamp = new UTCDateTime((int) now()->getTimestampMs());
+        $context->collection(self::OUTBOX_COLLECTION)->updateOne(
+            ['_id' => $eventId],
+            ['$setOnInsert' => [
+                '_id' => $eventId,
+                'schema_version' => 1,
+                'event_id' => $eventId,
+                'command_id' => $eventId,
+                'profile_type' => $normalizedType,
+                'capability_revision' => $capabilityRevision,
+                ...($visualRefreshId !== null ? ['visual_refresh_id' => $visualRefreshId] : []),
+                'operation' => 'map_poi_type_reconcile',
+                'operation_rank' => 0,
+                'source_checkpoint' => max(0, $sourceCheckpoint),
+                'after_profile_id' => null,
+                'occurred_at' => $timestamp,
+                'delivery_state' => 'pending',
+                'delivery_attempts' => 0,
+                'created_at' => $timestamp,
+            ]],
+            [...$context->rawOptions(), 'upsert' => true],
+        );
+
+        return $eventId;
+    }
+
     /** @return array<string, mixed>|null */
     public function receipt(
         AccountProfileTransactionContext $context,

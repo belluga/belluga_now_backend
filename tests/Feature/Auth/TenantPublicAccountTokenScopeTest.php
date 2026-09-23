@@ -84,11 +84,11 @@ class TenantPublicAccountTokenScopeTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );

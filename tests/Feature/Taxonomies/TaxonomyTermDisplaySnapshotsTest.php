@@ -14,7 +14,6 @@ use App\Jobs\Taxonomies\RepairTaxonomyTermSnapshotsJob;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\StaticAsset;
 use App\Models\Tenants\Taxonomy;
 use App\Models\Tenants\TaxonomyTerm;
 use App\Models\Tenants\TenantProfileType;
@@ -57,7 +56,6 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
         $tenant->makeCurrent();
 
         AccountProfile::query()->delete();
-        StaticAsset::query()->delete();
         Event::query()->delete();
         EventOccurrence::query()->delete();
         MapPoi::query()->delete();
@@ -87,12 +85,6 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
             'account_id' => (string) $account->_id,
             'profile_type' => 'artist',
             'display_name' => 'Legacy Artist',
-            'taxonomy_terms' => $legacyTerms,
-            'is_active' => true,
-        ]);
-        $staticAsset = StaticAsset::query()->create([
-            'profile_type' => 'poi',
-            'display_name' => 'Legacy Static',
             'taxonomy_terms' => $legacyTerms,
             'is_active' => true,
         ]);
@@ -158,7 +150,6 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
         $this->assertSame(0, $exitCode);
         $this->assertSame('Samba', data_get($profile->fresh()->taxonomy_terms, '0.name'));
         $this->assertSame('style:samba', data_get($profile->fresh()->taxonomy_terms_flat, '0'));
-        $this->assertSame('Style', data_get($staticAsset->fresh()->taxonomy_terms, '0.taxonomy_name'));
         $this->assertSame('Samba', data_get($event->fresh()->taxonomy_terms, '0.label'));
         $this->assertSame('Style', data_get($event->fresh()->venue, 'taxonomy_terms.0.taxonomy_name'));
         $this->assertSame('Samba', data_get($event->fresh()->event_parties, '0.metadata.taxonomy_terms.0.name'));
@@ -484,7 +475,7 @@ class TaxonomyTermDisplaySnapshotsTest extends TestCaseTenant
         $taxonomy = Taxonomy::query()->create([
             'slug' => 'style',
             'name' => 'Style',
-            'applies_to' => ['account_profile', 'static_asset', 'event'],
+            'applies_to' => ['account_profile', 'event'],
         ]);
         $term = TaxonomyTerm::query()->create([
             'taxonomy_id' => (string) $taxonomy->_id,

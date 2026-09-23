@@ -8,7 +8,6 @@ use App\Application\AccountProfiles\AccountProfileFormatterService;
 use App\Application\AccountProfiles\AccountProfileHeroImageResolver;
 use App\Application\AccountProfiles\AccountProfileQueryService;
 use App\Application\Branding\BrandingPublicWebMediaService;
-use App\Application\StaticAssets\StaticAssetQueryService;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Support\Helpers\ArrayReplaceEmptyAware;
@@ -28,7 +27,6 @@ class PublicWebMetadataService
         private readonly AccountProfileHeroImageResolver $accountProfileHeroImages,
         private readonly EventQueryService $eventQueryService,
         private readonly EventHeroImageResolver $eventHeroImages,
-        private readonly StaticAssetQueryService $staticAssetQueryService,
         private readonly BrandingPublicWebMediaService $brandingPublicWebMediaService,
         private readonly InviteShareService $inviteShareService,
     ) {}
@@ -114,41 +112,6 @@ class PublicWebMetadataService
         ]);
         $metadata['canonical_url'] = $this->canonicalUrlForPath('/agenda/evento/'.trim((string) ($payload['slug'] ?? $slug)));
         $metadata['type'] = 'article';
-
-        return $this->enrichImageMetadataForContext($metadata, $context);
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    public function staticAssetMetadata(string $assetRef): array
-    {
-        $context = $this->resolveRequestContext();
-        $metadata = $this->defaultMetadataForContext('/static/'.$assetRef, $context);
-
-        try {
-            $asset = $this->staticAssetQueryService->findByIdOrSlug($assetRef);
-            $payload = $this->staticAssetQueryService->format($asset);
-        } catch (ModelNotFoundException) {
-            return $metadata;
-        }
-
-        $displayName = trim((string) ($payload['display_name'] ?? ''));
-        if ($displayName !== '') {
-            $metadata['title'] = "{$displayName} | {$metadata['site_name']}";
-        }
-
-        $metadata['description'] = $this->excerpt(
-            $this->sanitizeText((string) ($payload['content'] ?? ''))
-            ?: $this->sanitizeText((string) ($payload['bio'] ?? ''))
-            ?: $metadata['description']
-        );
-        $metadata['image'] = $this->resolveImageUrl([
-            $payload['cover_url'] ?? null,
-            $metadata['image'],
-        ]);
-        $metadata['canonical_url'] = $this->canonicalUrlForPath('/static/'.trim((string) ($payload['slug'] ?? $assetRef)));
-        $metadata['type'] = 'place';
 
         return $this->enrichImageMetadataForContext($metadata, $context);
     }

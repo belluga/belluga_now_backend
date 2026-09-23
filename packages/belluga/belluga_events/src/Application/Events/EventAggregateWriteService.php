@@ -8,6 +8,7 @@ use Belluga\Events\Application\Transactions\EventTransactionContext;
 use Belluga\Events\Application\Transactions\EventTransactionRunner;
 use Belluga\Events\Contracts\EventContentSanitizerContract;
 use Belluga\Events\Contracts\EventMapPoiDeletionContract;
+use Belluga\Events\Contracts\EventProfileResolverContract;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\Events\Support\Validation\InputConstraints;
@@ -29,6 +30,7 @@ class EventAggregateWriteService
         private readonly EventOccurrencePayloadSnapshotService $occurrencePayloadSnapshots,
         private readonly EventContentSanitizerContract $contentSanitizer,
         private readonly EventMapPoiDeletionContract $mapPoiDeletion,
+        private readonly EventProfileResolverContract $profileResolver,
     ) {}
 
     /**
@@ -45,6 +47,8 @@ class EventAggregateWriteService
                 $payload['content'] ?? null,
             );
             $canonicalPayload['content'] = $canonicalContent;
+
+            $this->admitChangedPhysicalHosts($context, null, $canonicalPayload, $occurrences);
 
             $created = Event::query()->create($canonicalPayload);
             $this->pruneLegacyRelatedAccountFields($created);
@@ -67,8 +71,10 @@ class EventAggregateWriteService
      */
     public function update(Event $event, array $payload, array $occurrences): Event
     {
+        $eventId = (string) $event->getKey();
         /** @var Event $updated */
-        $updated = $this->transactions->run(function (EventTransactionContext $context) use ($event, $payload, $occurrences): Event {
+        $updated = $this->transactions->run(function (EventTransactionContext $context) use ($eventId, $payload, $occurrences): Event {
+            $event = Event::query()->findOrFail($eventId);
             $canonicalPayload = $payload;
             $canonicalPayload['profile_groups'] = [];
             $canonicalContent = $this->canonicalEventContent(
@@ -77,6 +83,8 @@ class EventAggregateWriteService
                     : $event->content,
             );
             $canonicalPayload['content'] = $canonicalContent;
+
+            $this->admitChangedPhysicalHosts($context, $event, $canonicalPayload, $occurrences);
 
             $event->unset('tags');
             $this->pruneLegacyRelatedAccountFields($event);
@@ -109,6 +117,98 @@ class EventAggregateWriteService
 
             return null;
         });
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  array<int, array<string, mixed>>  $occurrences
+     */
+    private function admitChangedPhysicalHosts(
+        EventTransactionContext $context,
+        ?Event $existing,
+        array $payload,
+        array $occurrences,
+    ): void {
+        $nextPayload = $payload;
+        if ($existing instanceof Event && ! array_key_exists('place_ref', $nextPayload)) {
+            $nextPayload['place_ref'] = $existing->place_ref ?? null;
+        }
+        $nextIds = $this->physicalHostIds($nextPayload, $occurrences);
+        $currentIds = $existing instanceof Event
+            ? $this->persistedPhysicalHostIds($context, $existing)
+            : [];
+        if ($nextIds === $currentIds) {
+            return;
+        }
+
+        $this->profileResolver->admitPhysicalHosts(
+            $context,
+            array_values(array_unique([...$currentIds, ...$nextIds])),
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  array<int, array<string, mixed>>  $occurrences
+     * @return list<string>
+     */
+    private function physicalHostIds(array $payload, array $occurrences): array
+    {
+        $ids = [];
+        $this->registerPhysicalHostId($ids, $payload['place_ref'] ?? null);
+        foreach ($occurrences as $occurrence) {
+            if (! is_array($occurrence)) {
+                continue;
+            }
+            $this->registerPhysicalHostId($ids, $occurrence['place_ref'] ?? null);
+            foreach (($occurrence['programming_items'] ?? []) as $item) {
+                if (is_array($item)) {
+                    $this->registerPhysicalHostId($ids, $item['place_ref'] ?? null);
+                }
+            }
+        }
+        $ids = array_values(array_unique($ids));
+        sort($ids, SORT_STRING);
+
+        return $ids;
+    }
+
+    /** @return list<string> */
+    private function persistedPhysicalHostIds(EventTransactionContext $context, Event $event): array
+    {
+        $ids = [];
+        $this->registerPhysicalHostId($ids, $event->place_ref ?? null);
+        foreach ($context->collection('event_occurrences')->find([
+            'event_id' => (string) $event->getKey(),
+            'deleted_at' => null,
+        ], [
+            ...$context->rawOptions(),
+            'projection' => ['place_ref' => 1, 'programming_items.place_ref' => 1],
+        ]) as $occurrence) {
+            $this->registerPhysicalHostId($ids, $occurrence['place_ref'] ?? null);
+            foreach (($occurrence['programming_items'] ?? []) as $item) {
+                $this->registerPhysicalHostId($ids, $item['place_ref'] ?? null);
+            }
+        }
+        $ids = array_values(array_unique($ids));
+        sort($ids, SORT_STRING);
+
+        return $ids;
+    }
+
+    /** @param list<string> $ids */
+    private function registerPhysicalHostId(array &$ids, mixed $placeRef): void
+    {
+        if ($placeRef instanceof \MongoDB\Model\BSONDocument) {
+            $placeRef = $placeRef->getArrayCopy();
+        }
+        if (! is_array($placeRef) || ($placeRef['type'] ?? null) !== 'account_profile') {
+            return;
+        }
+        $id = trim((string) ($placeRef['id'] ?? ''));
+        if ($id !== '') {
+            $ids[] = $id;
+        }
     }
 
     /**

@@ -2,12 +2,14 @@
 
 Canonical Map + POIs projection package for tenant discovery surfaces.
 
-This package owns the materialized `map_pois` projection and the read contracts that power map stack, near, and filter queries. It does not own the upstream source aggregates themselves.
+This package owns the materialized `map_pois` projection and the read contracts
+that power map stack, typed lookup, and nearby-item queries. It does not own the
+upstream source aggregates or the discovery-filter catalog.
 
 ## Scope
 
-- Map POI projection runtime for `event`, `account_profile`, and `static` sources.
-- Read endpoints for map stacks, nearby items, and filter catalogs.
+- Map POI projection runtime for `event` and `account_profile` sources.
+- Read endpoints for map stacks, typed POI lookup, and nearby items.
 - Tenant-scoped `map_pois` collection migrations and indexes.
 - Rebuild command for projection repair and backfill.
 - Host integration via contracts, listeners/jobs, and adapters.
@@ -17,13 +19,12 @@ This package owns the materialized `map_pois` projection and the read contracts 
 - `ref_type` identifies the source aggregate family:
   - `event`
   - `account_profile`
-  - `static`
 - `ref_id` is the source aggregate identifier.
 - `projection_key` is the unique projection identity and defaults to `{ref_type}:{ref_id}`.
 - `exact_key` is the stacking key used to group co-located POIs.
 - `source_type` is the normalized source discriminator used in filters and catalog logic.
 - `taxonomy_terms` and `tags` are read-side filter dimensions, not write-side source ownership.
-- `map_pois` is a projection, not the system of record for events, profiles, or static assets.
+- `map_pois` is a projection, not the system of record for events or profiles.
 
 ## Invariants
 
@@ -31,8 +32,10 @@ This package owns the materialized `map_pois` projection and the read contracts 
 - `projection_key` must remain unique.
 - The collection is tenant-scoped.
 - Event POIs are deactivated when capability or geometry conditions no longer hold.
-- Account profile POIs are removed when profile type is not favoritable or location is missing.
-- Static asset POIs are removed when profile type is not enabled or location is missing.
+- Account Profile POIs exist only when the host's canonical capability resolver
+  reports `location_policy=optional|required` and `is_map_poi_enabled=true`, and
+  the source Profile has a valid Point. They are removed when any condition stops
+  holding. Favoritability is unrelated to Map eligibility.
 
 ## Data Model
 
@@ -102,7 +105,8 @@ Returns a deterministic single POI payload by canonical typed reference.
 
 Query inputs:
 
-- `ref_type` (required): `event|account_profile|static` (aliases accepted by request validation)
+- `ref_type` (required): `event|account_profile` (`account` is accepted as the
+  Account Profile alias)
 - `ref_id` (required)
 
 Response shape:
@@ -134,16 +138,13 @@ Response shape:
 - `has_more`
 - `items[]`
 
-### `GET /api/v1/map/filters`
+## Discovery Filter Boundary
 
-Returns filter catalogs derived from current POIs.
-
-Response shape:
-
-- `tenant_id`
-- `categories`
-- `tags`
-- `taxonomy_terms`
+`GET /api/v1/map/filters` is retired and intentionally returns `404`. Public map
+filter definitions and their type/taxonomy options come from
+`GET /api/v1/discovery-filters/public_map.primary`, backed by the tenant's
+`discovery_filters` settings. The environment payload also projects those
+definitions through `settings.map_ui.filters`.
 
 ## Auth Boundary
 
@@ -164,8 +165,8 @@ The package reads the current tenant context and user timezone from the host-res
 
 The host app must provide adapters for:
 
-- source reading from events, account profiles, and static assets
-- registry decisions for favoritable/static POI types
+- source reading from events and account profiles
+- canonical Account Profile Map-eligibility decisions supplied by the host
 - tenant context resolution
 - settings resolution for map UI and ingest behavior
 
@@ -187,7 +188,11 @@ Projection repair and backfill:
 - `php artisan map-pois:rebuild`
 - `php artisan map-pois:rebuild events`
 - `php artisan map-pois:rebuild account_profiles`
-- `php artisan map-pois:rebuild static_assets`
+
+Account Profile type transitions use the host's durable Account Profile outbox
+and type revision/fence. The package remains projection-only: it applies one
+bounded reconciliation page at a time and never becomes the capability or
+source-location authority.
 
 Optional flags:
 

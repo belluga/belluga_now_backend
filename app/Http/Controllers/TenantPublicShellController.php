@@ -76,34 +76,6 @@ class TenantPublicShellController extends Controller
         );
     }
 
-    public function staticAsset(
-        Request $request,
-        string $assetRef,
-    ): Response|RedirectResponse {
-        $targetPath = $this->requestTargetPath($request, '/static/'.$assetRef);
-        $consumeDirectFallbackBypass = $this->shouldConsumeDirectFallbackBypass(
-            $request,
-            $targetPath,
-        );
-        $redirect = $this->redirectToInstalledAppIfAndroid(
-            $request,
-            $targetPath,
-            $consumeDirectFallbackBypass,
-        );
-        if ($redirect !== null) {
-            return $redirect;
-        }
-
-        app(TenantRequestLifecycleTrace::class)->record('endpoint.public_shell.controller.enter', [
-            'route_kind' => 'static_asset',
-        ]);
-
-        return $this->renderShell(
-            $this->metadataService->staticAssetMetadata($assetRef),
-            forgetDirectFallbackBypass: $consumeDirectFallbackBypass,
-        );
-    }
-
     public function fallback(
         Request $request,
         ?string $fallbackPath = null,

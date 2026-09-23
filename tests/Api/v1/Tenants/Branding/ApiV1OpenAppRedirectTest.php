@@ -289,6 +289,38 @@ class ApiV1OpenAppRedirectTest extends TestCaseTenant
         $this->assertSame("{$tenantOrigin}{$targetPath}", $referrer['link'] ?? null);
     }
 
+    public function test_open_app_redirect_rejects_retired_static_target_path(): void
+    {
+        $tenant = $this->makeCanonicalTenantCurrent($this->tenant);
+        $this->upsertTypedAppDomain($tenant, Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.guarappari.openapp.retired');
+
+        TenantSettings::query()->delete();
+        TenantSettings::create([
+            'app_links' => [
+                'android' => [
+                    'enabled' => true,
+                    'store_url' => 'https://play.google.com/store/apps/details?id=com.guarappari.openapp.retired',
+                ],
+            ],
+        ]);
+
+        $query = http_build_query([
+            'path' => '/static/retired-asset',
+            'store_channel' => 'web_detail',
+        ]);
+        $response = $this->withHeader('User-Agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8)')
+            ->get("{$this->base_tenant_url}open-app?{$query}");
+
+        $response->assertRedirect();
+        $intent = $this->parseAndroidIntentLocation((string) $response->headers->get('Location'));
+        $intentData = parse_url($intent['data']);
+        $referrer = [];
+        parse_str($this->playStoreReferrerFromUrl($intent['fallback_url']), $referrer);
+
+        $this->assertSame('/', $intentData['path'] ?? null);
+        $this->assertSame('/', $referrer['target_path'] ?? null);
+    }
+
     public function test_open_app_redirect_non_invite_context_falls_back_to_home_without_code_propagation(): void
     {
         $tenant = $this->makeCanonicalTenantCurrent($this->tenant);

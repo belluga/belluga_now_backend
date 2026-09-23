@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Accounts;
 
+use App\Application\AccountProfiles\AccountProfileAdmissionFenceService;
 use App\Application\AccountProfiles\AccountProfileLifecycleService;
 use App\Application\AccountProfiles\AccountProfileOutboxDispatcher;
 use App\Application\AccountProfiles\AccountProfileQueryService;
@@ -19,6 +20,7 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use MongoDB\Driver\Exception\BulkWriteException;
+use MongoDB\Driver\Exception\CommandException;
 use MongoDB\Laravel\Connection;
 use RuntimeException;
 
@@ -33,6 +35,7 @@ class AccountManagementService
         private readonly AccountProfileOutboxDispatcher $accountProfileOutboxDispatcher,
         private readonly AccountProfileQueryService $accountProfileQueryService,
         private readonly MapPoiProjectionService $mapPois,
+        private readonly AccountProfileAdmissionFenceService $profileAdmissionFences,
     ) {}
 
     public function paginateForUser(
@@ -184,6 +187,7 @@ class AccountManagementService
                 $account,
                 $attributes,
                 $publicationChanged,
+                $tenantConnection,
             ): Account {
                 $account->fill($attributes);
                 $account->save();
@@ -193,6 +197,12 @@ class AccountManagementService
                         ->where('account_id', (string) $account->_id)
                         ->first();
                     if ($profile !== null && $profile->deleted_at === null) {
+                        $context = $this->profileTransactionContext($tenantConnection);
+                        $this->profileAdmissionFences->touchProfiles(
+                            $context->database(),
+                            $context->session(),
+                            [(string) $profile->_id],
+                        );
                         $this->mapPois->upsertFromAccountProfile(
                             $profile,
                             parentAccountPublished: $this->accountPublicationStateService->isPublished(
@@ -204,6 +214,14 @@ class AccountManagementService
 
                 return $account->fresh();
             });
+        } catch (CommandException $exception) {
+            if ((int) $exception->getCode() !== 112) {
+                throw $exception;
+            }
+
+            throw ValidationException::withMessages([
+                'account' => ['Something went wrong when trying to update the account.'],
+            ]);
         } catch (BulkWriteException $exception) {
             if (str_contains($exception->getMessage(), 'E11000')) {
                 throw ValidationException::withMessages([

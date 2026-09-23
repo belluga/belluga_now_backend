@@ -150,9 +150,9 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             'label' => 'Artist',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
             ],
         ]);
         $profile = $this->createAccountProfileFixture('artist', 'Page Counterpart Artist', 611);
@@ -269,10 +269,10 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             ],
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_discoverable' => true,
-                'is_publicly_navigable' => true,
-                'is_poi_enabled' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
             ],
         ]);
 
@@ -336,19 +336,43 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             data_get($resolved, "{$profileId}.venue.public_detail_path")
         );
         $this->assertLessThanOrEqual(
-            3,
+            9,
             $queries->count(),
-            "Public physical host resolution must stay within the cold <=3 statement ceiling for three profiles. Queries: {$queryLogJson}"
+            "Public physical host resolution must use at most seven fixed policy/snapshot reads and two entity batch reads. Queries: {$queryLogJson}"
         );
         $this->assertCount(
-            2,
+            7,
             $profileTypeQueries,
-            "Public physical host resolution must reuse a bounded pair of account_profile_types lookups. Queries: {$queryLogJson}"
+            "Public physical host resolution must share host, navigation and catalog/media policy reads across three profiles. Queries: {$queryLogJson}"
         );
+        $this->assertStringContainsString('capabilities.is_physical_host_enabled.value', $queryLogJson);
+        $this->assertStringNotContainsString('capabilities.is_map_poi_enabled.value', $queryLogJson);
         $this->assertCount(
             1,
             $accountProfileQueries,
             "Public physical host resolution must fetch account_profiles once after type filtering. Queries: {$queryLogJson}"
+        );
+        $this->assertCount(1, $queries->filter(
+            static fn (array $query): bool => (json_decode($query['query'], true)['find'] ?? null) === 'accounts'
+        ), "Parent Accounts must be fetched once as a batch. Queries: {$queryLogJson}");
+
+        $connection->enableQueryLog();
+        try {
+            $repeated = app(AccountProfileResolverAdapter::class)
+                ->resolveExistingPublicPhysicalHostsByProfileIds(
+                    array_map(static fn (AccountProfile $profile): string => (string) $profile->_id, $profiles)
+                );
+            $repeatedQueries = $connection->getQueryLog();
+        } finally {
+            $connection->disableQueryLog();
+            $connection->flushQueryLog();
+        }
+
+        $this->assertSame($resolved, $repeated);
+        $this->assertSame(
+            ['account_profiles', 'accounts'],
+            array_map(static fn (array $query): mixed => json_decode($query['query'], true)['find'] ?? null, $repeatedQueries),
+            'A repeated resolution must reuse the request-scoped policies and only read the two entity batches.'
         );
     }
 
@@ -453,10 +477,10 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_poi_enabled' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -715,12 +739,12 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
                 'allowed_taxonomies' => [],
                 'visual' => ['mode' => 'icon', 'icon' => 'store'],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_favoritable' => true,
-                    'is_inviteable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'is_inviteable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ]);
         }
@@ -792,15 +816,12 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
             data_get($detailPayload, 'counterpart_preview.0.id')
         );
         $detailAccountProfileQueries = $detailQueries->filter(
-            static fn (array $query): bool => str_contains(
-                json_encode($query, JSON_UNESCAPED_SLASHES),
-                'account_profiles'
-            )
+            static fn (array $query): bool => (json_decode($query['query'], true)['find'] ?? null) === 'account_profiles'
         );
         $this->assertCount(
             1,
             $detailAccountProfileQueries,
-            'Public event detail must use a single bounded live account profile hydration query keyed by stored counterpart summaries.'
+            'Public event detail must use a single bounded live account profile hydration query keyed by stored counterpart summaries. Queries: '.json_encode($detailAccountProfileQueries->values()->all(), JSON_UNESCAPED_SLASHES)
         );
 
         $connection->flushQueryLog();
@@ -837,6 +858,18 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
 
     public function test_agenda_and_management_list_paths_stay_snapshot_only_without_live_account_profiles_queries(): void
     {
+        foreach (['artist', 'band'] as $type) {
+            TenantProfileType::query()->updateOrCreate(['type' => $type], [
+                'label' => ucfirst($type),
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                ],
+            ]);
+        }
+
         $profiles = collect([
             $this->createAccountProfileFixture('artist', 'Performance List Artist 01', 611),
             $this->createAccountProfileFixture('band', 'Performance List Band 02', 621),
@@ -887,16 +920,15 @@ class EventQueryPerformanceGuardrailTest extends TestCaseTenant
         $connection->flushQueryLog();
 
         $this->assertNotEmpty($agendaPayload['items'] ?? []);
+        $this->assertSame(2, data_get($agendaPayload, 'items.0.counterpart_count'));
+        $this->assertSame((string) $profiles->first()->_id, data_get($agendaPayload, 'items.0.counterpart_preview.0.id'));
         $agendaAccountProfileQueries = $agendaQueries->filter(
-            static fn (array $query): bool => str_contains(
-                json_encode($query, JSON_UNESCAPED_SLASHES),
-                'account_profiles'
-            )
+            static fn (array $query): bool => (json_decode($query['query'], true)['find'] ?? null) === 'account_profiles'
         );
         $this->assertCount(
             1,
             $agendaAccountProfileQueries,
-            'Public agenda list formatting must use a single bounded live account profile hydration query.'
+            'Public agenda list formatting must use a single bounded live account profile hydration query. Queries: '.json_encode($agendaQueries->values()->all(), JSON_UNESCAPED_SLASHES)
         );
 
         $connection->flushQueryLog();

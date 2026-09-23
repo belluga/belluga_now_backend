@@ -229,7 +229,7 @@ class DeferredDeepLinkResolverService
             return false;
         }
 
-        return in_array($segments[0], ['parceiro', 'static'], true);
+        return $segments[0] === 'parceiro';
     }
 
     private function isEventDetailPath(string $path): bool

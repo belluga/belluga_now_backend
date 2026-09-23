@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Social;
 
-use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\TenantProfileType;
@@ -25,7 +25,7 @@ class InviteablePeopleService
     private const int MAX_INVITEABLE_SOURCE_ROWS = 500;
 
     public function __construct(
-        private readonly AccountProfileTypeCapabilityCatalog $capabilityCatalog,
+        private readonly AccountProfileCapabilityResolverContract $capabilityResolver,
     ) {}
 
     /**
@@ -754,12 +754,7 @@ class InviteablePeopleService
 
         $profileType = (string) ($profile->profile_type ?? '');
         if (array_key_exists($profileType, $capabilitiesByType)) {
-            $capabilities = $capabilitiesByType[$profileType];
-
-            return $this->capabilityCatalog->isExplicitlyEnabled(
-                AccountProfileTypeCapabilityCatalog::IS_INVITEABLE,
-                $capabilities,
-            );
+            return $capabilitiesByType[$profileType] === true;
         }
 
         /** @var TenantProfileType|null $type */
@@ -767,12 +762,8 @@ class InviteablePeopleService
             ->where('type', $profileType)
             ->first();
 
-        $capabilities = is_array($type?->capabilities ?? null) ? $type->capabilities : [];
-
-        return $this->capabilityCatalog->isExplicitlyEnabled(
-            AccountProfileTypeCapabilityCatalog::IS_INVITEABLE,
-            $capabilities,
-        );
+        return $type instanceof TenantProfileType
+            && $this->capabilityResolver->resolveForProfileType($type, 'is_inviteable')['effective']['value'] === true;
     }
 
     private function profileIsDiscoverableByContacts(AccountProfile $profile): bool
@@ -868,7 +859,7 @@ class InviteablePeopleService
 
     /**
      * @param  array<int, AccountProfile>  $profiles
-     * @return array<string, array<string, mixed>>
+     * @return array<string, bool>
      */
     private function capabilitiesByProfileType(array $profiles): array
     {
@@ -885,11 +876,10 @@ class InviteablePeopleService
         return TenantProfileType::query()
             ->whereIn('type', $types)
             ->get()
-            ->mapWithKeys(function (TenantProfileType $type): array {
-                $capabilities = is_array($type->capabilities ?? null) ? $type->capabilities : [];
-
-                return [(string) $type->type => $this->capabilityCatalog->runtimeCapabilities($capabilities)];
-            })
+            ->mapWithKeys(fn (TenantProfileType $type): array => [
+                (string) $type->type => $this->capabilityResolver
+                    ->resolveForProfileType($type, 'is_inviteable')['effective']['value'] === true,
+            ])
             ->all();
     }
 

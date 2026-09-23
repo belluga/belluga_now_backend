@@ -770,7 +770,7 @@ class EventQueryService
         }
         $createdBy = $this->normalizeArray($event->created_by ?? []);
 
-        return $this->withPublicCounterpartContract([
+        return $this->withCounterpartContractCommon([
             'event_id' => isset($event->_id) ? (string) $event->_id : '',
             'occurrence_id' => null,
             'slug' => $this->scalarString($event->slug ?? null) ?? '',
@@ -814,7 +814,7 @@ class EventQueryService
             'created_at' => $event->created_at?->toJSON(),
             'updated_at' => $event->updated_at?->toJSON(),
             'deleted_at' => $event->deleted_at?->toJSON(),
-        ], $managementCounterpart['profiles'], $managementCounterpart['counterpart_count']);
+        ], $this->normalizeManagementLinkedAccountProfiles($managementCounterpart['profiles']), $managementCounterpart['counterpart_count']);
     }
 
     /**
@@ -1127,9 +1127,9 @@ class EventQueryService
             );
         }
 
-        return $this->withPublicCounterpartContract(
+        return $this->withCounterpartContractCommon(
             $payload,
-            $counterpart['profiles'],
+            $this->normalizeManagementLinkedAccountProfiles($counterpart['profiles']),
             $counterpart['counterpart_count'],
         );
     }
@@ -2339,12 +2339,16 @@ class EventQueryService
         array $candidateIds,
         bool $publicOnly,
     ): array {
+        if ($publicOnly) {
+            return $this->resolveCurrentRelatedProfilesByIds($candidateIds, true);
+        }
+
         $profilesById = $this->counterpartProfilesById($summaries);
         $missingIds = array_values(array_diff($candidateIds, array_keys($profilesById)));
 
         return [
             ...$profilesById,
-            ...$this->resolveCurrentRelatedProfilesByIds($missingIds, $publicOnly),
+            ...$this->resolveCurrentRelatedProfilesByIds($missingIds, false),
         ];
     }
 
@@ -2446,9 +2450,54 @@ class EventQueryService
         array $linkedAccountProfiles,
         ?int $counterpartCount = null,
     ): array {
-        $counterpartPreview = $this->normalizeManagementLinkedAccountProfiles(
+        $payload = $this->withCounterpartContractCommon(
+            $payload,
             $linkedAccountProfiles,
+            $counterpartCount,
         );
+        if (isset($payload['counterpart_preview'][0]) && is_array($payload['counterpart_preview'][0])) {
+            $profile = $payload['counterpart_preview'][0];
+            $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+            $avatarUrl = $this->accountProfileMediaUrlString(
+                $profile['avatar_url'] ?? null,
+                $profileId,
+                'avatar'
+            );
+            $coverUrl = $this->accountProfileMediaUrlString(
+                $profile['cover_url'] ?? null,
+                $profileId,
+                'cover'
+            );
+
+            if ($avatarUrl === null) {
+                unset($profile['avatar_url']);
+            } else {
+                $profile['avatar_url'] = $avatarUrl;
+            }
+
+            if ($coverUrl === null) {
+                unset($profile['cover_url']);
+            } else {
+                $profile['cover_url'] = $coverUrl;
+            }
+
+            $payload['counterpart_preview'][0] = $profile;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  array<int, array<string, mixed>>  $linkedAccountProfiles
+     * @return array<string, mixed>
+     */
+    private function withCounterpartContractCommon(
+        array $payload,
+        array $linkedAccountProfiles,
+        ?int $counterpartCount = null,
+    ): array {
+        $counterpartPreview = $this->normalizeLinkedAccountProfileSummaries($linkedAccountProfiles);
         $payload['counterpart_preview'] = $counterpartPreview;
         $payload['counterpart_count'] = $counterpartCount ?? count($counterpartPreview);
         $payload = $this->withCanonicalHeroImage($payload);
@@ -3539,6 +3588,13 @@ class EventQueryService
             $this->collectRelatedProfileIdsForProgrammingPayload($document, $relatedProfileIds);
         }
 
+        if ($publicOnly) {
+            return $this->resolveCurrentRelatedProfilesByIds([
+                ...array_keys($seedProfilesById),
+                ...array_keys($relatedProfileIds),
+            ], true);
+        }
+
         $missingIds = array_values(array_diff(
             array_keys($relatedProfileIds),
             array_keys($seedProfilesById),
@@ -3546,7 +3602,7 @@ class EventQueryService
 
         return [
             ...$seedProfilesById,
-            ...$this->resolveCurrentRelatedProfilesByIds($missingIds, $publicOnly),
+            ...$this->resolveCurrentRelatedProfilesByIds($missingIds, false),
         ];
     }
 
@@ -3732,7 +3788,7 @@ class EventQueryService
         }
 
         return $publicOnly
-            ? $this->eventProfileResolver->resolveExistingEventPartyDisplayProfilesByIds($ids)
+            ? $this->eventProfileResolver->resolveExistingPublicEventPartyProfilesByIds($ids)
             : $this->eventProfileResolver->resolveExistingEventPartyProfilesByIds($ids);
     }
 
@@ -4275,11 +4331,6 @@ class EventQueryService
 
     private function accountProfileMediaUrlString(mixed $value, ?string $profileId, string $kind): ?string
     {
-        $absolute = $this->absoluteUrlString($value);
-        if ($absolute !== null) {
-            return $absolute;
-        }
-
         $normalized = $this->scalarString($value);
         $resolvedProfileId = trim((string) ($profileId ?? ''));
         $resolvedKind = trim($kind);

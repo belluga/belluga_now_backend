@@ -40,6 +40,7 @@ use Belluga\MapPois\Jobs\DeleteMapPoiByRefJob;
 use Belluga\MapPois\Jobs\RefreshExpiredEventMapPoisJob;
 use Belluga\MapPois\Jobs\UpsertMapPoiFromEventJob;
 use Belluga\MapPois\Models\Tenants\MapPoi;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
@@ -188,6 +189,54 @@ class EventCrudControllerTest extends TestCaseTenant
         $this->assertTrue(
             $this->occurrenceDocumentAtOrderOrNull($eventId, 0) !== null
         );
+    }
+
+    public function test_event_created_through_api_blocks_clearing_its_physical_host_location(): void
+    {
+        $response = $this->postJson($this->accountEventsBase, $this->makeEventPayload());
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.place_ref.id', (string) $this->venue->_id);
+        $this->makeCanonicalTenantCurrent($this->tenant, allowSingleTenantContext: true);
+        $storedEvent = Event::query()->findOrFail((string) $response->json('data.event_id'));
+        self::assertSame((string) $this->venue->_id, (string) data_get($storedEvent->place_ref, 'id'));
+        $rawEvent = DB::connection('tenant')->getDatabase()->selectCollection('events')->findOne([
+            'slug' => (string) $storedEvent->slug,
+        ]);
+        self::assertNotNull($rawEvent);
+        $rawPlaceRef = $rawEvent['place_ref'] ?? null;
+        if ($rawPlaceRef instanceof \MongoDB\Model\BSONDocument) {
+            $rawPlaceRef = $rawPlaceRef->getArrayCopy();
+        }
+        self::assertIsArray($rawPlaceRef);
+        self::assertArrayNotHasKey('id', $rawPlaceRef);
+        self::assertIsString($rawPlaceRef['_id'] ?? null);
+        self::assertSame((string) $this->venue->_id, (string) $rawPlaceRef['_id']);
+        self::assertSame(1, DB::connection('tenant')->getDatabase()->selectCollection('events')->countDocuments([
+            'place_ref.type' => 'account_profile',
+            'place_ref._id' => $rawPlaceRef['_id'],
+        ]));
+        $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
+        $capabilities = (array) $venueType->capabilities;
+        data_set($capabilities, 'location_policy.value', 'optional');
+        $venueType->capabilities = $capabilities;
+        $venueType->save();
+
+        try {
+            $this->app->make(AccountProfileManagementService::class)->update(
+                $this->venue,
+                ['location' => null],
+                'event-host-location-clear-regression',
+                dispatchOutboxImmediately: false,
+            );
+            self::fail('Expected an event physical host location clear to fail closed.');
+        } catch (HttpResponseException $exception) {
+            self::assertSame(409, $exception->getResponse()->getStatusCode());
+            self::assertStringContainsString(
+                'account_profile_location_in_use',
+                (string) $exception->getResponse()->getContent(),
+            );
+        }
     }
 
     public function test_event_create_preserves_explicit_https_content_links_and_default_denies_unsafe_links(): void
@@ -340,7 +389,12 @@ class EventCrudControllerTest extends TestCaseTenant
 
     public function test_event_occurrence_member_patch_resolves_dynamic_account_profile_party_type_from_profile_id_and_keeps_admin_and_public_read_models_separate(): void
     {
-        $this->band->avatar_url = 'https://example.org/public-band-avatar.jpg';
+        $bandType = TenantProfileType::query()->where('type', 'band')->firstOrFail();
+        $capabilities = $bandType->capabilities;
+        $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
+        $bandType->capabilities = $capabilities;
+        $bandType->save();
+        $this->band->avatar_url = '/api/v1/media/account-profiles/'.(string) $this->band->_id.'/avatar?version=1';
         $this->band->save();
         $this->venue->cover_url = 'https://example.org/public-venue-cover.jpg';
         $this->venue->save();
@@ -390,7 +444,10 @@ class EventCrudControllerTest extends TestCaseTenant
         $publicResponse->assertJsonPath('data.counterpart_preview.0.profile_type', (string) $this->band->profile_type);
         $publicResponse->assertJsonPath('data.counterpart_preview.0.slug', (string) $this->band->slug);
         $publicResponse->assertJsonPath('data.counterpart_count', 1);
-        $publicResponse->assertJsonPath('data.hero_image_url', 'https://example.org/public-band-avatar.jpg');
+        $publicResponse->assertJsonPath(
+            'data.hero_image_url',
+            rtrim($this->base_tenant_url, '/').'/api/v1/media/account-profiles/'.(string) $this->band->_id.'/avatar?version=1'
+        );
         $publicResponse->assertJsonMissingPath('data.linked_account_profiles');
         $publicResponse->assertJsonMissingPath('data.event_parties');
 
@@ -398,7 +455,12 @@ class EventCrudControllerTest extends TestCaseTenant
 
     public function test_event_update_without_occurrence_payload_keeps_canonical_related_account_storage(): void
     {
-        $this->band->avatar_url = 'https://example.org/update-band-avatar.jpg';
+        $bandType = TenantProfileType::query()->where('type', 'band')->firstOrFail();
+        $capabilities = $bandType->capabilities;
+        $capabilities['has_avatar'] = ['value' => true, 'parameters' => []];
+        $bandType->capabilities = $capabilities;
+        $bandType->save();
+        $this->band->avatar_url = '/api/v1/media/account-profiles/'.(string) $this->band->_id.'/avatar?version=2';
         $this->band->save();
         $this->venue->cover_url = 'https://example.org/update-venue-cover.jpg';
         $this->venue->save();
@@ -448,7 +510,10 @@ class EventCrudControllerTest extends TestCaseTenant
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$storedOccurrence->_id}");
         $public->assertStatus(200);
         $public->assertJsonPath('data.counterpart_preview.0.id', (string) $this->band->_id);
-        $public->assertJsonPath('data.hero_image_url', 'https://example.org/update-band-avatar.jpg');
+        $public->assertJsonPath(
+            'data.hero_image_url',
+            rtrim($this->base_tenant_url, '/').'/api/v1/media/account-profiles/'.(string) $this->band->_id.'/avatar?version=2'
+        );
         $public->assertJsonMissingPath('data.linked_account_profiles');
         $public->assertJsonMissingPath('data.event_parties');
     }
@@ -1227,11 +1292,11 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -1245,10 +1310,10 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_poi_enabled' => true,
+                    'is_queryable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -1322,7 +1387,7 @@ class EventCrudControllerTest extends TestCaseTenant
         $hosts = collect($response->json('data') ?? [])
             ->keyBy(static fn (array $host): string => (string) ($host['id'] ?? ''));
 
-        $this->assertCount(5, $hosts);
+        $this->assertCount(6, $hosts);
 
         $relativeHost = $hosts->get((string) $this->venue->_id);
         $this->assertNotNull($relativeHost);
@@ -1382,7 +1447,7 @@ class EventCrudControllerTest extends TestCaseTenant
         );
 
         $this->assertFalse($hosts->has((string) $invalidNoLocationHost->_id));
-        $this->assertFalse($hosts->has((string) $hiddenHost->_id));
+        $this->assertTrue($hosts->has((string) $hiddenHost->_id));
     }
 
     public function test_event_account_profile_candidates_endpoint_paginates_related_account_profiles_beyond_one_hundred_results(): void
@@ -1420,7 +1485,7 @@ class EventCrudControllerTest extends TestCaseTenant
                     ? $profileType->capabilities
                     : [];
 
-                return (bool) ($capabilities['is_queryable'] ?? false);
+                return (bool) ($capabilities['is_queryable']['value'] ?? false);
             })
             ->map(static fn (TenantProfileType $profileType): string => trim((string) $profileType->type))
             ->filter()
@@ -1460,7 +1525,7 @@ class EventCrudControllerTest extends TestCaseTenant
                     ? $profileType->capabilities
                     : [];
 
-                return (bool) ($capabilities['is_queryable'] ?? false);
+                return (bool) ($capabilities['is_queryable']['value'] ?? false);
             })
             ->map(static fn (TenantProfileType $profileType): string => trim((string) $profileType->type))
             ->filter()
@@ -1507,9 +1572,9 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_publicly_navigable' => true,
+                    'is_queryable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -1571,16 +1636,16 @@ class EventCrudControllerTest extends TestCaseTenant
                 'label' => 'Restaurant',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => true,
-                    'has_bio' => false,
-                    'has_taxonomies' => false,
-                    'has_avatar' => false,
-                    'has_cover' => false,
-                    'has_events' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+                    'has_bio' => ['value' => false, 'parameters' => []],
+                    'has_taxonomies' => ['value' => false, 'parameters' => []],
+                    'has_avatar' => ['value' => false, 'parameters' => []],
+                    'has_cover' => ['value' => false, 'parameters' => []],
+                    'has_events' => ['value' => false, 'parameters' => []],
                 ],
             ]
         );
@@ -1625,13 +1690,13 @@ class EventCrudControllerTest extends TestCaseTenant
                 'label' => 'Restaurant',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_favoritable' => true,
-                    'is_poi_enabled' => true,
-                    'has_bio' => false,
-                    'has_taxonomies' => false,
-                    'has_avatar' => false,
-                    'has_cover' => false,
-                    'has_events' => false,
+                    'is_favoritable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
+                    'has_bio' => ['value' => false, 'parameters' => []],
+                    'has_taxonomies' => ['value' => false, 'parameters' => []],
+                    'has_avatar' => ['value' => false, 'parameters' => []],
+                    'has_cover' => ['value' => false, 'parameters' => []],
+                    'has_events' => ['value' => false, 'parameters' => []],
                 ],
             ]
         );
@@ -1650,16 +1715,34 @@ class EventCrudControllerTest extends TestCaseTenant
             'is_active' => true,
             'is_verified' => false,
         ]);
-
+        $wrongGeometryAccount = Account::create([
+            'name' => 'No Geo Bistro Line Account',
+            'document' => (string) Str::uuid(),
+        ]);
+        $hostWithWrongGeometry = AccountProfile::query()->create([
+            'account_id' => (string) $wrongGeometryAccount->_id,
+            'profile_type' => 'restaurant',
+            'display_name' => 'No Geo Bistro Line',
+            'name_search_key' => 'no geo bistro line',
+            'search_terms' => ['no', 'geo', 'bistro', 'line'],
+            'taxonomy_terms' => [],
+            'location' => [
+                'type' => 'LineString',
+                'coordinates' => [[-40.1, -20.1], [-40.2, -20.2]],
+            ],
+            'is_active' => true,
+            'is_verified' => false,
+        ]);
         $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=no%20geo");
 
         $response->assertStatus(200);
         $hosts = collect($response->json('data') ?? []);
         $matched = $hosts->firstWhere('id', (string) $hostWithoutLocation->_id);
         $this->assertNull($matched);
+        $this->assertNull($hosts->firstWhere('id', (string) $hostWithWrongGeometry->_id));
     }
 
-    public function test_event_account_profile_candidates_endpoint_excludes_non_queryable_physical_hosts_even_when_poi_is_enabled(): void
+    public function test_event_account_profile_candidates_endpoint_includes_non_queryable_profiles_when_physical_host_is_enabled(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
@@ -1670,40 +1753,29 @@ class EventCrudControllerTest extends TestCaseTenant
                 'label' => 'Hidden Restaurant',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_poi_enabled' => true,
+                    'is_queryable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
 
-        $hostAccount = Account::create([
-            'name' => 'Hidden Bistro Account',
-            'document' => (string) Str::uuid(),
-        ]);
-
-        $hiddenHost = AccountProfile::query()->create([
-            'account_id' => (string) $hostAccount->_id,
-            'profile_type' => 'hidden_restaurant',
-            'display_name' => 'Hidden Bistro',
-            'taxonomy_terms' => [],
-            'location' => [
-                'type' => 'Point',
-                'coordinates' => [-40.2, -20.2],
-            ],
-            'is_active' => true,
-            'is_verified' => false,
-        ]);
+        $hiddenHost = $this->createAccountProfile('hidden_restaurant', 'Hidden Bistro');
+        $hiddenHost->location = [
+            'type' => 'Point',
+            'coordinates' => [-40.2, -20.2],
+        ];
+        $hiddenHost->save();
 
         $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=hidden%20bistro");
 
         $response->assertStatus(200);
         $hostIds = collect($response->json('data') ?? [])->pluck('id')->all();
-        $this->assertNotContains((string) $hiddenHost->_id, $hostIds);
+        $this->assertContains((string) $hiddenHost->_id, $hostIds);
     }
 
-    public function test_event_account_profile_candidates_endpoint_excludes_non_navigable_physical_hosts_even_when_queryable_and_poi_enabled(): void
+    public function test_event_account_profile_candidates_endpoint_includes_non_navigable_profiles_when_physical_host_is_enabled(): void
     {
         $landlord = LandlordUser::query()->firstOrFail();
         Sanctum::actingAs($landlord, ['events:read']);
@@ -1714,37 +1786,26 @@ class EventCrudControllerTest extends TestCaseTenant
                 'label' => 'Editorial Restaurant',
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_publicly_navigable' => false,
-                    'is_poi_enabled' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
 
-        $hostAccount = Account::create([
-            'name' => 'Editorial Bistro Account',
-            'document' => (string) Str::uuid(),
-        ]);
-
-        $hiddenHost = AccountProfile::query()->create([
-            'account_id' => (string) $hostAccount->_id,
-            'profile_type' => 'editorial_restaurant',
-            'display_name' => 'Editorial Bistro',
-            'taxonomy_terms' => [],
-            'location' => [
-                'type' => 'Point',
-                'coordinates' => [-40.25, -20.25],
-            ],
-            'is_active' => true,
-            'is_verified' => false,
-        ]);
+        $hiddenHost = $this->createAccountProfile('editorial_restaurant', 'Editorial Bistro');
+        $hiddenHost->location = [
+            'type' => 'Point',
+            'coordinates' => [-40.25, -20.25],
+        ];
+        $hiddenHost->save();
 
         $response = $this->getJson("{$this->tenantAdminEventsBase}/account_profile_candidates?type=physical_host&search=editorial%20bistro");
 
         $response->assertStatus(200);
         $hostIds = collect($response->json('data') ?? [])->pluck('id')->all();
-        $this->assertNotContains((string) $hiddenHost->_id, $hostIds);
+        $this->assertContains((string) $hiddenHost->_id, $hostIds);
     }
 
     public function test_event_account_profile_candidates_endpoint_rejects_without_candidate_abilities(): void
@@ -3391,7 +3452,7 @@ class EventCrudControllerTest extends TestCaseTenant
                     ? $profileType->capabilities
                     : [];
 
-                return (bool) ($capabilities['is_queryable'] ?? false);
+                return (bool) ($capabilities['is_queryable']['value'] ?? false);
             })
             ->map(static fn (TenantProfileType $profileType): string => trim((string) $profileType->type))
             ->filter()
@@ -3459,9 +3520,9 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_publicly_navigable' => true,
+                    'is_queryable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -6045,10 +6106,10 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ]
         );
@@ -6137,9 +6198,9 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => false,
-                    'is_publicly_discoverable' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -6153,9 +6214,9 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_publicly_navigable' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -6193,6 +6254,12 @@ class EventCrudControllerTest extends TestCaseTenant
             ],
         )->assertOk();
 
+        $hiddenGuestType = TenantProfileType::query()->where('type', 'hidden_guest')->firstOrFail();
+        $hiddenGuestCapabilities = $hiddenGuestType->capabilities;
+        $hiddenGuestCapabilities['is_queryable']['value'] = false;
+        $hiddenGuestType->capabilities = $hiddenGuestCapabilities;
+        $hiddenGuestType->save();
+
         $public = $this->getJson("{$this->base_api_tenant}events/{$eventId}?occurrence={$firstOccurrence->_id}");
         $management = $this->getJson($this->accountEventsBase.'/'.$eventId);
 
@@ -6203,7 +6270,7 @@ class EventCrudControllerTest extends TestCaseTenant
             $this->publicEventRelatedProfileMemberRows((string) $public->json('data.slug'), $tabId)
         );
         $this->assertSame(
-            [(string) $this->artist->_id, (string) $delegate->_id],
+            [(string) $hiddenGuest->_id, (string) $this->artist->_id, (string) $delegate->_id],
             $profiles->pluck('id')->values()->all()
         );
         $membersPath = $this->assertManagementOccurrenceProfileGroupMetadata(
@@ -6220,8 +6287,13 @@ class EventCrudControllerTest extends TestCaseTenant
                 ->values()
                 ->all()
         );
-        $public->assertJsonPath('data.counterpart_preview.0.id', (string) $this->artist->_id);
-        $public->assertJsonPath('data.counterpart_count', 2);
+        $public->assertJsonPath('data.counterpart_preview.0.id', (string) $hiddenGuest->_id);
+        $public->assertJsonPath('data.counterpart_preview.0.can_open_public_detail', true);
+        $public->assertJsonPath(
+            'data.counterpart_preview.0.public_detail_path',
+            '/parceiro/'.$hiddenGuest->slug,
+        );
+        $public->assertJsonPath('data.counterpart_count', 3);
         $public->assertJsonMissingPath('data.linked_account_profiles');
         $management->assertJsonMissingPath('data.occurrences.1.own_linked_account_profiles');
         $management->assertJsonMissingPath('data.occurrences.1.own_event_parties');
@@ -6235,7 +6307,8 @@ class EventCrudControllerTest extends TestCaseTenant
 
         $this->assertSame(false, $delegatePayload['can_open_public_detail'] ?? null);
         $this->assertNull($delegatePayload['public_detail_path'] ?? null);
-        $this->assertNull($hiddenGuestPayload);
+        $this->assertSame(true, $hiddenGuestPayload['can_open_public_detail'] ?? null);
+        $this->assertSame('/parceiro/'.$hiddenGuest->slug, $hiddenGuestPayload['public_detail_path'] ?? null);
         $this->assertSame(true, $artistPayload['can_open_public_detail'] ?? null);
         $this->assertSame('/parceiro/'.$this->artist->slug, $artistPayload['public_detail_path'] ?? null);
     }
@@ -6252,9 +6325,9 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => false,
-                    'is_publicly_discoverable' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => false, 'parameters' => []],
                 ],
             ]
         );
@@ -6268,9 +6341,9 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_publicly_navigable' => true,
+                    'is_queryable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -6964,10 +7037,10 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => false,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => false, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -8207,7 +8280,7 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $venueCapabilities = (array) ($venueType->capabilities ?? []);
-        $venueCapabilities['has_nested_profile_groups'] = true;
+        $venueCapabilities['has_nested_profile_groups'] = ['value' => true, 'parameters' => []];
         $venueType->capabilities = $venueCapabilities;
         $venueType->save();
         $parent = $this->venue;
@@ -8252,7 +8325,7 @@ class EventCrudControllerTest extends TestCaseTenant
     {
         $venueType = TenantProfileType::query()->where('type', 'venue')->firstOrFail();
         $venueCapabilities = (array) ($venueType->capabilities ?? []);
-        $venueCapabilities['has_nested_profile_groups'] = true;
+        $venueCapabilities['has_nested_profile_groups'] = ['value' => true, 'parameters' => []];
         $venueType->capabilities = $venueCapabilities;
         $venueType->save();
 
@@ -9293,10 +9366,10 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'required', 'parameters' => []], 'is_map_poi_enabled' => ['value' => true, 'parameters' => []], 'is_physical_host_enabled' => ['value' => true, 'parameters' => []], 'is_reference_location_enabled' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -9311,10 +9384,10 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ]
         );
@@ -9329,10 +9402,10 @@ class EventCrudControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
-                    'is_poi_enabled' => false,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
                 ],
             ]
         );

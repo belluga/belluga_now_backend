@@ -8,7 +8,6 @@ use App\Application\AccountProfiles\AccountProfileContactChannelsService;
 use App\Application\AccountProfiles\AccountProfileMediaService;
 use App\Application\AccountProfiles\AccountProfilePublicCatalogSnapshotReader;
 use App\Application\AccountProfiles\AccountProfileQueryService;
-use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\AccountProfiles\AccountProfileTypeSetProvider;
 use App\Application\Accounts\AccountOwnershipStateService;
 use App\Application\Accounts\AccountPublicationStateService;
@@ -34,8 +33,8 @@ class AccountProfileQueryServiceTest extends TestCase
             new AccountPublicationStateService,
             $this->createMock(AccountProfileMediaService::class),
             $this->createMock(TaxonomyTermSummaryResolverService::class),
-            new AccountProfileTypeSetProvider,
-            new AccountProfilePublicCatalogSnapshotReader(new AccountProfileTypeCapabilityCatalog),
+            $this->app->make(AccountProfileTypeSetProvider::class),
+            $this->app->make(AccountProfilePublicCatalogSnapshotReader::class),
             $contactChannelsService,
             $runtimeCatalogService,
             new RichTextReadCanonicalizer,

@@ -6,7 +6,6 @@ namespace App\Application\Taxonomies;
 
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Models\Tenants\AccountProfile;
-use App\Models\Tenants\StaticAsset;
 use Belluga\Events\Models\Tenants\Event;
 use Belluga\Events\Models\Tenants\EventOccurrence;
 use Belluga\MapPois\Models\Tenants\MapPoi;
@@ -38,7 +37,6 @@ class TaxonomySnapshotBackfillService
 
         $collections = [
             'account_profiles' => $this->repairRootTaxonomyModel(AccountProfile::class, $taxonomyType, $termValue, true),
-            'static_assets' => $this->repairRootTaxonomyModel(StaticAsset::class, $taxonomyType, $termValue),
             'events' => $this->repairEventLikeModel(Event::class, $taxonomyType, $termValue),
             'event_occurrences' => $this->repairEventLikeModel(EventOccurrence::class, $taxonomyType, $termValue),
             'map_pois' => $this->repairRootTaxonomyModel(MapPoi::class, $taxonomyType, $termValue, true),

@@ -8,8 +8,8 @@ use App\Application\AccountProfiles\AccountProfileExternalLinkRegistry;
 use App\Application\AccountProfiles\AccountProfileExternalLinkService;
 use App\Application\AccountProfiles\AccountProfileManagementService;
 use App\Application\AccountProfiles\AccountProfileRegistryService;
-use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
 use App\Application\AccountProfiles\AccountProfileTypeMediaService;
+use App\Application\AccountProfiles\Capabilities\AccountProfileCapabilityResolverContract;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Shared\MapPois\PoiVisualNormalizer;
@@ -69,10 +69,10 @@ final class AccountProfileExternalLinksContractTest extends TestCaseTenant
             'label' => 'Partner',
             'allowed_taxonomies' => [],
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'has_external_links' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                'has_external_links' => ['value' => true, 'parameters' => ['max_links' => 3]],
             ],
         ]);
     }
@@ -473,7 +473,7 @@ final class AccountProfileExternalLinksContractTest extends TestCaseTenant
                 'type' => 'partner',
                 'label' => 'Partner',
                 'allowed_taxonomies' => [],
-                'capabilities' => ['has_external_links' => true],
+                'capabilities' => ['has_external_links' => ['value' => true, 'parameters' => ['max_links' => 3]]],
             ]);
             $secondaryProfile = AccountProfile::query()->create([
                 'account_id' => (string) $secondaryAccount->getKey(),
@@ -525,15 +525,19 @@ final class AccountProfileExternalLinksContractTest extends TestCaseTenant
 
     private function externalLinksWithCapabilityReadHook(\Closure $afterRead): AccountProfileExternalLinkService
     {
-        $profileTypes = new class(app(PoiVisualNormalizer::class), app(AccountProfileTypeMediaService::class), app(AccountProfileTypeCapabilityCatalog::class), $afterRead) extends AccountProfileRegistryService
+        $profileTypes = new class(app(PoiVisualNormalizer::class), app(AccountProfileTypeMediaService::class), app(AccountProfileCapabilityResolverContract::class), $afterRead) extends AccountProfileRegistryService
         {
             public function __construct(
                 PoiVisualNormalizer $poiVisualNormalizer,
                 AccountProfileTypeMediaService $mediaService,
-                AccountProfileTypeCapabilityCatalog $capabilityCatalog,
+                AccountProfileCapabilityResolverContract $capabilityResolver,
                 private readonly \Closure $afterRead,
             ) {
-                parent::__construct($poiVisualNormalizer, $mediaService, $capabilityCatalog);
+                parent::__construct(
+                    $poiVisualNormalizer,
+                    $mediaService,
+                    $capabilityResolver,
+                );
             }
 
             public function hasExternalLinksAuthoritatively(string $profileType): bool
@@ -565,14 +569,14 @@ final class AccountProfileExternalLinksContractTest extends TestCaseTenant
     private function setCapability(bool $enabled): void
     {
         $this->makeCanonicalTenantCurrent(allowSingleTenantContext: true);
-        TenantProfileType::query()->where('type', 'partner')->update([
-            'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
-                'has_external_links' => $enabled,
-            ],
-        ]);
+        $type = TenantProfileType::query()->where('type', 'partner')->firstOrFail();
+        $capabilities = is_array($type->capabilities) ? $type->capabilities : [];
+        $capabilities['has_external_links'] = [
+            'value' => $enabled,
+            'parameters' => ['max_links' => 3],
+        ];
+        $type->capabilities = $capabilities;
+        $type->save();
     }
 
     private function initializeSystem(): void

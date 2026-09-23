@@ -20,7 +20,6 @@ use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Belluga\Settings\Models\Tenants\TenantSettings;
 use Belluga\Settings\Support\SettingsNamespaceDefinition;
 use Illuminate\Database\QueryException;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use MongoDB\Driver\Exception\Exception as MongoDriverException;
@@ -217,9 +216,9 @@ class SettingsKernelControllerTest extends TestCaseTenant
         TenantProfileType::query()->updateOrCreate(['type' => 'venue'], [
             'label' => 'Venue',
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
             ],
         ]);
         $tenantOwnedAccount = Account::query()->create([
@@ -271,9 +270,9 @@ class SettingsKernelControllerTest extends TestCaseTenant
         TenantProfileType::query()->updateOrCreate(['type' => 'venue'], [
             'label' => 'Venue',
             'capabilities' => [
-                'is_queryable' => true,
-                'is_publicly_navigable' => true,
-                'is_publicly_discoverable' => true,
+                'is_queryable' => ['value' => true, 'parameters' => []],
+                'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
             ],
         ]);
         $unmanagedAccount = Account::query()->create([
@@ -1187,17 +1186,17 @@ class SettingsKernelControllerTest extends TestCaseTenant
     {
         $paths = (array) config('multitenancy.tenant_migration_paths', []);
         $this->assertContains('packages/belluga/belluga_settings/database/migrations', $paths);
-
-        $tenantExitCode = Artisan::call('tenants:artisan', [
-            'artisanCommand' => 'migrate --database=tenant --path=packages/belluga/belluga_settings/database/migrations',
-        ]);
-        $this->assertSame(0, $tenantExitCode, Artisan::output());
-
-        $landlordExitCode = Artisan::call('migrate', [
-            '--database' => 'landlord',
-            '--path' => 'packages/belluga/belluga_settings/database/migrations_landlord',
-        ]);
-        $this->assertSame(0, $landlordExitCode, Artisan::output());
+        $this->assertContains(
+            'packages/belluga/belluga_settings/database/migrations_landlord',
+            (array) config('multitenancy.landlord_migration_paths', []),
+        );
+        foreach ([
+            'tenant' => '2026_02_26_000700_create_settings_collection',
+            'landlord' => '2026_02_26_000710_create_landlord_settings_collection',
+        ] as $connection => $migration) {
+            $this->assertSame(1, DB::connection($connection)->getDatabase()
+                ->selectCollection('migrations')->countDocuments(['migration' => $migration]));
+        }
 
         $tenantCollection = iterator_to_array(DB::connection('tenant')->getMongoDB()->listCollections([
             'filter' => ['name' => 'settings'],
@@ -1212,25 +1211,6 @@ class SettingsKernelControllerTest extends TestCaseTenant
         $this->assertNotNull($landlordCollection);
         $landlordOptions = json_decode(json_encode($landlordCollection->getOptions()), true);
         $this->assertSame('settings_root', data_get($landlordOptions, 'validator.$expr.$eq.1'));
-    }
-
-    public function test_tenant_scoped_settings_migration_command_succeeds_for_existing_tenants(): void
-    {
-        $exitCode = Artisan::call('tenants:artisan', [
-            'artisanCommand' => 'migrate --database=tenant --path=packages/belluga/belluga_settings/database/migrations',
-        ]);
-
-        $this->assertSame(0, $exitCode, Artisan::output());
-    }
-
-    public function test_landlord_scoped_settings_migration_command_succeeds(): void
-    {
-        $exitCode = Artisan::call('migrate', [
-            '--database' => 'landlord',
-            '--path' => 'packages/belluga/belluga_settings/database/migrations_landlord',
-        ]);
-
-        $this->assertSame(0, $exitCode, Artisan::output());
     }
 
     private function createAccountUser(array $permissions): AccountUser

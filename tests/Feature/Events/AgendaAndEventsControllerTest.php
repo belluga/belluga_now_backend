@@ -459,9 +459,10 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'has_avatar' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -481,6 +482,8 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'is_active' => true,
             'is_verified' => false,
         ]);
+        $firstProfile->avatar_url = '/api/v1/media/account-profiles/'.(string) $firstProfile->_id.'/avatar?version=1';
+        $firstProfile->save();
 
         $secondProfileAccount = Account::create([
             'name' => 'Second Ordered Counterpart Account',
@@ -497,6 +500,8 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
             'is_active' => true,
             'is_verified' => false,
         ]);
+        $secondProfile->avatar_url = '/api/v1/media/account-profiles/'.(string) $secondProfile->_id.'/avatar?version=2';
+        $secondProfile->save();
 
         $event = $this->createEvent([
             'title' => 'Root detail first occurrence counterpart summary',
@@ -572,14 +577,17 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $response->assertJsonMissingPath('data.linked_account_profiles');
         $response->assertJsonPath('data.counterpart_preview.0.id', (string) $firstProfile->_id);
         $response->assertJsonPath('data.counterpart_count', 1);
-        $response->assertJsonPath('data.hero_image_url', 'https://example.org/root-first-occurrence-avatar.jpg');
+        $response->assertJsonPath(
+            'data.hero_image_url',
+            rtrim($this->base_tenant_url, '/').'/api/v1/media/account-profiles/'.(string) $firstProfile->_id.'/avatar?version=1'
+        );
         $this->assertFalse(
             collect($response->json('data.counterpart_preview', []))
                 ->pluck('id')
                 ->contains((string) $secondProfile->_id)
         );
         $this->assertNotSame(
-            'https://example.org/root-second-occurrence-avatar.jpg',
+            rtrim($this->base_tenant_url, '/').'/api/v1/media/account-profiles/'.(string) $secondProfile->_id.'/avatar?version=2',
             (string) $response->json('data.hero_image_url')
         );
     }
@@ -598,9 +606,9 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -614,9 +622,9 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -1976,9 +1984,9 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
@@ -2056,6 +2064,106 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
         $members->assertJsonPath('data.data.0.slug', (string) $profile->slug);
         $members->assertJsonPath('data.data.0.can_open_public_detail', true);
         $members->assertJsonPath('data.data.0.public_detail_path', '/parceiro/'.(string) $profile->slug);
+    }
+
+    public function test_public_event_counterpart_preview_materializes_profile_media_for_request_host(): void
+    {
+        TenantProfileType::query()->updateOrCreate(
+            ['type' => 'artist'],
+            [
+                'label' => 'Artist',
+                'labels' => [
+                    'singular' => 'Artist',
+                    'plural' => 'Artists',
+                ],
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'has_avatar' => ['value' => true, 'parameters' => []],
+                    'has_cover' => ['value' => true, 'parameters' => []],
+                ],
+            ]
+        );
+        \App\Application\AccountProfiles\AccountProfileTypeSetProvider::bumpRevision();
+
+        $profile = AccountProfile::create([
+            'account_id' => (string) $this->account->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'AMG Counterpart',
+            'avatar_url' => 'https://legacy-media.example.test/api/v1/media/account-profiles/pending/avatar?version=7',
+            'cover_url' => '/legacy/account-profile-cover.jpg',
+            'taxonomy_terms' => [],
+            'is_active' => true,
+            'is_verified' => false,
+            'visibility' => 'public',
+        ]);
+        $profile->avatar_url = 'https://legacy-media.example.test/api/v1/media/account-profiles/'.(string) $profile->_id.'/avatar?version=7';
+        $profile->cover_url = '/api/v1/media/account-profiles/'.(string) $profile->_id.'/cover?version=11';
+        $profile->save();
+        $event = $this->createEvent(['event_parties' => []]);
+        $occurrence = EventOccurrence::query()
+            ->where('event_id', (string) $event->_id)
+            ->firstOrFail();
+        $this->seedOccurrenceProfileGroups($event, $occurrence, [[
+            'label' => 'AMG Counterparts',
+            'account_profile_ids' => [(string) $profile->_id],
+        ]]);
+
+        $response = $this->getJson("{$this->base_api_tenant}events/{$event->_id}");
+
+        $response->assertOk();
+        $response->assertJsonPath('data.counterpart_preview.0.id', (string) $profile->_id);
+        $response->assertJsonPath('data.counterpart_preview.0.display_name', 'AMG Counterpart');
+        $response->assertJsonPath('data.counterpart_preview.0.profile_type', 'artist');
+        $response->assertJsonPath(
+            'data.counterpart_preview.0.avatar_url',
+            rtrim($this->base_tenant_url, '/').'/api/v1/media/account-profiles/'.(string) $profile->_id.'/avatar?version=7'
+        );
+        $response->assertJsonPath(
+            'data.counterpart_preview.0.cover_url',
+            rtrim($this->base_tenant_url, '/').'/api/v1/media/account-profiles/'.(string) $profile->_id.'/cover?version=11'
+        );
+
+        Tenant::query()->where('slug', $this->tenant->slug)->firstOrFail()->makeCurrent();
+        $omittedAccount = Account::create([
+            'name' => 'AMG Omitted Counterpart Account',
+            'document' => uniqid('amg-omitted-', true),
+            'publication' => [
+                'status' => \App\Application\Accounts\AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ],
+        ]);
+        $omittedProfile = AccountProfile::create([
+            'account_id' => (string) $omittedAccount->_id,
+            'profile_type' => 'artist',
+            'display_name' => 'AMG Omitted Counterpart',
+            'avatar_url' => '/api/v1/media/account-profiles/pending/avatar?version=13',
+            'cover_url' => 'https://external.example.test/external/profile-cover.jpg?version=14',
+            'taxonomy_terms' => [],
+            'is_active' => true,
+            'is_verified' => false,
+            'visibility' => 'public',
+        ]);
+        $omittedProfile->avatar_url = '/api/v1/media/account-profiles/'.(string) $omittedProfile->_id.'/avatar?version=13';
+        $omittedProfile->save();
+        $omittedEvent = $this->createEvent(['event_parties' => []]);
+        $omittedOccurrence = EventOccurrence::query()
+            ->where('event_id', (string) $omittedEvent->_id)
+            ->firstOrFail();
+        $this->seedOccurrenceProfileGroups($omittedEvent, $omittedOccurrence, [[
+            'label' => 'AMG Omitted Counterpart',
+            'account_profile_ids' => [(string) $omittedProfile->_id],
+        ]]);
+
+        $response = $this->getJson("{$this->base_api_tenant}events/{$omittedEvent->_id}");
+
+        $response->assertOk();
+        $response->assertJsonPath('data.counterpart_preview.0.id', (string) $omittedProfile->_id);
+        $response->assertJsonPath('data.counterpart_preview.0.display_name', 'AMG Omitted Counterpart');
+        $response->assertJsonPath('data.counterpart_preview.0.profile_type', 'artist');
+        $response->assertJsonMissingPath('data.counterpart_preview.0.cover_url');
     }
 
     public function test_event_stream_returns_deltas(): void
@@ -2493,9 +2601,11 @@ class AgendaAndEventsControllerTest extends TestCaseTenant
                 ],
                 'allowed_taxonomies' => [],
                 'capabilities' => [
-                    'is_queryable' => true,
-                    'is_publicly_navigable' => true,
-                    'is_publicly_discoverable' => true,
+                    'is_queryable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_navigable' => ['value' => true, 'parameters' => []],
+                    'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
+                    'has_cover' => ['value' => true, 'parameters' => []],
+                    'has_avatar' => ['value' => true, 'parameters' => []],
                 ],
             ]
         );
