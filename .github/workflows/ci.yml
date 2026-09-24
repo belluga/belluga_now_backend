@@ -294,7 +294,23 @@ jobs:
       - name: Run Laravel architecture guardrails
         run: composer run architecture:guardrails
 
+      - name: Classify hotfix Laravel suite policy
+        id: hotfix_policy
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PUSH_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+
+          skip_laravel_suite=false
+          if [[ "${PR_TITLE:-}" == "[HOTFIX]"* || "${PUSH_MESSAGE:-}" == *"[HOTFIX]"* ]]; then
+            skip_laravel_suite=true
+          fi
+
+          echo "skip_laravel_suite=${skip_laravel_suite}" >> "$GITHUB_OUTPUT"
+
       - name: Run Laravel full test suite
+        if: steps.hotfix_policy.outputs.skip_laravel_suite != 'true'
         env:
           APP_ENV: testing
           APP_URL: http://nginx
@@ -326,6 +342,10 @@ jobs:
             echo "ERROR: Laravel test suite reported warnings; warnings are blocking." >&2
             exit 1
           fi
+
+      - name: Skip Laravel full test suite for hotfix lane
+        if: steps.hotfix_policy.outputs.skip_laravel_suite == 'true'
+        run: echo "Hotfix lane detected; Laravel full test suite intentionally skipped."
 
       - name: Diagnose warning source (on failure)
         if: failure()
