@@ -2458,13 +2458,15 @@ class EventQueryService
         if (isset($payload['counterpart_preview'][0]) && is_array($payload['counterpart_preview'][0])) {
             $profile = $payload['counterpart_preview'][0];
             $profileId = trim((string) ($this->scalarString($profile['id'] ?? null) ?? ''));
+            $rawAvatarUrl = $this->scalarString($profile['avatar_url'] ?? null);
+            $rawCoverUrl = $this->scalarString($profile['cover_url'] ?? null);
             $avatarUrl = $this->accountProfileMediaUrlString(
-                $profile['avatar_url'] ?? null,
+                $rawAvatarUrl,
                 $profileId,
                 'avatar'
             );
             $coverUrl = $this->accountProfileMediaUrlString(
-                $profile['cover_url'] ?? null,
+                $rawCoverUrl,
                 $profileId,
                 'cover'
             );
@@ -2482,6 +2484,12 @@ class EventQueryService
             }
 
             $payload['counterpart_preview'][0] = $profile;
+
+            if (($payload['hero_image_url'] ?? null) === $rawCoverUrl && $coverUrl !== null) {
+                $payload['hero_image_url'] = $coverUrl;
+            } elseif (($payload['hero_image_url'] ?? null) === $rawAvatarUrl && $avatarUrl !== null) {
+                $payload['hero_image_url'] = $avatarUrl;
+            }
         }
 
         return $payload;
