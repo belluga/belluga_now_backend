@@ -3469,6 +3469,7 @@ class AccountProfilesControllerTest extends TestCaseTenant
                 'is_favoritable' => ['value' => true, 'parameters' => []],
                 'is_publicly_discoverable' => ['value' => true, 'parameters' => []],
                 'location_policy' => ['value' => 'disabled', 'parameters' => []], 'is_map_poi_enabled' => ['value' => false, 'parameters' => []], 'is_physical_host_enabled' => ['value' => false, 'parameters' => []], 'is_reference_location_enabled' => ['value' => false, 'parameters' => []],
+                'has_avatar' => ['value' => true, 'parameters' => []],
                 'has_events' => ['value' => true, 'parameters' => []],
             ],
         ]);
@@ -3486,6 +3487,8 @@ class AccountProfilesControllerTest extends TestCaseTenant
             'is_active' => true,
             'visibility' => 'public',
         ]);
+        $profile->avatar_url = '/api/v1/media/account-profiles/'.(string) $profile->_id.'/avatar?version=1';
+        $profile->save();
 
         $futureEvent = $this->createAgendaEventForAccountProfile(
             $profile,
@@ -3494,6 +3497,13 @@ class AccountProfilesControllerTest extends TestCaseTenant
             endsAt: Carbon::now()->addHours(7),
             viaLinkedParticipation: true,
         );
+        $futureEvent->thumb = null;
+        $futureEvent->save();
+        EventOccurrence::query()
+            ->where('event_id', (string) $futureEvent->_id)
+            ->firstOrFail()
+            ->forceFill(['thumb' => null])
+            ->save();
 
         $response = $this->getJson(
             "{$this->base_api_tenant}account_profiles/ananda-torres-agenda"
@@ -3504,6 +3514,10 @@ class AccountProfilesControllerTest extends TestCaseTenant
         $this->assertCount(1, $occurrences);
         $this->assertSame((string) $futureEvent->_id, $occurrences[0]['event_id'] ?? null);
         $this->assertSame('Future Artist Event', $occurrences[0]['title'] ?? null);
+        $this->assertSame(
+            rtrim($this->base_tenant_url, '/').'/api/v1/media/account-profiles/'.(string) $profile->_id.'/avatar?version=1',
+            $occurrences[0]['hero_image_url'] ?? null,
+        );
     }
 
     public function test_public_account_profile_show_by_slug_includes_agenda_occurrences_for_capability_enabled_poi_profile_via_linked_profile_groups(): void
