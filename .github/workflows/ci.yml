@@ -20,11 +20,17 @@ on:
       - cicd-implementation
 
 concurrency:
-  group: laravel-ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Keep metadata edits in the same PR queue.  A distinct run_id here would
+  # allow every edit to start a duplicate, expensive suite concurrently.
+  group: laravel-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event.action != 'edited' }}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   lane_policy:
@@ -159,6 +165,25 @@ jobs:
           git cat-file -e "$protected_base^{commit}"
           php scripts/migration_integrity_guard.php --protected-base="$protected_base"
 
+      - name: Classify hotfix Laravel suite policy
+        id: hotfix_policy
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PUSH_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          skip_laravel_suite=false
+          if [[ "${PR_TITLE:-}" == "[HOTFIX]"* || "${PUSH_MESSAGE:-}" == *"[HOTFIX]"* ]]; then
+            skip_laravel_suite=true
+          fi
+          echo "skip_laravel_suite=${skip_laravel_suite}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve reusable Laravel suite evidence
+        id: suite_evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: php scripts/ci_evidence_resolver.php
+
       - name: PHP and Composer diagnostics
         run: |
           php --version
@@ -178,6 +203,7 @@ jobs:
         run: composer install --no-interaction --no-progress --prefer-dist --no-scripts
 
       - name: Start MongoDB replica set
+        if: steps.hotfix_policy.outputs.skip_laravel_suite != 'true' && steps.suite_evidence.outputs.decision != 'reused'
         run: |
           docker run -d --name mongo-rs -p 27017:27017 mongo:7.0 --replSet rs0 --bind_ip_all
 
@@ -204,6 +230,7 @@ jobs:
           exit 1
 
       - name: Wait for MongoDB client readiness
+        if: steps.hotfix_policy.outputs.skip_laravel_suite != 'true' && steps.suite_evidence.outputs.decision != 'reused'
         env:
           DB_URI_LANDLORD: mongodb://localhost:27017/landlord_test?replicaSet=rs0&directConnection=true
         run: |
@@ -294,23 +321,9 @@ jobs:
       - name: Run Laravel architecture guardrails
         run: composer run architecture:guardrails
 
-      - name: Classify hotfix Laravel suite policy
-        id: hotfix_policy
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PUSH_MESSAGE: ${{ github.event.head_commit.message }}
-        run: |
-          set -euo pipefail
-
-          skip_laravel_suite=false
-          if [[ "${PR_TITLE:-}" == "[HOTFIX]"* || "${PUSH_MESSAGE:-}" == *"[HOTFIX]"* ]]; then
-            skip_laravel_suite=true
-          fi
-
-          echo "skip_laravel_suite=${skip_laravel_suite}" >> "$GITHUB_OUTPUT"
-
       - name: Run Laravel full test suite
-        if: steps.hotfix_policy.outputs.skip_laravel_suite != 'true'
+        id: run_laravel_suite
+        if: steps.hotfix_policy.outputs.skip_laravel_suite != 'true' && steps.suite_evidence.outputs.decision != 'reused'
         env:
           APP_ENV: testing
           APP_URL: http://nginx
@@ -343,6 +356,25 @@ jobs:
             exit 1
           fi
 
+      - name: Reuse Laravel full test suite
+        id: reuse_laravel_suite
+        if: steps.hotfix_policy.outputs.skip_laravel_suite != 'true' && steps.suite_evidence.outputs.decision == 'reused'
+        run: echo "Reused Laravel suite evidence from run ${{ steps.suite_evidence.outputs.source_run_id }}."
+
+      - name: Record reusable tree evidence
+        if: steps.hotfix_policy.outputs.skip_laravel_suite != 'true' && steps.suite_evidence.outputs.decision != 'reused'
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "$(git rev-parse HEAD^{tree})" = "$(git rev-parse "${GITHUB_SHA}^{tree}")"
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            pr_head="$(jq -r '.pull_request.head.sha // empty' "$GITHUB_EVENT_PATH")"
+            test -n "$pr_head"
+            git fetch --no-tags origin "$pr_head" --depth=1
+            test "$(git rev-parse HEAD^{tree})" = "$(git rev-parse "${pr_head}^{tree}")"
+          fi
+          echo "CI evidence marker: Laravel full suite completed for $(git rev-parse HEAD^{tree})."
+
       - name: Skip Laravel full test suite for hotfix lane
         if: steps.hotfix_policy.outputs.skip_laravel_suite == 'true'
         run: echo "Hotfix lane detected; Laravel full test suite intentionally skipped."
@@ -372,6 +404,26 @@ jobs:
       - name: Stop MongoDB
         if: always()
         run: docker rm -f mongo-rs || true
+
+      - name: Summarize final Laravel suite outcome
+        if: always()
+        env:
+          RESOLVER_DECISION: ${{ steps.suite_evidence.outputs.decision || 'rerun-required' }}
+          RESOLVER_REASON: ${{ steps.suite_evidence.outputs.reason || 'resolver-unavailable' }}
+          SUITE_OUTCOME: ${{ steps.run_laravel_suite.outcome }}
+          REUSE_OUTCOME: ${{ steps.reuse_laravel_suite.outcome }}
+          SOURCE_RUN: ${{ steps.suite_evidence.outputs.source_run_id }}
+          SOURCE_ATTEMPT: ${{ steps.suite_evidence.outputs.source_attempt }}
+          SOURCE_URL: ${{ steps.suite_evidence.outputs.source_url }}
+          HOTFIX_SKIP: ${{ steps.hotfix_policy.outputs.skip_laravel_suite }}
+        run: |
+          decision='rerun-required'
+          reason="$RESOLVER_REASON"
+          if [[ "$HOTFIX_SKIP" == true ]]; then reason='hotfix-policy-skip';
+          elif [[ "$REUSE_OUTCOME" == success ]]; then decision='reused'; reason='canonical-source-reused';
+          elif [[ "$SUITE_OUTCOME" == success ]]; then decision='executed'; reason='canonical-suite-executed';
+          elif [[ "$SUITE_OUTCOME" == failure ]]; then reason='canonical-suite-failed'; fi
+          { echo '## Laravel suite evidence'; echo "- decision: $decision"; echo "- reason: $reason"; echo "- source: ${SOURCE_RUN:-none} attempt ${SOURCE_ATTEMPT:-none} ${SOURCE_URL:-}"; } >> "$GITHUB_STEP_SUMMARY"
 
   notify_orchestrator:
     name: Notify Docker Promotion Status
